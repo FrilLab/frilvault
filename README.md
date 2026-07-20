@@ -49,22 +49,10 @@ flvt repair --apply
 
 ## Documentation
 
-The maintained documentation now lives in `docs/book`.
-
-Build it locally from the repository root:
-
-```bash
-cargo install mdbook --locked
-cargo install mdbook-mermaid --locked
-mdbook-mermaid install docs/book
-mdbook build docs/book
-```
-
-Serve it locally:
-
-```bash
-mdbook serve docs/book --open
-```
+- [Architecture](docs/ARCHITECTURE.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Contributing](docs/CONTRIBUTING.md)
+- [Agents](docs/AGENTS.md)
 
 ## Development
 
