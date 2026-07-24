@@ -219,11 +219,15 @@ The Marketplace workflow should:
 2. download the target-specific VSIX files from the selected GitHub Release
 3. publish those VSIX files to the Visual Studio Marketplace
 
-Use a Visual Studio Marketplace publisher token for the manual publish workflow.
+Use Azure Workload Identity Federation for the manual publish workflow. This avoids long-lived personal access tokens and allows the GitHub Actions runner to authenticate as a service principal that is a member of the `frillab` VS Marketplace publisher.
 
-Required GitHub Actions configuration:
+Required GitHub Actions secrets and configuration:
 
-- secret: `VSCE_PAT`
+- secret: `AZURE_CLIENT_ID` — the Azure AD application (client) ID
+- secret: `AZURE_TENANT_ID` — the Azure AD tenant ID
+- secret: `AZURE_SUBSCRIPTION_ID` — the Azure subscription ID
+
+The Azure AD application must have a federated identity credential configured for this repository and the service principal must be added as a member of the `frillab` VS Marketplace publisher.
 
 The publisher remains a single Marketplace extension identity. Platform-specific VSIX files do not create separate extension listings.
 

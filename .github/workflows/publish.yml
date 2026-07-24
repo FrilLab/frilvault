@@ -2,6 +2,7 @@ name: Publish Marketplace
 
 permissions:
   contents: read
+  id-token: write
 
 on:
   workflow_dispatch:
@@ -89,22 +90,31 @@ jobs:
             fi
           done
 
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Publish platform packages
         working-directory: apps/vscode-extension
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
         shell: bash
         run: |
           version="${{ steps.version.outputs.extension_version }}"
 
           npx @vscode/vsce publish \
+            --azure-credential \
             --packagePath "../../dist/release/frilvault-${version}-darwin-arm64.vsix"
 
           npx @vscode/vsce publish \
+            --azure-credential \
             --packagePath "../../dist/release/frilvault-${version}-darwin-x64.vsix"
 
           npx @vscode/vsce publish \
+            --azure-credential \
             --packagePath "../../dist/release/frilvault-${version}-linux-x64.vsix"
 
           npx @vscode/vsce publish \
+            --azure-credential \
             --packagePath "../../dist/release/frilvault-${version}-win32-x64.vsix"
