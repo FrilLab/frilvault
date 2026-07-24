@@ -1,5 +1,12 @@
 # FrilVault
 
+[![Build Status](https://github.com/FrilLab/frilvault/actions/workflows/ci.yml/badge.svg)](https://github.com/FrilLab/frilvault/actions/workflows/ci.yml)
+[![Test Coverage](https://codecov.io/gh/FrilLab/frilvault/branch/main/graph/badge.svg)](https://codecov.io/gh/FrilLab/frilvault)
+[![Release](https://img.shields.io/github/v/release/FrilLab/frilvault)](https://github.com/FrilLab/frilvault/releases)
+[![Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/frillab.frilvault)](https://marketplace.visualstudio.com/items?itemName=frillab.frilvault)
+[![Rust](https://img.shields.io/badge/Rust-2024%20edition-DEA584?logo=rust)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/github/license/FrilLab/frilvault)](LICENSE)
+
 Personal notes for source code, without modifying source files.
 
 FrilVault is a local-first workspace knowledge layer. Notes live under `.vault/` beside the project, while application code stays untouched.
