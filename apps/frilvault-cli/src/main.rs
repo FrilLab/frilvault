@@ -16,8 +16,10 @@ use clap::Parser;
 use cli::{Cli, Commands};
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    run(Cli::parse())
+}
 
+fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Add(cmd) => {
             command::add::execute(cmd)?;
@@ -74,5 +76,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod index_command;
 #[cfg(test)]
 mod tests;
