@@ -87,7 +87,8 @@ The VS Code extension is the current editor-facing integration.
 Current feature scope:
 
 - add note
-- notes panel
+- current-file and workspace notes panel
+- built-in Explorer note count decorations
 - gutter decorations
 - gutter actions
 - note edit and delete
@@ -115,11 +116,7 @@ Its active backend is currently CLI-backed:
 - URI resolution
 - workspace sync and rename-related flows
 
-The `FrilVault: Add Note` command and the create-here flow both currently route through the inline editor path.
-
-There is still native bridge scaffolding in the extension repo, but it is not the active runtime path. `src/core/nodeBridge.ts` is not part of extension activation today.
-
-There is also a legacy `features/add-note` command/service path that is still covered by tests but is not part of the active extension command registration.
+The `frilvault.addNote` command and the create-here flow both currently route through the inline editor path.
 
 ## Known Architectural Reality
 
@@ -135,8 +132,8 @@ That is acceptable for the current MVP, but it means the runtime layer is only p
 
 ## Current Risks
 
-The following behaviors are important to release readiness in the current checkout:
+The following limitations remain important to release readiness:
 
-- the VS Code URI handler decodes the `workspace` query before entering its guarded error path, so malformed percent-encoding can still escape as an exception
-- the post-save `.gitignore` prompt shares the inline editor invalidation path, so a prompt/check failure can be surfaced to the user as if the note save failed even after persistence succeeded
-- CodeLens path matching uses custom string slicing instead of the shared path helpers, which makes nested workspace-root overrides and Windows path handling more fragile than the rest of the extension
+- the extension targets one workspace root at a time
+- extension integration tests require a working VS Code Electron test host
+- the CLI boundary and UI caches must be invalidated together after note mutations

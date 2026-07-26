@@ -50,20 +50,20 @@ Release automation is split into two stages:
 
 1. Install the FrilVault extension.
 2. Open a project in VS Code.
-3. Run `FrilVault: Turn On` for the workspace.
-4. Run `FrilVault: Add Note`.
+3. Open `FrilVault Notes` in the Explorer and select `Enable`.
+4. Select `Add` or use `Note Add` at the current editor line.
 5. Enter a note in the inline editor.
 
 ## Commands
 
-| Command | Description |
-| --- | --- |
-| `FrilVault: Add Note` | Add a note at the current line or symbol |
-| `FrilVault: Show Notes for Current File` | Show notes for the active file |
-| `FrilVault: Search Notes` | Search notes in the current workspace |
-| `FrilVault: Show Workspace Stats` | Show workspace note statistics |
-| `FrilVault: Show Workspace Health` | Show missing-file health information |
-| `FrilVault: Apply Repairs` | Apply note repair suggestions for renamed or moved files |
+| Label | Command ID | Description |
+| --- | --- | --- |
+| `Add` | `frilvault.addNote` | Add a note at the current line or symbol |
+| `Show Notes` | `frilvault.showNotesForCurrentFile` | Show notes for the active file |
+| `Search Notes` | `frilvault.searchNotes` | Search notes in the current workspace |
+| `Show Stats` | `frilvault.showStats` | Show workspace note statistics |
+| `Show Health` | `frilvault.showHealth` | Show missing-file health information |
+| `Apply Repairs` | `frilvault.applyRepairs` | Apply note repair suggestions for renamed or moved files |
 
 ## Data Storage
 

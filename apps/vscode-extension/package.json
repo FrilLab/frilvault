@@ -2,7 +2,7 @@
   "name": "frilvault",
   "displayName": "FrilVault",
   "description": "A local-first knowledge layer for attaching persistent notes to source code.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "frilvaultBundledCliVersion": "0.1.0",
   "publisher": "frillab",
   "license": "MIT",
@@ -324,6 +324,7 @@
     "compile-tests": "tsc -p . --outDir out",
     "pretest": "npm run compile-tests && npm run compile",
     "test": "vscode-test",
+    "test:coverage": "npm run compile-tests && npm run compile && vscode-test --coverage",
     "vsix:list": "vsce ls",
     "vsix": "node scripts/package-target.mjs",
     "publish:marketplace": "vsce publish --packagePath"

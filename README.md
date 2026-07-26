@@ -45,7 +45,7 @@ The current checkout contains a CLI and a VS Code extension. Repository guidance
 
 ## Install
 
-The current public release is `v0.0.2` for the VS Code extension.
+The current public release is `v0.0.3` for the VS Code extension.
 
 ### Option 1: Visual Studio Marketplace
 
@@ -84,17 +84,19 @@ Each published GitHub Release attaches these VSIX packages:
 - `frilvault-<version>-linux-x64.vsix`
 - `frilvault-<version>-win32-x64.vsix`
 
-## Current Notes
+## Current Release
 
-FrilVault `v0.0.2` removes the separate CLI installation requirement for supported VS Code installs by bundling `flvt` inside each platform-specific package.
+FrilVault `v0.0.3` adds Explorer note counts and a workspace note overview in `FrilVault Notes`. The extension continues to bundle `flvt` inside each platform-specific package.
 
 ## Storage Model
 
 ```text
 .vault/
 ├── notes/
+├── images/
+├── cache/
 ├── index/
-└── workspace.yml
+└── workspace.json
 ```
 
 FrilVault does not rewrite or annotate source files.

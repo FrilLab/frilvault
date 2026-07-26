@@ -6,7 +6,7 @@
 2. Open `apps/vscode-extension` in VS Code.
 3. Run `npm run compile`.
 4. Press `F5` to launch an Extension Development Host.
-5. Run `FrilVault: Turn On` inside the test workspace.
+5. Open `FrilVault Notes` and select `Enable` inside the test workspace.
 
 ## Configure the CLI
 
@@ -30,16 +30,16 @@ GitHub Release packaging and Marketplace publishing are separate steps.
 For a manual local publish, use a generated VSIX:
 
 ```bash
-npx @vscode/vsce publish --packagePath frilvault-0.0.2-darwin-arm64.vsix
+npx @vscode/vsce publish --packagePath frilvault-0.0.3-darwin-arm64.vsix
 ```
 
 ## Useful Commands
 
-- `FrilVault: Add Note`
-- `FrilVault: Search Notes`
-- `FrilVault: Show Workspace Stats`
-- `FrilVault: Show Workspace Health`
-- `FrilVault: Apply Repairs`
+- `Add`
+- `Search Notes`
+- `Show Stats`
+- `Show Health`
+- `Apply Repairs`
 
 ## Test
 

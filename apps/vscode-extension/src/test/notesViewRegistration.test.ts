@@ -119,6 +119,16 @@ suite('Notes view registration', () => {
         (entry) => entry.command === COMMAND_IDS.notesPanelEditNote,
       ),
     );
+    const contributedCommands = new Set(
+      packageJson.contributes?.commands?.map((entry) => entry.command) ?? [],
+    );
+    const itemContextCommands =
+      packageJson.contributes?.menus?.['view/item/context']?.map((entry) => entry.command) ?? [];
+
+    assert.ok(
+      itemContextCommands.every((command) => contributedCommands.has(command)),
+      'every notes view menu command must be declared in contributes.commands',
+    );
     assert.ok(
       packageJson.contributes?.menus?.['view/item/context']?.some(
         (entry) => entry.command === COMMAND_IDS.notesPanelOpenNote,

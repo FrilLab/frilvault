@@ -131,10 +131,6 @@ export function activate(context: vscode.ExtensionContext): void {
     await refreshWorkspaceNoteCounts();
   };
 
-  const refreshUi = async (editor?: vscode.TextEditor) => {
-    await refreshAfterMutation(editor);
-  };
-
   const inlineNoteEditor = createInlineNoteEditor({
     cliClient,
     getWorkspaceRoot,
@@ -209,7 +205,7 @@ export function activate(context: vscode.ExtensionContext): void {
       createEnableCommand({
         getWorkspaceRoot,
         workspaceState: context.workspaceState,
-        refreshUi,
+        refreshUi: refreshAfterMutation,
         clearUi,
       }),
     ),
@@ -218,7 +214,7 @@ export function activate(context: vscode.ExtensionContext): void {
       createDisableCommand({
         getWorkspaceRoot,
         workspaceState: context.workspaceState,
-        refreshUi,
+        refreshUi: refreshAfterMutation,
         clearUi,
       }),
     ),
@@ -274,14 +270,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       COMMAND_IDS.refresh,
       runWhenEnabled(async () => {
-        await refreshUi();
+        await refreshAfterMutation();
       }),
     ),
     vscode.window.onDidChangeActiveTextEditor(async (editor) => {
-      await refreshUi(editor);
+      await refreshAfterMutation(editor);
     }),
     vscode.workspace.onDidSaveTextDocument(async () => {
-      await refreshUi();
+      await refreshAfterMutation();
     }),
   );
 
@@ -302,7 +298,7 @@ export function activate(context: vscode.ExtensionContext): void {
   void syncEnabledContext(isEnabled()).then(async () => {
     try {
       if (isEnabled()) {
-        await refreshUi();
+        await refreshAfterMutation();
         return;
       }
 

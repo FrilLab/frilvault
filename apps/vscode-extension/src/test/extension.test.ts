@@ -278,11 +278,12 @@ suite('Extension Test Suite', () => {
       },
       () => workspace.root,
     );
+    const overviewLoaded = waitForTreeChange(provider);
     let children = await provider.getChildren();
 
     assert.strictEqual(children[0]?.label, 'Loading workspace notes...');
 
-    await flushMicrotasks();
+    await overviewLoaded;
     children = await provider.getChildren();
 
     assert.strictEqual(children[0]?.label, 'Workspace notes');
@@ -298,10 +299,63 @@ suite('Extension Test Suite', () => {
     assert.strictEqual(srcChildren[1]?.label, 'sample.ts');
     assert.strictEqual(srcChildren[1]?.description, '(1)');
 
-    await flushMicrotasks();
     children = await provider.getChildren();
     assert.strictEqual(children[0]?.label, 'Workspace notes');
     assert.strictEqual(overviewLoadCount, 1);
+  });
+
+  test('FrilVault Notes provider reports explorer failures and retries after refresh', async () => {
+    const workspace = createTestWorkspace();
+    await configureExtension(workspace);
+
+    const cliClient = new CliClient(() => workspace.cliPath);
+    const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
+    store.clear();
+    let overviewLoadCount = 0;
+    const provider = new FrilVaultNotesProvider(
+      store,
+      async () => {
+        overviewLoadCount += 1;
+
+        if (overviewLoadCount === 1) {
+          throw new Error('explorer failed');
+        }
+
+        return {
+          root: {
+            type: 'Directory',
+            name: '',
+            path: '',
+            children: [{
+              type: 'File',
+              source_file: 'README.md',
+              exists: true,
+              groups: [{ type: 'LineNotes', notes: [{ id: 'readme-note' }] }],
+            }],
+          },
+        };
+      },
+      () => workspace.root,
+    );
+
+    let overviewLoaded = waitForTreeChange(provider);
+    let children = await provider.getChildren();
+    assert.strictEqual(children[0]?.label, 'Loading workspace notes...');
+
+    await overviewLoaded;
+    children = await provider.getChildren();
+    assert.strictEqual(children[0]?.label, 'explorer failed');
+
+    provider.refresh();
+    overviewLoaded = waitForTreeChange(provider);
+    children = await provider.getChildren();
+    assert.strictEqual(children[0]?.label, 'Loading workspace notes...');
+
+    await overviewLoaded;
+    children = await provider.getChildren();
+    assert.strictEqual(children[0]?.label, 'Workspace notes');
+    assert.strictEqual(children[1]?.label, 'README.md');
+    assert.strictEqual(overviewLoadCount, 2);
   });
 
   test('Gitignore prompt reports inspection failures without throwing', async () => {
@@ -707,6 +761,20 @@ async function configureExtension(workspace: TestWorkspace): Promise<void> {
 
 async function flushMicrotasks(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function waitForTreeChange(provider: FrilVaultNotesProvider): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      subscription.dispose();
+      reject(new Error('Timed out waiting for notes tree refresh.'));
+    }, 5_000);
+    const subscription = provider.onDidChangeTreeData(() => {
+      clearTimeout(timeout);
+      subscription.dispose();
+      resolve();
+    });
+  });
 }
 
 async function openFile(filePath: string): Promise<vscode.TextEditor> {

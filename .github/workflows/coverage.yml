@@ -42,4 +42,42 @@ jobs:
         with:
           use_oidc: true
           files: lcov.info
+          flags: rust
+          fail_ci_if_error: true
+
+  extension-coverage:
+    name: VS Code Extension Coverage
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    defaults:
+      run:
+        working-directory: apps/vscode-extension
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/vscode-extension/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate coverage
+        run: xvfb-run -a npm run test:coverage
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: apps/vscode-extension/coverage/lcov.info
+          flags: vscode-extension
           fail_ci_if_error: true

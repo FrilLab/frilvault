@@ -2,6 +2,26 @@
 
 All notable changes to the FrilVault VS Code extension are documented here.
 
+## 0.0.3 - 2026-07-27
+
+### Added
+
+- Note count badges for files and aggregated folders in the built-in Explorer
+- A workspace note overview in `FrilVault Notes` when no editor file is active
+- Folder and file note counts with direct file navigation from the notes view
+
+### Changed
+
+- Prefer line anchors when adding a note from a blank cursor line
+- Use shorter command labels while keeping the `FrilVault Notes` view name explicit
+- Label editor CodeLens actions as `Note Add` and `Note Edit`
+
+### Fixed
+
+- Workspace notes remaining stuck at `Loading workspace notes...`
+- Missing `frilvault.notesPanel.openNote` command contribution
+- Workspace note discovery now uses the vault explorer result instead of stale UI index state
+
 ## 0.0.2 - 2026-07-24
 
 ### Added
