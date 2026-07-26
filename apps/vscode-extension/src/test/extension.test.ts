@@ -8,7 +8,6 @@ import * as vscode from 'vscode';
 
 import { CliClient } from '../core/cliClient';
 import { CurrentFileNotesStore } from '../features/current-file/store';
-import { WorkspaceNoteCountStore } from '../features/explorer-badges/store';
 import { createAddNoteCommand } from '../features/inline-editor/command';
 import {
   GITIGNORE_PROMPT_DISABLED_KEY,
@@ -86,10 +85,9 @@ suite('Extension Test Suite', () => {
 
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => false, () => workspace.root);
-    const noteCountStore = await createLoadedNoteCountStore(cliClient, workspace.root);
     const provider = new FrilVaultNotesProvider(
       store,
-      noteCountStore,
+      () => cliClient.workspaceExplorer(workspace.root),
       () => workspace.root,
       () => false,
     );
@@ -130,9 +128,12 @@ suite('Extension Test Suite', () => {
 
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
-    const noteCountStore = await createLoadedNoteCountStore(cliClient, workspace.root);
     await store.syncActiveEditor(vscode.window.activeTextEditor);
-    const provider = new FrilVaultNotesProvider(store, noteCountStore, () => workspace.root);
+    const provider = new FrilVaultNotesProvider(
+      store,
+      () => cliClient.workspaceExplorer(workspace.root),
+      () => workspace.root,
+    );
     const firstChildren = await provider.getChildren();
 
     assert.strictEqual(firstChildren.length, 2);
@@ -168,9 +169,12 @@ suite('Extension Test Suite', () => {
 
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
-    const noteCountStore = await createLoadedNoteCountStore(cliClient, workspace.root);
     await store.syncActiveEditor(vscode.window.activeTextEditor);
-    const provider = new FrilVaultNotesProvider(store, noteCountStore, () => workspace.root);
+    const provider = new FrilVaultNotesProvider(
+      store,
+      () => cliClient.workspaceExplorer(workspace.root),
+      () => workspace.root,
+    );
     const groups = await provider.getChildren();
 
     assert.strictEqual(groups.length, 4);
@@ -240,8 +244,11 @@ suite('Extension Test Suite', () => {
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
     await store.syncActiveEditor(vscode.window.activeTextEditor);
-    const noteCountStore = await createLoadedNoteCountStore(cliClient, workspace.root);
-    const provider = new FrilVaultNotesProvider(store, noteCountStore, () => workspace.root);
+    const provider = new FrilVaultNotesProvider(
+      store,
+      () => cliClient.workspaceExplorer(workspace.root),
+      () => workspace.root,
+    );
     const children = await provider.getChildren();
 
     assert.strictEqual(children.length, 2);
@@ -262,9 +269,17 @@ suite('Extension Test Suite', () => {
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
     store.clear();
-    const noteCountStore = await createLoadedNoteCountStore(cliClient, workspace.root);
-    const provider = new FrilVaultNotesProvider(store, noteCountStore, () => workspace.root);
-    const children = await provider.getChildren();
+    const provider = new FrilVaultNotesProvider(
+      store,
+      () => cliClient.workspaceExplorer(workspace.root),
+      () => workspace.root,
+    );
+    let children = await provider.getChildren();
+
+    assert.strictEqual(children[0]?.label, 'Loading workspace notes...');
+
+    await flushMicrotasks();
+    children = await provider.getChildren();
 
     assert.strictEqual(children[0]?.label, 'Workspace notes');
     assert.strictEqual(children[1]?.label, 'src');
@@ -482,6 +497,58 @@ if (command === 'index') {
   process.exit(0);
 }
 
+if (command === 'explorer') {
+  const files = new Map();
+
+  for (const note of state.notes) {
+    const current = files.get(note.source_file) ?? [];
+    current.push(note.note);
+    files.set(note.source_file, current);
+  }
+
+  const root = { type: 'Directory', name: '', path: '', children: [] };
+
+  for (const [sourceFile, notes] of [...files.entries()].sort((left, right) => left[0].localeCompare(right[0]))) {
+    const parts = sourceFile.split('/');
+    let cursor = root;
+
+    for (let index = 0; index < parts.length - 1; index += 1) {
+      const name = parts[index];
+      let directory = cursor.children.find((child) => child.type === 'Directory' && child.name === name);
+      if (!directory) {
+        directory = {
+          type: 'Directory',
+          name,
+          path: cursor.path ? cursor.path + '/' + name : name,
+          children: [],
+        };
+        cursor.children.push(directory);
+      }
+      cursor = directory;
+    }
+
+    const lineNotes = notes.filter((note) => note.anchor.type === 'Line');
+    const symbolNotes = notes.filter((note) => note.anchor.type === 'Symbol');
+    const groups = [];
+    if (lineNotes.length > 0) {
+      groups.push({ type: 'LineNotes', notes: lineNotes });
+    }
+    if (symbolNotes.length > 0) {
+      groups.push({ type: 'SymbolNotes', notes: symbolNotes });
+    }
+
+    cursor.children.push({
+      type: 'File',
+      source_file: sourceFile,
+      exists: true,
+      groups,
+    });
+  }
+
+  process.stdout.write(JSON.stringify({ root }));
+  process.exit(0);
+}
+
 if (command === 'add') {
   const file = valueOf('--file');
   const line = Number(valueOf('--line'));
@@ -619,15 +686,6 @@ function writeNotesState(workspace: TestWorkspace, notes: NoteView[]): void {
   fs.writeFileSync(workspace.stateFile, JSON.stringify({ notes }, null, 2));
 }
 
-async function createLoadedNoteCountStore(
-  cliClient: CliClient,
-  workspaceRoot: string,
-): Promise<WorkspaceNoteCountStore> {
-  const store = new WorkspaceNoteCountStore(cliClient, () => workspaceRoot);
-  await store.reload();
-  return store;
-}
-
 async function configureExtension(workspace: TestWorkspace): Promise<void> {
   await vscode.workspace
     .getConfiguration('frilvault')
@@ -635,6 +693,10 @@ async function configureExtension(workspace: TestWorkspace): Promise<void> {
   await vscode.workspace
     .getConfiguration('frilvault')
     .update('cliPath', workspace.cliPath, vscode.ConfigurationTarget.Global);
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 async function openFile(filePath: string): Promise<vscode.TextEditor> {

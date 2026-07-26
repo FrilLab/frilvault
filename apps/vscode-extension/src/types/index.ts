@@ -88,6 +88,29 @@ export interface WorkspaceIndex {
   files: IndexedFile[];
 }
 
+export interface ExplorerGroup {
+  type: 'LineNotes' | 'SymbolNotes';
+  notes: Array<{ id: string }>;
+}
+
+export type WorkspaceExplorerNode =
+  | {
+      type: 'Directory';
+      name: string;
+      path: string;
+      children: WorkspaceExplorerNode[];
+    }
+  | {
+      type: 'File';
+      source_file: string;
+      exists: boolean;
+      groups: ExplorerGroup[];
+    };
+
+export interface WorkspaceExplorer {
+  root: WorkspaceExplorerNode;
+}
+
 export interface MutationResult {
   note: NoteView['note'] | null;
 }

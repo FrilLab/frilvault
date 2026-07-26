@@ -90,7 +90,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const noteCountStore = new WorkspaceNoteCountStore(cliClient, getWorkspaceRoot);
   activeNoteCountStore = noteCountStore;
 
-  const notesProvider = new FrilVaultNotesProvider(store, noteCountStore, getWorkspaceRoot, isEnabled);
+  const notesProvider = new FrilVaultNotesProvider(
+    store,
+    () => cliClient.workspaceExplorer(getWorkspaceRoot()),
+    getWorkspaceRoot,
+    isEnabled,
+  );
   const decorator = new FrilVaultDecorator(
     context.extensionPath,
     store,

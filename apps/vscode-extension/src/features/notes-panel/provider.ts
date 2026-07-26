@@ -1,11 +1,15 @@
 import * as vscode from 'vscode';
 
 import { COMMAND_IDS } from '../../constants/ids';
-import { WorkspaceNoteCountStore } from '../explorer-badges/store';
 import {
   CurrentFileNotesStore,
 } from '../current-file/store';
-import { buildWorkspaceNoteTree, groupNotesByAnchor, type WorkspaceTreeNode } from './presentation';
+import type { WorkspaceExplorer } from '../../types';
+import {
+  buildWorkspaceNoteTreeFromExplorer,
+  groupNotesByAnchor,
+  type WorkspaceTreeNode,
+} from './presentation';
 import {
   NotesAnchorGroupItem,
   NotesFileHeaderItem,
@@ -31,17 +35,20 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<void>();
   private workspaceOverviewLoad: Promise<void> | undefined;
   private workspaceOverviewError: string | undefined;
+  private workspaceOverview: WorkspaceExplorer | undefined;
 
   public readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 
   public constructor(
     private readonly store: CurrentFileNotesStore,
-    private readonly noteCountStore: WorkspaceNoteCountStore,
+    private readonly loadWorkspaceOverview: () => Promise<WorkspaceExplorer>,
     private readonly getWorkspaceRoot: () => string,
     private readonly isEnabled: () => boolean = () => true,
   ) {}
 
   public refresh(): void {
+    this.workspaceOverview = undefined;
+    this.workspaceOverviewError = undefined;
     this.onDidChangeTreeDataEmitter.fire();
   }
 
@@ -114,7 +121,7 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
   }
 
   private workspaceOverviewRoot(): TreeNode[] {
-    if (!this.noteCountStore.isLoaded()) {
+    if (!this.workspaceOverview) {
       void this.ensureWorkspaceOverviewLoaded();
       return [new NotesStatusItem('Loading workspace notes...', 'loading~spin')];
     }
@@ -138,6 +145,10 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
   }
 
   private workspaceOverviewChildrenSync(): Array<NotesWorkspaceFolderItem | NotesWorkspaceFileItem> {
+    if (!this.workspaceOverview) {
+      return [];
+    }
+
     let workspaceRoot: string;
 
     try {
@@ -146,19 +157,19 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
       return [];
     }
 
-    return buildWorkspaceNoteTree(this.noteCountStore.listIndexedFiles())
+    return buildWorkspaceNoteTreeFromExplorer(this.workspaceOverview.root)
       .map((node) => this.toWorkspaceItem(node, workspaceRoot));
   }
 
   private async ensureWorkspaceOverviewLoaded(): Promise<void> {
-    if (this.noteCountStore.isLoaded()) {
+    if (this.workspaceOverview) {
       return;
     }
 
     if (!this.workspaceOverviewLoad) {
-      this.workspaceOverviewLoad = this.noteCountStore
-        .reload()
-        .then(() => {
+      this.workspaceOverviewLoad = this.loadWorkspaceOverview()
+        .then((overview) => {
+          this.workspaceOverview = overview;
           this.workspaceOverviewError = undefined;
         })
         .catch((error: unknown) => {

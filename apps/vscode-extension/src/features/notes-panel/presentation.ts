@@ -1,4 +1,4 @@
-import type { NoteView } from '../../types';
+import type { NoteView, WorkspaceExplorerNode } from '../../types';
 import { createInlinePreview } from '../presentation/inlinePreview';
 
 export interface SymbolNoteGroup {
@@ -149,6 +149,18 @@ export function buildWorkspaceNoteTree(
   return sortWorkspaceTree(root);
 }
 
+export function buildWorkspaceNoteTreeFromExplorer(
+  root: WorkspaceExplorerNode,
+): WorkspaceTreeNode[] {
+  if (root.type !== 'Directory') {
+    return [];
+  }
+
+  return root.children
+    .map((child) => mapExplorerNode(child))
+    .filter((node): node is WorkspaceTreeNode => node !== undefined);
+}
+
 type WorkspaceTreeBuilderNode = WorkspaceTreeFolderBuilder | WorkspaceTreeFile;
 
 interface WorkspaceTreeFolderBuilder {
@@ -176,4 +188,38 @@ function sortWorkspaceTree(nodes: Map<string, WorkspaceTreeBuilderNode>): Worksp
   }
 
   return ordered as unknown as WorkspaceTreeNode[];
+}
+
+function mapExplorerNode(node: WorkspaceExplorerNode): WorkspaceTreeNode | undefined {
+  if (node.type === 'File') {
+    const noteCount = node.groups.reduce((sum, group) => sum + group.notes.length, 0);
+
+    if (noteCount <= 0) {
+      return undefined;
+    }
+
+    return {
+      kind: 'file',
+      path: node.source_file,
+      name: node.source_file.split('/').pop() ?? node.source_file,
+      noteCount,
+    };
+  }
+
+  const children = node.children
+    .map((child) => mapExplorerNode(child))
+    .filter((child): child is WorkspaceTreeNode => child !== undefined);
+  const noteCount = children.reduce((sum, child) => sum + child.noteCount, 0);
+
+  if (noteCount <= 0) {
+    return undefined;
+  }
+
+  return {
+    kind: 'folder',
+    path: node.path,
+    name: node.name,
+    noteCount,
+    children,
+  };
 }
