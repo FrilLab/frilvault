@@ -3,7 +3,7 @@ import { access } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import type { NoteView, RepairSuggestion, SyncResult, WorkspaceHealth, WorkspaceStats } from '../types';
+import type { NoteView, RepairSuggestion, SyncResult, WorkspaceHealth, WorkspaceIndex, WorkspaceStats } from '../types';
 import { parseJson } from '../utils/parser';
 import {
   getConfiguredCliPath,
@@ -250,6 +250,11 @@ export class CliClient {
   public async workspaceStats(workspaceRoot: string): Promise<WorkspaceStats> {
     const stdout = await this.execInWorkspace(workspaceRoot, ['stats', '--format', 'json']);
     return parseJson<WorkspaceStats>(stdout);
+  }
+
+  public async workspaceIndex(workspaceRoot: string): Promise<WorkspaceIndex> {
+    const stdout = await this.execInWorkspace(workspaceRoot, ['index', '--format', 'json']);
+    return parseJson<WorkspaceIndex>(stdout);
   }
 
   public async workspaceHealth(workspaceRoot: string): Promise<WorkspaceHealth> {

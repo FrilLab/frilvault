@@ -138,6 +138,10 @@ impl WorkspaceService {
         Ok(stats)
     }
 
+    pub fn index(&mut self) -> FrilVaultResult<WorkspaceIndex> {
+        self.index_repository.load_and_refresh_exists()
+    }
+
     pub fn explorer(&mut self) -> FrilVaultResult<WorkspaceExplorer> {
         let index = self.index_repository.load_and_refresh_exists()?;
         let exists_by_file = index

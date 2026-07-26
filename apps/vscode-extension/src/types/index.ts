@@ -77,6 +77,17 @@ export interface SyncResult {
   repairs_applied: number;
 }
 
+export interface IndexedFile {
+  source_file: string;
+  note_count: number;
+  exists: boolean;
+}
+
+export interface WorkspaceIndex {
+  version: number;
+  files: IndexedFile[];
+}
+
 export interface MutationResult {
   note: NoteView['note'] | null;
 }

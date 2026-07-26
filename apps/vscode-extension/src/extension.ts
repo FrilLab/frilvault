@@ -19,6 +19,8 @@ import { CurrentFileNotesStore } from './features/current-file/store';
 import { createDisableCommand, createEnableCommand } from './features/enablement/command';
 import { isFrilVaultEnabled, syncEnabledContext } from './features/enablement/state';
 import { runOptionalPostSaveTasks } from './features/post-save/tasks';
+import { registerExplorerNoteCountDecorations } from './features/explorer-badges/provider';
+import { WorkspaceNoteCountStore } from './features/explorer-badges/store';
 import { FrilVaultDecorator } from './features/decorations/decorator';
 import { GutterNoteActions } from './features/decorations/gutterActions';
 import { registerGutterCommands } from './features/decorations/gutterCommands';
@@ -44,6 +46,7 @@ import type { NoteView } from './types';
 import { getWorkspaceRoot, revealNote, tryGetWorkspaceRoot } from './utils/file';
 
 let activeDecorator: FrilVaultDecorator | undefined;
+let activeNoteCountStore: WorkspaceNoteCountStore | undefined;
 let activeStore: CurrentFileNotesStore | undefined;
 let activeRegistry: GutterNoteRegistry | undefined;
 const codeLensRefreshEmitter = new vscode.EventEmitter<void>();
@@ -95,18 +98,42 @@ export function activate(context: vscode.ExtensionContext): void {
   activeDecorator = decorator;
   const hoverProvider = new FrilVaultHoverProvider(store, getWorkspaceRoot, isEnabled);
 
+  const noteCountStore = new WorkspaceNoteCountStore(cliClient, getWorkspaceRoot);
+  activeNoteCountStore = noteCountStore;
+
   const refreshNoteState = async (editor?: vscode.TextEditor) => {
     await store.syncActiveEditor(editor ?? vscode.window.activeTextEditor);
   };
 
-  const refreshUi = async (editor?: vscode.TextEditor) => {
+  const refreshWorkspaceNoteCounts = async () => {
+    if (!isEnabled()) {
+      noteCountStore.clear();
+      return;
+    }
+
+    try {
+      await noteCountStore.reload();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to load workspace note counts.';
+
+      cliOutputChannel.appendLine(`FrilVault: ${message}`);
+    }
+  };
+
+  const refreshAfterMutation = async (editor?: vscode.TextEditor) => {
     await refreshNoteState(editor);
+    await refreshWorkspaceNoteCounts();
+  };
+
+  const refreshUi = async (editor?: vscode.TextEditor) => {
+    await refreshAfterMutation(editor);
   };
 
   const inlineNoteEditor = createInlineNoteEditor({
     cliClient,
     getWorkspaceRoot,
-    refreshNoteState: () => refreshNoteState(),
+    refreshNoteState: () => refreshAfterMutation(),
     runOptionalPostSaveTasks: () =>
       runOptionalPostSaveTasks({
         getWorkspaceRoot,
@@ -121,12 +148,13 @@ export function activate(context: vscode.ExtensionContext): void {
     cliClient,
     registry: gutterRegistry,
     getWorkspaceRoot,
-    invalidateViews: refreshNoteState,
+    invalidateViews: refreshAfterMutation,
     openInlineEditor: (noteView) => inlineNoteEditor.openEdit(noteView),
   });
 
   const clearUi = () => {
     store.clear();
+    noteCountStore.clear();
     gutterRegistry.clear();
     decorator.clear();
     notesProvider.refresh();
@@ -160,6 +188,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     cliOutputChannel,
     store,
+    noteCountStore,
     decorator,
     registerFrilVaultHoverProvider(context, hoverProvider),
     vscode.commands.registerCommand(COMMAND_IDS.notesPanelOpenNote, async (noteView: NoteView) => {
@@ -218,7 +247,7 @@ export function activate(context: vscode.ExtensionContext): void {
           quickPick: {
             cliClient,
             getWorkspaceRoot,
-            invalidateViews: refreshNoteState,
+            invalidateViews: refreshAfterMutation,
             openInlineEditor: (noteView) => inlineNoteEditor.openEdit(noteView),
           },
         }),
@@ -234,7 +263,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand(
       'frilvault.applyRepairs',
-      runWhenEnabled(createApplyRepairsCommand(cliClient, getWorkspaceRoot, refreshNoteState)),
+      runWhenEnabled(createApplyRepairsCommand(cliClient, getWorkspaceRoot, refreshAfterMutation)),
     ),
     vscode.commands.registerCommand(
       COMMAND_IDS.refresh,
@@ -252,9 +281,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
   registerNotesTreeDataProvider(context, notesProvider);
 
-  registerSourceRenameHandler(context, cliClient, isEnabled, refreshNoteState);
-  registerWorkspaceWatcher(context, cliClient, isEnabled, refreshNoteState);
+  registerSourceRenameHandler(context, cliClient, isEnabled, refreshAfterMutation);
+  registerWorkspaceWatcher(context, cliClient, isEnabled, refreshAfterMutation);
   registerNoteUriHandler(context, { cliClient, isEnabled });
+  registerExplorerNoteCountDecorations(context, noteCountStore, getWorkspaceRoot, isEnabled);
   registerInlineNoteCodeLensProvider(
     context,
     store,
@@ -286,8 +316,10 @@ export function deactivate(): void {
   disposeNotesTreeDataProvider();
   activeDecorator?.clear();
   activeStore?.clear();
+  activeNoteCountStore?.clear();
   activeRegistry?.clear();
   activeDecorator = undefined;
   activeStore = undefined;
+  activeNoteCountStore = undefined;
   activeRegistry = undefined;
 }
