@@ -52,6 +52,8 @@ fn main() -> Result<()> {
 
         Commands::Stats(cmd) => command::stats::execute(cmd)?,
 
+        Commands::Index(cmd) => command::index::execute(cmd)?,
+
         Commands::Explorer(cmd) => command::explorer::execute(cmd)?,
 
         Commands::Sync(cmd) => command::sync::execute(cmd)?,

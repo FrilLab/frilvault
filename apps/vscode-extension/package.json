@@ -249,6 +249,16 @@
           "default": "dot",
           "description": "Visual style for interactive gutter note markers."
         },
+        "frilvault.explorerNoteCounts.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show FrilVault note counts beside files in the VS Code Explorer."
+        },
+        "frilvault.explorerNoteCounts.folderAggregation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show aggregated FrilVault note counts on Explorer folders."
+        },
         "frilvault.hoverPreviewLength": {
           "type": "number",
           "default": 800,

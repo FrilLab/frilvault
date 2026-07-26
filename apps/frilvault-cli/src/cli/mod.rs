@@ -11,6 +11,7 @@ pub mod explorer;
 pub mod format;
 pub mod gitignore;
 pub mod health;
+pub mod index;
 pub mod list;
 pub mod repair;
 pub mod resolve_uri;
@@ -25,6 +26,7 @@ use delete::DeleteCommand;
 use explorer::ExplorerCommand;
 use gitignore::GitignoreCommand;
 use health::HealthCommand;
+use index::IndexCommand;
 use list::ListCommand;
 use repair::RepairCommand;
 use resolve_uri::ResolveUriCommand;
@@ -53,6 +55,7 @@ pub enum Commands {
     Doctor(HealthCommand),
     Health(HealthCommand),
     Stats(StatsCommand),
+    Index(IndexCommand),
     Explorer(ExplorerCommand),
     Sync(SyncCommand),
     Gitignore(GitignoreCommand),

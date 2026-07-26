@@ -14,6 +14,7 @@ suite('CliClient', () => {
       platform: 'darwin',
       arch: 'arm64',
       existsSync: (filePath) => filePath === '/extension/bin/darwin-arm64/flvt',
+      access: async () => undefined,
       execFile: async (file, args) => {
         calls.push(`${file} ${args.join(' ')}`);
 
@@ -47,6 +48,7 @@ suite('CliClient', () => {
       extensionPath: '/extension',
       extensionVersion: '0.1.0',
       existsSync: () => true,
+      access: async () => undefined,
       execFile: async (file, args) => {
         calls.push(`${file} ${args.join(' ')}`);
 
@@ -112,6 +114,38 @@ suite('CliClient', () => {
     );
   });
 
+  test('loads workspace note counts from the index command', async () => {
+    const calls: string[] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (file, args) => {
+        calls.push(`${file} ${args.join(' ')}`);
+
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+
+        return {
+          stdout: JSON.stringify({
+            version: 1,
+            files: [{ source_file: 'src/main.rs', note_count: 2, exists: true }],
+          }),
+          stderr: '',
+        };
+      },
+    });
+
+    const index = await cliClient.workspaceIndex('/workspace');
+
+    assert.strictEqual(index.files[0]?.note_count, 2);
+    assert.ok(calls.some((call) => call.includes('index --format json')));
+  });
+
   test('fails fast when the CLI version does not match the extension expectation', async () => {
     const cliClient = new CliClient({
       extensionPath: '/extension',
@@ -119,6 +153,7 @@ suite('CliClient', () => {
       platform: 'darwin',
       arch: 'arm64',
       existsSync: () => true,
+      access: async () => undefined,
       execFile: async (_file, args) => {
         if (args[0] === '--version') {
           return { stdout: 'flvt 0.1.0\n', stderr: '' };

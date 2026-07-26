@@ -75,6 +75,18 @@ fn parses_stats_json_format() {
 }
 
 #[test]
+fn parses_index_json_format() {
+    let cli = Cli::parse_from(["flvt", "index", "--format", "json"]);
+
+    match cli.command {
+        Commands::Index(command) => {
+            assert!(matches!(command.format, Some(FormatArg::Json)));
+        }
+        _ => panic!("expected index command"),
+    }
+}
+
+#[test]
 fn parses_explorer_json_format() {
     let cli = Cli::parse_from(["flvt", "explorer", "--format", "json"]);
 
