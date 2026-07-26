@@ -54,7 +54,7 @@ export class InlineNotePanel implements InlineNotePanelLike {
     if (!this.panel) {
       this.panel = vscode.window.createWebviewPanel(
         'frilvault.inlineNoteEditor',
-        'FrilVault Note',
+        'Note',
         vscode.ViewColumn.Beside,
         {
           enableScripts: true,
@@ -78,7 +78,7 @@ export class InlineNotePanel implements InlineNotePanelLike {
       context.subscriptions.push(this.panel);
     }
 
-    this.panel.title = draft.mode === 'create' ? 'Create FrilVault Note' : 'Edit FrilVault Note';
+    this.panel.title = draft.mode === 'create' ? 'Add Note' : 'Edit Note';
     this.panel.webview.html = renderPanelHtml(draft);
     this.panel.reveal(vscode.ViewColumn.Beside, true);
   }
@@ -138,7 +138,7 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FrilVault Note Editor</title>
+  <title>Note Editor</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -182,7 +182,7 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
   </style>
 </head>
 <body>
-  <form id="note-form" aria-label="FrilVault note editor">
+  <form id="note-form" aria-label="note editor">
     <div>
       <strong id="mode-label">${escapeHtml(draft.mode === 'create' ? 'Create note' : 'Edit note')}</strong>
       <div class="meta" aria-label="Anchor summary">${escapeHtml(draft.anchorSummary)}</div>

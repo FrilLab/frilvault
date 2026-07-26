@@ -49,7 +49,7 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
   public refresh(): void {
     this.workspaceOverview = undefined;
     this.workspaceOverviewError = undefined;
-    this.onDidChangeTreeDataEmitter.fire();
+    this.notifyTreeChanged();
   }
 
   public getTreeItem(element: TreeNode): vscode.TreeItem {
@@ -58,7 +58,7 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
 
   public async getChildren(element?: TreeNode): Promise<TreeNode[]> {
     if (!this.isEnabled()) {
-      return [new NotesStatusItem('FrilVault is disabled for this workspace.', 'debug-pause')];
+      return [new NotesStatusItem('Disabled for this workspace.', 'debug-pause')];
     }
 
     const snapshot = this.store.getSnapshot();
@@ -95,7 +95,7 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
       return [
         new NotesFileHeaderItem(snapshot.sourceFile),
         new NotesStatusItem(
-          'No FrilVault notes are attached to this file.',
+          'No notes are attached to this file.',
           'note',
           COMMAND_IDS.addNote,
         ),
@@ -121,19 +121,19 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
   }
 
   private workspaceOverviewRoot(): TreeNode[] {
+    if (this.workspaceOverviewError) {
+      return [new NotesStatusItem(this.workspaceOverviewError, 'error')];
+    }
+
     if (!this.workspaceOverview) {
       void this.ensureWorkspaceOverviewLoaded();
       return [new NotesStatusItem('Loading workspace notes...', 'loading~spin')];
     }
 
-    if (this.workspaceOverviewError) {
-      return [new NotesStatusItem(this.workspaceOverviewError, 'error')];
-    }
-
     const children = this.workspaceOverviewChildrenSync();
 
     if (children.length === 0) {
-      return [new NotesStatusItem('No FrilVault notes found in this workspace yet.', 'note')];
+      return [new NotesStatusItem('No notes found in this workspace yet.', 'note')];
     }
 
     return [new NotesWorkspaceOverviewItem(), ...children];
@@ -180,11 +180,15 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
         })
         .finally(() => {
           this.workspaceOverviewLoad = undefined;
-          this.refresh();
+          this.notifyTreeChanged();
         });
     }
 
     await this.workspaceOverviewLoad;
+  }
+
+  private notifyTreeChanged(): void {
+    this.onDidChangeTreeDataEmitter.fire();
   }
 
   private toWorkspaceItem(

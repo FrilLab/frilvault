@@ -253,7 +253,7 @@ suite('Extension Test Suite', () => {
 
     assert.strictEqual(children.length, 2);
     assert.strictEqual(children[0]?.label, path.join('src', 'sample.ts'));
-    assert.strictEqual(children[1]?.label, 'No FrilVault notes are attached to this file.');
+    assert.strictEqual(children[1]?.label, 'No notes are attached to this file.');
   });
 
   test('FrilVault Notes provider shows workspace note overview when no file is open', async () => {
@@ -269,9 +269,13 @@ suite('Extension Test Suite', () => {
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
     store.clear();
+    let overviewLoadCount = 0;
     const provider = new FrilVaultNotesProvider(
       store,
-      () => cliClient.workspaceExplorer(workspace.root),
+      () => {
+        overviewLoadCount += 1;
+        return cliClient.workspaceExplorer(workspace.root);
+      },
       () => workspace.root,
     );
     let children = await provider.getChildren();
@@ -286,12 +290,18 @@ suite('Extension Test Suite', () => {
     assert.strictEqual(children[1]?.description, '(2)');
     assert.strictEqual(children[2]?.label, 'README.md');
     assert.strictEqual(children[2]?.description, '(1)');
+    assert.strictEqual(overviewLoadCount, 1);
 
     const srcChildren = await provider.getChildren(children[1]);
     assert.strictEqual(srcChildren[0]?.label, 'deep');
     assert.strictEqual(srcChildren[0]?.description, '(1)');
     assert.strictEqual(srcChildren[1]?.label, 'sample.ts');
     assert.strictEqual(srcChildren[1]?.description, '(1)');
+
+    await flushMicrotasks();
+    children = await provider.getChildren();
+    assert.strictEqual(children[0]?.label, 'Workspace notes');
+    assert.strictEqual(overviewLoadCount, 1);
   });
 
   test('Gitignore prompt reports inspection failures without throwing', async () => {

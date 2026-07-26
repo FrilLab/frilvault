@@ -126,7 +126,7 @@ export class NotesPanelItem extends vscode.TreeItem {
     this.iconPath = new vscode.ThemeIcon('note');
     this.command = {
       command: COMMAND_IDS.notesPanelOpenNote,
-      title: 'Open FrilVault Note',
+      title: 'Open Note',
       arguments: [noteView],
     };
   }

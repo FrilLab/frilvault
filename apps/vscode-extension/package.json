@@ -59,78 +59,82 @@
     "commands": [
       {
         "command": "frilvault.addNote",
-        "title": "FrilVault: Add Note"
+        "title": "Add"
       },
       {
         "command": "frilvault.editNote",
-        "title": "FrilVault: Edit Note"
+        "title": "Edit"
       },
       {
         "command": "frilvault.notesPanel.editNote",
-        "title": "FrilVault: Edit Note"
+        "title": "Edit"
+      },
+      {
+        "command": "frilvault.notesPanel.openNote",
+        "title": "Open Note"
       },
       {
         "command": "frilvault.searchNotes",
-        "title": "FrilVault: Search Notes"
+        "title": "Search Notes"
       },
       {
         "command": "frilvault.showNotesForCurrentFile",
-        "title": "FrilVault: Show Notes For Current File",
+        "title": "Show Notes",
         "icon": "$(note)"
       },
       {
         "command": "frilvault.showStats",
-        "title": "FrilVault: Show Workspace Stats"
+        "title": "Show Stats"
       },
       {
         "command": "frilvault.showHealth",
-        "title": "FrilVault: Show Workspace Health"
+        "title": "Show Health"
       },
       {
         "command": "frilvault.applyRepairs",
-        "title": "FrilVault: Apply Repairs"
+        "title": "Apply Repairs"
       },
       {
         "command": "frilvault.refresh",
-        "title": "FrilVault: Refresh"
+        "title": "Refresh"
       },
       {
         "command": "frilvault.enable",
-        "title": "FrilVault: Turn On",
+        "title": "Enable",
         "icon": "$(debug-start)"
       },
       {
         "command": "frilvault.disable",
-        "title": "FrilVault: Turn Off",
+        "title": "Disable",
         "icon": "$(debug-pause)"
       },
       {
         "command": "frilvault.gutter.showActions",
-        "title": "FrilVault: Gutter Note Actions"
+        "title": "Note Actions"
       },
       {
         "command": "frilvault.gutter.viewNote",
-        "title": "FrilVault: View Gutter Note"
+        "title": "View Note"
       },
       {
         "command": "frilvault.gutter.editNote",
-        "title": "FrilVault: Edit Gutter Note"
+        "title": "Edit Note"
       },
       {
         "command": "frilvault.gutter.deleteNote",
-        "title": "FrilVault: Delete Gutter Note"
+        "title": "Delete Note"
       },
       {
         "command": "frilvault.gutter.copyLink",
-        "title": "FrilVault: Copy Gutter Note Link"
+        "title": "Copy Note Link"
       },
       {
         "command": "frilvault.gutter.copyNoteContent",
-        "title": "FrilVault: Copy Gutter Note Content"
+        "title": "Copy Note Content"
       },
       {
         "command": "frilvault.gutter.copyNoteMarkdown",
-        "title": "FrilVault: Copy Gutter Note as Markdown"
+        "title": "Copy Note as Markdown"
       }
     ],
     "menus": {
