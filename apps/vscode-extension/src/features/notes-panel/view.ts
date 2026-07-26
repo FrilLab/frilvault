@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 
 import { COMMAND_IDS, VIEW_ITEM_CONTEXT } from '../../constants/ids';
 import type { NoteView } from '../../types';
@@ -27,6 +28,46 @@ export class NotesStatusItem extends vscode.TreeItem {
         title: message,
       };
     }
+  }
+}
+
+export class NotesWorkspaceOverviewItem extends vscode.TreeItem {
+  public constructor() {
+    super('Workspace notes', vscode.TreeItemCollapsibleState.None);
+    this.description = 'No active file';
+    this.iconPath = new vscode.ThemeIcon('files');
+    this.contextValue = VIEW_ITEM_CONTEXT.notesStatus;
+  }
+}
+
+export class NotesWorkspaceFolderItem extends vscode.TreeItem {
+  public constructor(
+    public readonly relativePath: string,
+    public readonly noteCount: number,
+    public readonly children: Array<NotesWorkspaceFolderItem | NotesWorkspaceFileItem>,
+  ) {
+    super(path.posix.basename(relativePath), vscode.TreeItemCollapsibleState.Expanded);
+    this.description = `(${noteCount})`;
+    this.iconPath = new vscode.ThemeIcon('folder');
+    this.contextValue = VIEW_ITEM_CONTEXT.notesStatus;
+  }
+}
+
+export class NotesWorkspaceFileItem extends vscode.TreeItem {
+  public constructor(
+    public readonly workspaceRoot: string,
+    public readonly relativePath: string,
+    public readonly noteCount: number,
+  ) {
+    super(path.posix.basename(relativePath), vscode.TreeItemCollapsibleState.None);
+    this.description = `(${noteCount})`;
+    this.iconPath = new vscode.ThemeIcon('file');
+    this.contextValue = VIEW_ITEM_CONTEXT.notesFileHeader;
+    this.command = {
+      command: 'vscode.open',
+      title: 'Open file',
+      arguments: [vscode.Uri.file(path.join(workspaceRoot, relativePath))],
+    };
   }
 }
 
@@ -85,7 +126,7 @@ export class NotesPanelItem extends vscode.TreeItem {
     this.iconPath = new vscode.ThemeIcon('note');
     this.command = {
       command: COMMAND_IDS.notesPanelOpenNote,
-      title: 'Open FrilVault Note',
+      title: 'Open Note',
       arguments: [noteView],
     };
   }

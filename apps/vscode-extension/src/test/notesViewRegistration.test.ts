@@ -135,5 +135,12 @@ function createProvider(): FrilVaultNotesProvider {
     () => '/tmp/workspace',
   );
 
-  return new FrilVaultNotesProvider(store, () => '/tmp/workspace', () => true);
+  return new FrilVaultNotesProvider(
+    store,
+    async () => ({
+      root: { type: 'Directory', name: '', path: '', children: [] },
+    }),
+    () => '/tmp/workspace',
+    () => true,
+  );
 }

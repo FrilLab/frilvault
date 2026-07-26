@@ -1,4 +1,4 @@
-import type { NoteView } from '../../types';
+import type { NoteView, WorkspaceExplorerNode } from '../../types';
 import { createInlinePreview } from '../presentation/inlinePreview';
 
 export interface SymbolNoteGroup {
@@ -11,6 +11,23 @@ export interface NotesAnchorGroups {
   lineNotes: NoteView[];
   unresolvedNotes: NoteView[];
 }
+
+export interface WorkspaceTreeFolder {
+  kind: 'folder';
+  path: string;
+  name: string;
+  noteCount: number;
+  children: WorkspaceTreeNode[];
+}
+
+export interface WorkspaceTreeFile {
+  kind: 'file';
+  path: string;
+  name: string;
+  noteCount: number;
+}
+
+export type WorkspaceTreeNode = WorkspaceTreeFolder | WorkspaceTreeFile;
 
 /** Groups current-file notes by symbol name, line anchor, and unresolved symbol anchors. */
 export function groupNotesByAnchor(notes: NoteView[]): NotesAnchorGroups {
@@ -73,4 +90,136 @@ export function formatNoteQuickPickDetail(noteView: NoteView): string | undefine
 
 export function noteQuickPickLabel(noteView: NoteView): string {
   return truncateNoteContent(noteView.note.content);
+}
+
+export function buildWorkspaceNoteTree(
+  files: Array<{ source_file: string; note_count: number }>,
+): WorkspaceTreeNode[] {
+  const root = new Map<string, WorkspaceTreeBuilderNode>();
+
+  for (const file of files) {
+    if (file.note_count <= 0) {
+      continue;
+    }
+
+    const segments = file.source_file.split('/').filter((segment) => segment.length > 0);
+
+    if (segments.length === 0) {
+      continue;
+    }
+
+    let currentLevel = root;
+    let currentPath = '';
+
+    for (let index = 0; index < segments.length; index += 1) {
+      const segment = segments[index]!;
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+      const isLeaf = index === segments.length - 1;
+      const existing = currentLevel.get(segment);
+
+      if (isLeaf) {
+        currentLevel.set(segment, {
+          kind: 'file',
+          path: currentPath,
+          name: segment,
+          noteCount: file.note_count,
+        });
+        break;
+      }
+
+      if (existing && existing.kind === 'folder') {
+        existing.noteCount += file.note_count;
+        currentLevel = existing.children;
+        continue;
+      }
+
+      const folder: WorkspaceTreeFolderBuilder = {
+        kind: 'folder',
+        path: currentPath,
+        name: segment,
+        noteCount: file.note_count,
+        children: new Map<string, WorkspaceTreeBuilderNode>(),
+      };
+
+      currentLevel.set(segment, folder);
+      currentLevel = folder.children;
+    }
+  }
+
+  return sortWorkspaceTree(root);
+}
+
+export function buildWorkspaceNoteTreeFromExplorer(
+  root: WorkspaceExplorerNode,
+): WorkspaceTreeNode[] {
+  if (root.type !== 'Directory') {
+    return [];
+  }
+
+  return root.children
+    .map((child) => mapExplorerNode(child))
+    .filter((node): node is WorkspaceTreeNode => node !== undefined);
+}
+
+type WorkspaceTreeBuilderNode = WorkspaceTreeFolderBuilder | WorkspaceTreeFile;
+
+interface WorkspaceTreeFolderBuilder {
+  kind: 'folder';
+  path: string;
+  name: string;
+  noteCount: number;
+  children: Map<string, WorkspaceTreeBuilderNode>;
+}
+
+function sortWorkspaceTree(nodes: Map<string, WorkspaceTreeBuilderNode>): WorkspaceTreeNode[] {
+  const ordered = [...nodes.values()].sort((left, right) => {
+    if (left.kind !== right.kind) {
+      return left.kind === 'folder' ? -1 : 1;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+
+  for (const node of ordered) {
+    if (node.kind === 'folder') {
+      const children = sortWorkspaceTree(node.children);
+      Object.assign(node, { children });
+    }
+  }
+
+  return ordered as unknown as WorkspaceTreeNode[];
+}
+
+function mapExplorerNode(node: WorkspaceExplorerNode): WorkspaceTreeNode | undefined {
+  if (node.type === 'File') {
+    const noteCount = node.groups.reduce((sum, group) => sum + group.notes.length, 0);
+
+    if (noteCount <= 0) {
+      return undefined;
+    }
+
+    return {
+      kind: 'file',
+      path: node.source_file,
+      name: node.source_file.split('/').pop() ?? node.source_file,
+      noteCount,
+    };
+  }
+
+  const children = node.children
+    .map((child) => mapExplorerNode(child))
+    .filter((child): child is WorkspaceTreeNode => child !== undefined);
+  const noteCount = children.reduce((sum, child) => sum + child.noteCount, 0);
+
+  if (noteCount <= 0) {
+    return undefined;
+  }
+
+  return {
+    kind: 'folder',
+    path: node.path,
+    name: node.name,
+    noteCount,
+    children,
+  };
 }

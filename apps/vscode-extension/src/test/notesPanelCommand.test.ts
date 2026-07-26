@@ -43,9 +43,9 @@ suite('Show notes for current file command', () => {
       showInformationMessage: async (message, ...items) => {
         infoMessage = message;
 
-        if (items.includes('Create Note Here')) {
+        if (items.includes('Add')) {
           createNoteRequested = true;
-          return 'Create Note Here';
+          return 'Add';
         }
 
         return undefined;
@@ -59,7 +59,7 @@ suite('Show notes for current file command', () => {
 
     assert.strictEqual(syncCount, 1);
     assert.strictEqual(refreshCount, 1);
-    assert.strictEqual(infoMessage, 'No FrilVault notes are attached to this file.');
+    assert.strictEqual(infoMessage, 'No notes are attached to this file.');
     assert.strictEqual(createNoteRequested, true);
   });
 

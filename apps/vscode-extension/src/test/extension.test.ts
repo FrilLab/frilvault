@@ -85,7 +85,12 @@ suite('Extension Test Suite', () => {
 
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => false, () => workspace.root);
-    const provider = new FrilVaultNotesProvider(store, () => workspace.root, () => false);
+    const provider = new FrilVaultNotesProvider(
+      store,
+      () => cliClient.workspaceExplorer(workspace.root),
+      () => workspace.root,
+      () => false,
+    );
     const children = await provider.getChildren();
 
     assert.strictEqual(children.length, 1);
@@ -124,7 +129,11 @@ suite('Extension Test Suite', () => {
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
     await store.syncActiveEditor(vscode.window.activeTextEditor);
-    const provider = new FrilVaultNotesProvider(store, () => workspace.root);
+    const provider = new FrilVaultNotesProvider(
+      store,
+      () => cliClient.workspaceExplorer(workspace.root),
+      () => workspace.root,
+    );
     const firstChildren = await provider.getChildren();
 
     assert.strictEqual(firstChildren.length, 2);
@@ -161,7 +170,11 @@ suite('Extension Test Suite', () => {
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
     await store.syncActiveEditor(vscode.window.activeTextEditor);
-    const provider = new FrilVaultNotesProvider(store, () => workspace.root);
+    const provider = new FrilVaultNotesProvider(
+      store,
+      () => cliClient.workspaceExplorer(workspace.root),
+      () => workspace.root,
+    );
     const groups = await provider.getChildren();
 
     assert.strictEqual(groups.length, 4);
@@ -231,12 +244,64 @@ suite('Extension Test Suite', () => {
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
     await store.syncActiveEditor(vscode.window.activeTextEditor);
-    const provider = new FrilVaultNotesProvider(store, () => workspace.root);
+    const provider = new FrilVaultNotesProvider(
+      store,
+      () => cliClient.workspaceExplorer(workspace.root),
+      () => workspace.root,
+    );
     const children = await provider.getChildren();
 
     assert.strictEqual(children.length, 2);
     assert.strictEqual(children[0]?.label, path.join('src', 'sample.ts'));
-    assert.strictEqual(children[1]?.label, 'No FrilVault notes are attached to this file.');
+    assert.strictEqual(children[1]?.label, 'No notes are attached to this file.');
+  });
+
+  test('FrilVault Notes provider shows workspace note overview when no file is open', async () => {
+    const workspace = createTestWorkspace();
+    writeNotesState(workspace, [
+      createLineNoteView('src/sample.ts', 7, 2, 'first file note'),
+      createLineNoteView('src/deep/nested.ts', 3, 1, 'nested note'),
+      createLineNoteView('README.md', 1, 1, 'readme note'),
+    ]);
+
+    await configureExtension(workspace);
+
+    const cliClient = new CliClient(() => workspace.cliPath);
+    const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
+    store.clear();
+    let overviewLoadCount = 0;
+    const provider = new FrilVaultNotesProvider(
+      store,
+      () => {
+        overviewLoadCount += 1;
+        return cliClient.workspaceExplorer(workspace.root);
+      },
+      () => workspace.root,
+    );
+    let children = await provider.getChildren();
+
+    assert.strictEqual(children[0]?.label, 'Loading workspace notes...');
+
+    await flushMicrotasks();
+    children = await provider.getChildren();
+
+    assert.strictEqual(children[0]?.label, 'Workspace notes');
+    assert.strictEqual(children[1]?.label, 'src');
+    assert.strictEqual(children[1]?.description, '(2)');
+    assert.strictEqual(children[2]?.label, 'README.md');
+    assert.strictEqual(children[2]?.description, '(1)');
+    assert.strictEqual(overviewLoadCount, 1);
+
+    const srcChildren = await provider.getChildren(children[1]);
+    assert.strictEqual(srcChildren[0]?.label, 'deep');
+    assert.strictEqual(srcChildren[0]?.description, '(1)');
+    assert.strictEqual(srcChildren[1]?.label, 'sample.ts');
+    assert.strictEqual(srcChildren[1]?.description, '(1)');
+
+    await flushMicrotasks();
+    children = await provider.getChildren();
+    assert.strictEqual(children[0]?.label, 'Workspace notes');
+    assert.strictEqual(overviewLoadCount, 1);
   });
 
   test('Gitignore prompt reports inspection failures without throwing', async () => {
@@ -423,6 +488,77 @@ if (command === 'list') {
   process.exit(0);
 }
 
+if (command === 'index') {
+  const byFile = new Map();
+
+  for (const note of state.notes) {
+    const current = byFile.get(note.source_file) ?? 0;
+    byFile.set(note.source_file, current + 1);
+  }
+
+  process.stdout.write(JSON.stringify({
+    version: 1,
+    files: [...byFile.entries()].map(([source_file, note_count]) => ({
+      source_file,
+      note_count,
+      exists: true,
+    })),
+  }));
+  process.exit(0);
+}
+
+if (command === 'explorer') {
+  const files = new Map();
+
+  for (const note of state.notes) {
+    const current = files.get(note.source_file) ?? [];
+    current.push(note.note);
+    files.set(note.source_file, current);
+  }
+
+  const root = { type: 'Directory', name: '', path: '', children: [] };
+
+  for (const [sourceFile, notes] of [...files.entries()].sort((left, right) => left[0].localeCompare(right[0]))) {
+    const parts = sourceFile.split('/');
+    let cursor = root;
+
+    for (let index = 0; index < parts.length - 1; index += 1) {
+      const name = parts[index];
+      let directory = cursor.children.find((child) => child.type === 'Directory' && child.name === name);
+      if (!directory) {
+        directory = {
+          type: 'Directory',
+          name,
+          path: cursor.path ? cursor.path + '/' + name : name,
+          children: [],
+        };
+        cursor.children.push(directory);
+      }
+      cursor = directory;
+    }
+
+    const lineNotes = notes.filter((note) => note.anchor.type === 'Line');
+    const symbolNotes = notes.filter((note) => note.anchor.type === 'Symbol');
+    const groups = [];
+    if (lineNotes.length > 0) {
+      groups.push({ type: 'LineNotes', notes: lineNotes });
+    }
+    if (symbolNotes.length > 0) {
+      groups.push({ type: 'SymbolNotes', notes: symbolNotes });
+    }
+
+    cursor.children.push({
+      type: 'File',
+      source_file: sourceFile,
+      exists: true,
+      groups,
+    });
+  }
+
+  process.stdout.write(JSON.stringify({ root }));
+  process.exit(0);
+}
+
 if (command === 'add') {
   const file = valueOf('--file');
   const line = Number(valueOf('--line'));
@@ -567,6 +703,10 @@ async function configureExtension(workspace: TestWorkspace): Promise<void> {
   await vscode.workspace
     .getConfiguration('frilvault')
     .update('cliPath', workspace.cliPath, vscode.ConfigurationTarget.Global);
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 async function openFile(filePath: string): Promise<vscode.TextEditor> {

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 
 import type { CliClient } from '../../core/cliClient';
+import type { IndexedFile } from '../../types';
 import { normalizeWorkspaceRelativePath } from '../../utils/file';
 
 export function isExplorerNoteCountsEnabled(): boolean {
@@ -19,6 +20,8 @@ export class WorkspaceNoteCountStore implements vscode.Disposable {
   private fileCounts = new Map<string, number>();
 
   private folderCounts = new Map<string, number>();
+
+  private hasLoaded = false;
 
   private readonly onDidChangeEmitter = new vscode.EventEmitter<
     vscode.Uri[] | undefined
@@ -39,6 +42,20 @@ export class WorkspaceNoteCountStore implements vscode.Disposable {
     return this.folderCounts.get(relativePath);
   }
 
+  public listIndexedFiles(): IndexedFile[] {
+    return [...this.fileCounts.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([source_file, note_count]) => ({
+        source_file,
+        note_count,
+        exists: true,
+      }));
+  }
+
+  public isLoaded(): boolean {
+    return this.hasLoaded;
+  }
+
   public async reload(): Promise<void> {
     const index = await this.cliClient.workspaceIndex(this.getWorkspaceRoot());
 
@@ -52,6 +69,7 @@ export class WorkspaceNoteCountStore implements vscode.Disposable {
       this.fileCounts.set(normalizeWorkspaceRelativePath(file.source_file), file.note_count);
     }
 
+    this.hasLoaded = true;
     this.rebuildFolderCounts();
     this.onDidChangeEmitter.fire(undefined);
   }
@@ -59,6 +77,7 @@ export class WorkspaceNoteCountStore implements vscode.Disposable {
   public clear(): void {
     this.fileCounts.clear();
     this.folderCounts.clear();
+    this.hasLoaded = false;
     this.onDidChangeEmitter.fire(undefined);
   }
 

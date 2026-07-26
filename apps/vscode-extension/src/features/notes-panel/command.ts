@@ -40,7 +40,7 @@ export function createShowNotesForCurrentFileCommand(
       const snapshot = dependencies.store.getSnapshot();
 
       if (snapshot.error) {
-        await showErrorMessage(`FrilVault: ${snapshot.error}`);
+        await showErrorMessage(snapshot.error);
         return;
       }
 
@@ -51,11 +51,11 @@ export function createShowNotesForCurrentFileCommand(
 
       if (snapshot.notes.length === 0) {
         const choice = await showInformationMessage(
-          'No FrilVault notes are attached to this file.',
-          'Create Note Here',
+          'No notes are attached to this file.',
+          'Add',
         );
 
-        if (choice === 'Create Note Here') {
+        if (choice === 'Add') {
           await executeCommand(COMMAND_IDS.addNote);
         }
 
@@ -67,7 +67,7 @@ export function createShowNotesForCurrentFileCommand(
       const message =
         error instanceof Error ? error.message : 'Failed to show notes for the current file.';
 
-      await showErrorMessage(`FrilVault: ${message}`);
+      await showErrorMessage(message);
     }
   };
 }

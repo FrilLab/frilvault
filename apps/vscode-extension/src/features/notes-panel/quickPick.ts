@@ -45,7 +45,7 @@ export async function showCurrentFileNotesQuickPick(
   const items = buildQuickPickItems(snapshot.notes, sourceFile);
   const quickPick = (dependencies.createQuickPick ?? vscode.window.createQuickPick<NoteQuickPickItem>)();
 
-  quickPick.title = `FrilVault Notes — ${sourceFile}`;
+  quickPick.title = `Notes — ${sourceFile}`;
   quickPick.placeholder = 'Select a note to reveal its source location';
   quickPick.items = items;
 
@@ -141,7 +141,7 @@ export function buildQuickPickItems(notes: NoteView[], sourceFile: string): Note
 
   if (items.length === 0) {
     items.push({
-      label: `No FrilVault notes are attached to ${sourceFile}.`,
+      label: `No notes are attached to ${sourceFile}.`,
     });
   }
 
