@@ -24,6 +24,36 @@ export async function findSymbolAtPosition(
   return findInnermostSymbol(symbols, position);
 }
 
+/**
+ * Resolves a symbol anchor for note creation at a cursor position.
+ *
+ * Blank or whitespace-only lines prefer a line anchor even when the cursor is
+ * inside a symbol range. Non-blank lines inside a symbol still use a symbol
+ * anchor.
+ *
+ * 커서 위치에서 note 생성용 symbol anchor를 결정합니다.
+ *
+ * 공백/빈 줄은 symbol range 안이어도 line anchor를 사용하고, symbol 내부의
+ * 실제 코드 줄은 symbol anchor를 사용합니다.
+ */
+export async function findSymbolAnchorAtPosition(
+  document: vscode.TextDocument,
+  position: vscode.Position,
+): Promise<vscode.DocumentSymbol | undefined> {
+  if (isBlankLineAtPosition(document, position)) {
+    return undefined;
+  }
+
+  return findSymbolAtPosition(document, position);
+}
+
+export function isBlankLineAtPosition(
+  document: vscode.TextDocument,
+  position: vscode.Position,
+): boolean {
+  return document.lineAt(position.line).text.trim().length === 0;
+}
+
 function findInnermostSymbol(
   symbols: readonly vscode.DocumentSymbol[],
   position: vscode.Position,

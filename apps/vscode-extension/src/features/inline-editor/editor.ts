@@ -9,7 +9,7 @@ import {
   getWorkspaceRoot,
 } from '../../utils/file';
 import {
-  findSymbolAtPosition,
+  findSymbolAnchorAtPosition,
   mapDocumentSymbolKind,
   readSymbolSignature,
 } from '../../utils/symbols';
@@ -97,7 +97,7 @@ export class InlineNoteEditor {
     const line = position.line + 1;
     const column = position.character + 1;
 
-    const symbol = await findSymbolAtPosition(editor.document, position);
+    const symbol = await findSymbolAnchorAtPosition(editor.document, position);
     const draft = this.service.buildCreateDraftForEditor({
       workspaceRoot,
       sourceFile,
