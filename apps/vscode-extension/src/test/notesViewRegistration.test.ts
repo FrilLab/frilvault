@@ -12,6 +12,7 @@ import {
   notesViewFocusCommand,
 } from '../constants/ids';
 import { CurrentFileNotesStore } from '../features/current-file/store';
+import { WorkspaceNoteCountStore } from '../features/explorer-badges/store';
 import { FrilVaultNotesProvider } from '../features/notes-panel/provider';
 import {
   disposeNotesTreeDataProvider,
@@ -134,6 +135,10 @@ function createProvider(): FrilVaultNotesProvider {
     () => true,
     () => '/tmp/workspace',
   );
+  const noteCountStore = new WorkspaceNoteCountStore(
+    { workspaceIndex: async () => ({ version: 1, files: [] }) } as unknown as import('../core/cliClient').CliClient,
+    () => '/tmp/workspace',
+  );
 
-  return new FrilVaultNotesProvider(store, () => '/tmp/workspace', () => true);
+  return new FrilVaultNotesProvider(store, noteCountStore, () => '/tmp/workspace', () => true);
 }

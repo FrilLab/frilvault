@@ -1,16 +1,20 @@
 import * as vscode from 'vscode';
 
 import { COMMAND_IDS } from '../../constants/ids';
+import { WorkspaceNoteCountStore } from '../explorer-badges/store';
 import {
   CurrentFileNotesStore,
 } from '../current-file/store';
-import { groupNotesByAnchor } from './presentation';
+import { buildWorkspaceNoteTree, groupNotesByAnchor, type WorkspaceTreeNode } from './presentation';
 import {
   NotesAnchorGroupItem,
   NotesFileHeaderItem,
   NotesPanelItem,
   NotesStatusItem,
   NotesSymbolGroupItem,
+  NotesWorkspaceFileItem,
+  NotesWorkspaceFolderItem,
+  NotesWorkspaceOverviewItem,
 } from './view';
 
 type TreeNode =
@@ -18,7 +22,10 @@ type TreeNode =
   | NotesStatusItem
   | NotesSymbolGroupItem
   | NotesAnchorGroupItem
-  | NotesPanelItem;
+  | NotesPanelItem
+  | NotesWorkspaceOverviewItem
+  | NotesWorkspaceFolderItem
+  | NotesWorkspaceFileItem;
 
 export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode> {
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<void>();
@@ -27,6 +34,7 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
 
   public constructor(
     private readonly store: CurrentFileNotesStore,
+    private readonly noteCountStore: WorkspaceNoteCountStore,
     private readonly getWorkspaceRoot: () => string,
     private readonly isEnabled: () => boolean = () => true,
   ) {}
@@ -50,6 +58,14 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
       return element.notes.map((note) => new NotesPanelItem(note, this.getWorkspaceRoot()));
     }
 
+    if (element instanceof NotesWorkspaceOverviewItem) {
+      return this.workspaceOverviewChildren();
+    }
+
+    if (element instanceof NotesWorkspaceFolderItem) {
+      return element.children;
+    }
+
     if (element) {
       return [];
     }
@@ -63,9 +79,7 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
     }
 
     if (!snapshot.sourceFile) {
-      return [
-        new NotesStatusItem('Open a workspace file to view its notes.', 'info'),
-      ];
+      return this.workspaceOverviewRoot();
     }
 
     if (snapshot.notes.length === 0) {
@@ -95,5 +109,43 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
     }
 
     return children;
+  }
+
+  private workspaceOverviewRoot(): TreeNode[] {
+    const children = this.workspaceOverviewChildren();
+
+    if (children.length === 0) {
+      return [new NotesStatusItem('No FrilVault notes found in this workspace yet.', 'note')];
+    }
+
+    return [new NotesWorkspaceOverviewItem(), ...children];
+  }
+
+  private workspaceOverviewChildren(): Array<NotesWorkspaceFolderItem | NotesWorkspaceFileItem> {
+    let workspaceRoot: string;
+
+    try {
+      workspaceRoot = this.getWorkspaceRoot();
+    } catch {
+      return [];
+    }
+
+    return buildWorkspaceNoteTree(this.noteCountStore.listIndexedFiles())
+      .map((node) => this.toWorkspaceItem(node, workspaceRoot));
+  }
+
+  private toWorkspaceItem(
+    node: WorkspaceTreeNode,
+    workspaceRoot: string,
+  ): NotesWorkspaceFolderItem | NotesWorkspaceFileItem {
+    if (node.kind === 'file') {
+      return new NotesWorkspaceFileItem(workspaceRoot, node.path, node.noteCount);
+    }
+
+    return new NotesWorkspaceFolderItem(
+      node.path,
+      node.noteCount,
+      node.children.map((child) => this.toWorkspaceItem(child, workspaceRoot)),
+    );
   }
 }

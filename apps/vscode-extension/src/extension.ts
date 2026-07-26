@@ -87,7 +87,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const gutterRegistry = new GutterNoteRegistry();
   activeRegistry = gutterRegistry;
 
-  const notesProvider = new FrilVaultNotesProvider(store, getWorkspaceRoot, isEnabled);
+  const noteCountStore = new WorkspaceNoteCountStore(cliClient, getWorkspaceRoot);
+  activeNoteCountStore = noteCountStore;
+
+  const notesProvider = new FrilVaultNotesProvider(store, noteCountStore, getWorkspaceRoot, isEnabled);
   const decorator = new FrilVaultDecorator(
     context.extensionPath,
     store,
@@ -97,9 +100,6 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   activeDecorator = decorator;
   const hoverProvider = new FrilVaultHoverProvider(store, getWorkspaceRoot, isEnabled);
-
-  const noteCountStore = new WorkspaceNoteCountStore(cliClient, getWorkspaceRoot);
-  activeNoteCountStore = noteCountStore;
 
   const refreshNoteState = async (editor?: vscode.TextEditor) => {
     await store.syncActiveEditor(editor ?? vscode.window.activeTextEditor);
@@ -169,6 +169,7 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   store.onDidChange(onStoreChanged, undefined, context.subscriptions);
+  noteCountStore.onDidChange(onStoreChanged, undefined, context.subscriptions);
 
   const runWhenEnabled = <T extends unknown[]>(
     handler: (...args: T) => void | Promise<void>,

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 
 import type { CliClient } from '../../core/cliClient';
+import type { IndexedFile } from '../../types';
 import { normalizeWorkspaceRelativePath } from '../../utils/file';
 
 export function isExplorerNoteCountsEnabled(): boolean {
@@ -37,6 +38,16 @@ export class WorkspaceNoteCountStore implements vscode.Disposable {
 
   public getFolderCount(relativePath: string): number | undefined {
     return this.folderCounts.get(relativePath);
+  }
+
+  public listIndexedFiles(): IndexedFile[] {
+    return [...this.fileCounts.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([source_file, note_count]) => ({
+        source_file,
+        note_count,
+        exists: true,
+      }));
   }
 
   public async reload(): Promise<void> {

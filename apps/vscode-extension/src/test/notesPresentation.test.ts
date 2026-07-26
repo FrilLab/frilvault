@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { suite, test } from 'mocha';
 
 import { COMMAND_IDS } from '../constants/ids';
-import { groupNotesByAnchor } from '../features/notes-panel/presentation';
+import { buildWorkspaceNoteTree, groupNotesByAnchor } from '../features/notes-panel/presentation';
 import { buildQuickPickItems } from '../features/notes-panel/quickPick';
 import type { NoteView } from '../types';
 
@@ -50,6 +50,31 @@ suite('Notes presentation', () => {
       'Unresolved Anchors',
       'unresolved symbol',
     ]);
+  });
+
+  test('buildWorkspaceNoteTree nests folder counts beside file counts', () => {
+    const tree = buildWorkspaceNoteTree([
+      { source_file: 'src/parser.rs', note_count: 5 },
+      { source_file: 'src/main.rs', note_count: 2 },
+      { source_file: 'README.md', note_count: 1 },
+    ]);
+
+    assert.strictEqual(tree.length, 2);
+    assert.strictEqual(tree[0]?.kind, 'folder');
+    assert.strictEqual(tree[1]?.kind, 'file');
+    assert.strictEqual(tree[0]?.path, 'src');
+    assert.strictEqual(tree[0]?.noteCount, 7);
+
+    if (tree[0]?.kind !== 'folder') {
+      assert.fail('expected src folder node');
+    }
+
+    assert.deepStrictEqual(
+      tree[0].children.map((child) => `${child.kind}:${child.name}:${child.noteCount}`),
+      ['file:main.rs:2', 'file:parser.rs:5'],
+    );
+    assert.strictEqual(tree[1]?.path, 'README.md');
+    assert.strictEqual(tree[1]?.noteCount, 1);
   });
 
   test('package.json exposes the editor title action for current-file notes', () => {

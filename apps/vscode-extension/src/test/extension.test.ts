@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
 
 import { CliClient } from '../core/cliClient';
 import { CurrentFileNotesStore } from '../features/current-file/store';
+import { WorkspaceNoteCountStore } from '../features/explorer-badges/store';
 import { createAddNoteCommand } from '../features/inline-editor/command';
 import {
   GITIGNORE_PROMPT_DISABLED_KEY,
@@ -85,7 +86,13 @@ suite('Extension Test Suite', () => {
 
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => false, () => workspace.root);
-    const provider = new FrilVaultNotesProvider(store, () => workspace.root, () => false);
+    const noteCountStore = await createLoadedNoteCountStore(cliClient, workspace.root);
+    const provider = new FrilVaultNotesProvider(
+      store,
+      noteCountStore,
+      () => workspace.root,
+      () => false,
+    );
     const children = await provider.getChildren();
 
     assert.strictEqual(children.length, 1);
@@ -123,8 +130,9 @@ suite('Extension Test Suite', () => {
 
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
+    const noteCountStore = await createLoadedNoteCountStore(cliClient, workspace.root);
     await store.syncActiveEditor(vscode.window.activeTextEditor);
-    const provider = new FrilVaultNotesProvider(store, () => workspace.root);
+    const provider = new FrilVaultNotesProvider(store, noteCountStore, () => workspace.root);
     const firstChildren = await provider.getChildren();
 
     assert.strictEqual(firstChildren.length, 2);
@@ -160,8 +168,9 @@ suite('Extension Test Suite', () => {
 
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
+    const noteCountStore = await createLoadedNoteCountStore(cliClient, workspace.root);
     await store.syncActiveEditor(vscode.window.activeTextEditor);
-    const provider = new FrilVaultNotesProvider(store, () => workspace.root);
+    const provider = new FrilVaultNotesProvider(store, noteCountStore, () => workspace.root);
     const groups = await provider.getChildren();
 
     assert.strictEqual(groups.length, 4);
@@ -231,12 +240,43 @@ suite('Extension Test Suite', () => {
     const cliClient = new CliClient(() => workspace.cliPath);
     const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
     await store.syncActiveEditor(vscode.window.activeTextEditor);
-    const provider = new FrilVaultNotesProvider(store, () => workspace.root);
+    const noteCountStore = await createLoadedNoteCountStore(cliClient, workspace.root);
+    const provider = new FrilVaultNotesProvider(store, noteCountStore, () => workspace.root);
     const children = await provider.getChildren();
 
     assert.strictEqual(children.length, 2);
     assert.strictEqual(children[0]?.label, path.join('src', 'sample.ts'));
     assert.strictEqual(children[1]?.label, 'No FrilVault notes are attached to this file.');
+  });
+
+  test('FrilVault Notes provider shows workspace note overview when no file is open', async () => {
+    const workspace = createTestWorkspace();
+    writeNotesState(workspace, [
+      createLineNoteView('src/sample.ts', 7, 2, 'first file note'),
+      createLineNoteView('src/deep/nested.ts', 3, 1, 'nested note'),
+      createLineNoteView('README.md', 1, 1, 'readme note'),
+    ]);
+
+    await configureExtension(workspace);
+
+    const cliClient = new CliClient(() => workspace.cliPath);
+    const store = new CurrentFileNotesStore(cliClient, () => true, () => workspace.root);
+    store.clear();
+    const noteCountStore = await createLoadedNoteCountStore(cliClient, workspace.root);
+    const provider = new FrilVaultNotesProvider(store, noteCountStore, () => workspace.root);
+    const children = await provider.getChildren();
+
+    assert.strictEqual(children[0]?.label, 'Workspace notes');
+    assert.strictEqual(children[1]?.label, 'src');
+    assert.strictEqual(children[1]?.description, '(2)');
+    assert.strictEqual(children[2]?.label, 'README.md');
+    assert.strictEqual(children[2]?.description, '(1)');
+
+    const srcChildren = await provider.getChildren(children[1]);
+    assert.strictEqual(srcChildren[0]?.label, 'deep');
+    assert.strictEqual(srcChildren[0]?.description, '(1)');
+    assert.strictEqual(srcChildren[1]?.label, 'sample.ts');
+    assert.strictEqual(srcChildren[1]?.description, '(1)');
   });
 
   test('Gitignore prompt reports inspection failures without throwing', async () => {
@@ -558,6 +598,15 @@ function createSymbolNoteView(
 
 function writeNotesState(workspace: TestWorkspace, notes: NoteView[]): void {
   fs.writeFileSync(workspace.stateFile, JSON.stringify({ notes }, null, 2));
+}
+
+async function createLoadedNoteCountStore(
+  cliClient: CliClient,
+  workspaceRoot: string,
+): Promise<WorkspaceNoteCountStore> {
+  const store = new WorkspaceNoteCountStore(cliClient, () => workspaceRoot);
+  await store.reload();
+  return store;
 }
 
 async function configureExtension(workspace: TestWorkspace): Promise<void> {
