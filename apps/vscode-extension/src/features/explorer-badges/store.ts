@@ -21,6 +21,8 @@ export class WorkspaceNoteCountStore implements vscode.Disposable {
 
   private folderCounts = new Map<string, number>();
 
+  private hasLoaded = false;
+
   private readonly onDidChangeEmitter = new vscode.EventEmitter<
     vscode.Uri[] | undefined
   >();
@@ -50,6 +52,10 @@ export class WorkspaceNoteCountStore implements vscode.Disposable {
       }));
   }
 
+  public isLoaded(): boolean {
+    return this.hasLoaded;
+  }
+
   public async reload(): Promise<void> {
     const index = await this.cliClient.workspaceIndex(this.getWorkspaceRoot());
 
@@ -63,6 +69,7 @@ export class WorkspaceNoteCountStore implements vscode.Disposable {
       this.fileCounts.set(normalizeWorkspaceRelativePath(file.source_file), file.note_count);
     }
 
+    this.hasLoaded = true;
     this.rebuildFolderCounts();
     this.onDidChangeEmitter.fire(undefined);
   }
@@ -70,6 +77,7 @@ export class WorkspaceNoteCountStore implements vscode.Disposable {
   public clear(): void {
     this.fileCounts.clear();
     this.folderCounts.clear();
+    this.hasLoaded = false;
     this.onDidChangeEmitter.fire(undefined);
   }
 

@@ -29,6 +29,8 @@ type TreeNode =
 
 export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode> {
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<void>();
+  private workspaceOverviewLoad: Promise<void> | undefined;
+  private workspaceOverviewError: string | undefined;
 
   public readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 
@@ -112,7 +114,16 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
   }
 
   private workspaceOverviewRoot(): TreeNode[] {
-    const children = this.workspaceOverviewChildren();
+    if (!this.noteCountStore.isLoaded()) {
+      void this.ensureWorkspaceOverviewLoaded();
+      return [new NotesStatusItem('Loading workspace notes...', 'loading~spin')];
+    }
+
+    if (this.workspaceOverviewError) {
+      return [new NotesStatusItem(this.workspaceOverviewError, 'error')];
+    }
+
+    const children = this.workspaceOverviewChildrenSync();
 
     if (children.length === 0) {
       return [new NotesStatusItem('No FrilVault notes found in this workspace yet.', 'note')];
@@ -122,6 +133,11 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
   }
 
   private workspaceOverviewChildren(): Array<NotesWorkspaceFolderItem | NotesWorkspaceFileItem> {
+    void this.ensureWorkspaceOverviewLoaded();
+    return this.workspaceOverviewChildrenSync();
+  }
+
+  private workspaceOverviewChildrenSync(): Array<NotesWorkspaceFolderItem | NotesWorkspaceFileItem> {
     let workspaceRoot: string;
 
     try {
@@ -132,6 +148,32 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
 
     return buildWorkspaceNoteTree(this.noteCountStore.listIndexedFiles())
       .map((node) => this.toWorkspaceItem(node, workspaceRoot));
+  }
+
+  private async ensureWorkspaceOverviewLoaded(): Promise<void> {
+    if (this.noteCountStore.isLoaded()) {
+      return;
+    }
+
+    if (!this.workspaceOverviewLoad) {
+      this.workspaceOverviewLoad = this.noteCountStore
+        .reload()
+        .then(() => {
+          this.workspaceOverviewError = undefined;
+        })
+        .catch((error: unknown) => {
+          this.workspaceOverviewError =
+            error instanceof Error
+              ? error.message
+              : 'Failed to load workspace note overview.';
+        })
+        .finally(() => {
+          this.workspaceOverviewLoad = undefined;
+          this.refresh();
+        });
+    }
+
+    await this.workspaceOverviewLoad;
   }
 
   private toWorkspaceItem(

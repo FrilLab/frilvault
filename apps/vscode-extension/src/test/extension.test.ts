@@ -463,6 +463,25 @@ if (command === 'list') {
   process.exit(0);
 }
 
+if (command === 'index') {
+  const byFile = new Map();
+
+  for (const note of state.notes) {
+    const current = byFile.get(note.source_file) ?? 0;
+    byFile.set(note.source_file, current + 1);
+  }
+
+  process.stdout.write(JSON.stringify({
+    version: 1,
+    files: [...byFile.entries()].map(([source_file, note_count]) => ({
+      source_file,
+      note_count,
+      exists: true,
+    })),
+  }));
+  process.exit(0);
+}
+
 if (command === 'add') {
   const file = valueOf('--file');
   const line = Number(valueOf('--line'));
