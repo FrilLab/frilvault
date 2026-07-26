@@ -359,6 +359,7 @@ export class CliClient {
       configuredCliPath,
       extensionPath: this.dependencies.extensionPath,
       platform: this.dependencies.platform,
+      arch: this.dependencies.arch,
       existsSync: this.dependencies.existsSync,
     });
   }

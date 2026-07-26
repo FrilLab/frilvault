@@ -130,7 +130,6 @@ function createQuickPickDependencies(): {
 }
 
 function createMockQuickPick(items: NoteQuickPickItem[]): vscode.QuickPick<NoteQuickPickItem> {
-  const acceptHandlers: Array<() => void | Promise<void>> = [];
   const hideHandlers: Array<() => void> = [];
 
   return {
@@ -138,17 +137,13 @@ function createMockQuickPick(items: NoteQuickPickItem[]): vscode.QuickPick<NoteQ
     placeholder: '',
     items,
     selectedItems: items.filter((item) => item.note).slice(0, 1),
-    onDidAccept: (handler: () => void | Promise<void>) => {
-      acceptHandlers.push(handler);
-      return { dispose: () => undefined };
-    },
+    onDidAccept: () => ({ dispose: () => undefined }),
     onDidTriggerItemButton: () => ({ dispose: () => undefined }),
     onDidHide: (handler: () => void) => {
       hideHandlers.push(handler);
       return { dispose: () => undefined };
     },
     show: () => {
-      void acceptHandlers[0]?.();
       hideHandlers[0]?.();
     },
     hide: () => hideHandlers[0]?.(),

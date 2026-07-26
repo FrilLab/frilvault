@@ -5,9 +5,12 @@ import * as path from 'node:path';
 import { suite, test } from 'mocha';
 
 import { COMMAND_IDS } from '../constants/ids';
-import { buildWorkspaceNoteTree, groupNotesByAnchor } from '../features/notes-panel/presentation';
+import {
+  buildWorkspaceNoteTreeFromExplorer,
+  groupNotesByAnchor,
+} from '../features/notes-panel/presentation';
 import { buildQuickPickItems } from '../features/notes-panel/quickPick';
-import type { NoteView } from '../types';
+import type { NoteView, WorkspaceExplorerNode } from '../types';
 
 suite('Notes presentation', () => {
   test('groups notes by symbol name, line anchor, and unresolved symbol anchors', () => {
@@ -52,12 +55,24 @@ suite('Notes presentation', () => {
     ]);
   });
 
-  test('buildWorkspaceNoteTree nests folder counts beside file counts', () => {
-    const tree = buildWorkspaceNoteTree([
-      { source_file: 'src/parser.rs', note_count: 5 },
-      { source_file: 'src/main.rs', note_count: 2 },
-      { source_file: 'README.md', note_count: 1 },
-    ]);
+  test('buildWorkspaceNoteTreeFromExplorer aggregates nested note counts', () => {
+    const tree = buildWorkspaceNoteTreeFromExplorer({
+      type: 'Directory',
+      name: '',
+      path: '',
+      children: [
+        {
+          type: 'Directory',
+          name: 'src',
+          path: 'src',
+          children: [
+            createExplorerFile('src/parser.rs', 5),
+            createExplorerFile('src/main.rs', 2),
+          ],
+        },
+        createExplorerFile('README.md', 1),
+      ],
+    });
 
     assert.strictEqual(tree.length, 2);
     assert.strictEqual(tree[0]?.kind, 'folder');
@@ -75,6 +90,32 @@ suite('Notes presentation', () => {
     );
     assert.strictEqual(tree[1]?.path, 'README.md');
     assert.strictEqual(tree[1]?.noteCount, 1);
+  });
+
+  test('buildWorkspaceNoteTreeFromExplorer omits empty files and directories', () => {
+    const tree = buildWorkspaceNoteTreeFromExplorer({
+      type: 'Directory',
+      name: '',
+      path: '',
+      children: [
+        {
+          type: 'Directory',
+          name: 'empty',
+          path: 'empty',
+          children: [createExplorerFile('empty/file.ts', 0)],
+        },
+        createExplorerFile('src/noted.ts', 1),
+      ],
+    });
+
+    assert.deepStrictEqual(
+      tree.map((node) => `${node.kind}:${node.path}:${node.noteCount}`),
+      ['file:src/noted.ts:1'],
+    );
+    assert.deepStrictEqual(
+      buildWorkspaceNoteTreeFromExplorer(createExplorerFile('README.md', 1)),
+      [],
+    );
   });
 
   test('package.json exposes the editor title action for current-file notes', () => {
@@ -104,6 +145,19 @@ suite('Notes presentation', () => {
     );
   });
 });
+
+function createExplorerFile(sourceFile: string, noteCount: number): WorkspaceExplorerNode {
+  return {
+    type: 'File',
+    source_file: sourceFile,
+    exists: true,
+    groups: noteCount > 0
+      ? [{ type: 'LineNotes', notes: Array.from({ length: noteCount }, (_, index) => ({
+          id: `${sourceFile}-${index}`,
+        })) }]
+      : [],
+  };
+}
 
 function createLineNoteView(
   sourceFile: string,

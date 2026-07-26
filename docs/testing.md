@@ -121,7 +121,9 @@ Current repository reality:
 
 - `apps/vscode-extension/package.json` exposes `check-types`, not `typecheck`.
 - `npm run compile` is the normal local validation path for the extension bundle.
-- `npm test` currently runs `vscode-test` and may abort with `SIGABRT` after reusing a cached Electron host. Treat that as an unresolved validation problem until the failure is either fixed or proven to be an external environment limitation with a documented workaround.
+- `npm run test:coverage` runs the extension test suite with V8 coverage and writes LCOV output to `apps/vscode-extension/coverage/lcov.info`.
+- Linux CI runs extension tests under `xvfb-run` because the VS Code Electron host requires a display.
+- `npm test` runs `vscode-test`. In restricted macOS sandboxes the Electron host may abort with `SIGABRT`; rerun outside the sandbox before treating it as a code failure.
 
 ## Desktop Application
 
