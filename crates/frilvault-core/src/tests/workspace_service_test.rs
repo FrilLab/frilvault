@@ -21,7 +21,10 @@ fn index_returns_file_counts_for_indexed_files() {
     note_service
         .add_note(AddNoteRequest {
             source_file: "src/main.rs".into(),
-            anchor: NoteAnchor::Line(LineAnchor { line: 10, column: 5 }),
+            anchor: NoteAnchor::Line(LineAnchor {
+                line: 10,
+                column: 5,
+            }),
             content: "index note".to_string(),
             tags: None,
         })

@@ -9,9 +9,8 @@ use clap::Parser;
 use frilvault_core::{AddNoteRequest, FrilVault, LineAnchor, NoteAnchor};
 
 use crate::{
-    cli::{format::FormatArg, index::IndexCommand, Cli},
-    command,
-    run,
+    cli::{Cli, format::FormatArg, index::IndexCommand},
+    command, run,
 };
 
 static WORKING_DIRECTORY_LOCK: Mutex<()> = Mutex::new(());
@@ -36,8 +35,7 @@ impl WorkingDirectoryGuard {
 
 impl Drop for WorkingDirectoryGuard {
     fn drop(&mut self) {
-        std::env::set_current_dir(&self.previous)
-            .expect("restore previous working directory");
+        std::env::set_current_dir(&self.previous).expect("restore previous working directory");
     }
 }
 
@@ -55,14 +53,19 @@ fn create_index_fixture() -> PathBuf {
     note_service
         .add_note(AddNoteRequest {
             source_file: "src/main.rs".into(),
-            anchor: NoteAnchor::Line(LineAnchor { line: 10, column: 5 }),
+            anchor: NoteAnchor::Line(LineAnchor {
+                line: 10,
+                column: 5,
+            }),
             content: "index command note".to_string(),
             tags: None,
         })
         .expect("add note");
 
     let mut workspace_service = vault.workspace().expect("create workspace service");
-    workspace_service.warm_up().expect("warm up workspace index");
+    workspace_service
+        .warm_up()
+        .expect("warm up workspace index");
 
     workspace
 }
