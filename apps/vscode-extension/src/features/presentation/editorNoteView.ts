@@ -129,15 +129,6 @@ export {
   truncateInlineContent,
 } from './inlinePreview';
 
-export {
-  getInlineLineNotesMaxLength,
-  getInlineNotesMaxLength,
-  isInlineLineNotesEnabled,
-  isInlineNotesEnabled,
-  showInlineLineNotes,
-  showInlineSymbolNotes,
-} from './inlinePreviewSettings';
-
 function resolveNoteAnchor(note: NoteView): ResolvedNoteAnchor {
   if (note.note.anchor.type === 'Line') {
     const line = note.note.anchor.line ?? 1;

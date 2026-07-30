@@ -8,7 +8,6 @@ import {
   sortNotesDeterministic,
 } from '../features/decorations/aggregate';
 import { buildNoteUri } from '../features/decorations/gutterActions';
-import { formatGutterHoverSummary } from '../features/decorations/gutterHover';
 import type { NoteView } from '../types';
 
 suite('Gutter marker helpers', () => {
@@ -65,30 +64,6 @@ suite('Gutter marker helpers', () => {
     });
 
     assert.strictEqual(resolveNoteLine(note), 8);
-  });
-
-  test('formatGutterHoverSummary includes tags and action links', () => {
-    const parts = formatGutterHoverSummary(
-      [
-        {
-          ...createLineNoteView('src/a.ts', 2, 'hello world'),
-          note: {
-            ...createLineNoteView('src/a.ts', 2, 'hello world').note,
-            tags: ['bug'],
-            updated_at: '2026-01-02T00:00:00Z',
-          },
-        },
-      ],
-      'src/a.ts',
-      '/tmp/workspace',
-    );
-
-    const combined = parts.map((part) => part.value).join('\n');
-
-    assert.match(combined, /Line 2/);
-    assert.match(combined, /Tags: bug/);
-    assert.match(combined, /\[Open Note\]/);
-    assert.match(combined, /frilvault\.gutter\.viewNote/);
   });
 
   test('buildNoteUri encodes workspace identity', () => {

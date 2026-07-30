@@ -2,12 +2,8 @@ import * as vscode from 'vscode';
 
 import type { NoteView } from '../../types';
 import {
-  formatInlineNotesPreview,
-  getInlineNotesMaxLength,
   resolveNoteLine,
   resolveNoteRange,
-  showInlineLineNotes,
-  showInlineSymbolNotes,
 } from '../presentation/editorNoteView';
 import { aggregateNotesByLine } from './aggregate';
 import { createSymbolNoteDecorationType } from './gutter';
@@ -18,11 +14,18 @@ import {
   type GutterMarkerStyle,
 } from './markerStyle';
 import type { GutterNoteRegistry } from './registry';
+import {
+  getNoteViewerMaxPreviewLines,
+  getNoteViewerDefaultState,
+  isNoteViewerEnabled,
+} from '../note-viewer/config';
+import { buildNoteViewerModel } from '../note-viewer/model';
+import type { NoteViewerState } from '../note-viewer/state';
 
 export class FrilVaultDecorator implements vscode.Disposable {
   private gutterDecorationType: vscode.TextEditorDecorationType;
 
-  private inlinePreviewDecorationType: vscode.TextEditorDecorationType;
+  private noteViewerDecorationType: vscode.TextEditorDecorationType;
 
   private symbolDecorationType: vscode.TextEditorDecorationType;
 
@@ -39,23 +42,22 @@ export class FrilVaultDecorator implements vscode.Disposable {
     private readonly store: import('../current-file/store').CurrentFileNotesStore,
     private readonly registry: GutterNoteRegistry,
     private readonly getWorkspaceRoot: () => string,
+    private readonly noteViewerState: NoteViewerState,
     private readonly isEnabled: () => boolean = () => true,
   ) {
     this.markerStyle = getConfiguredMarkerStyle();
     this.gutterDecorationType = createMarkerDecorationType(this.extensionPath, this.markerStyle);
-    this.inlinePreviewDecorationType = vscode.window.createTextEditorDecorationType({
-      after: {
-        margin: '0 0 0 1em',
+    this.noteViewerDecorationType = vscode.window.createTextEditorDecorationType({
+      before: {
         color: new vscode.ThemeColor('editorCodeLens.foreground'),
-        fontStyle: 'italic',
+        margin: '0 0 0 0',
       },
     });
     this.symbolDecorationType = createSymbolNoteDecorationType(this.extensionPath);
     this.configListener = vscode.workspace.onDidChangeConfiguration((event) => {
       if (
         !event.affectsConfiguration('frilvault.gutterMarkerStyle') &&
-        !event.affectsConfiguration('frilvault.inlineNotes') &&
-        !event.affectsConfiguration('frilvault.inlineLineNotes')
+        !event.affectsConfiguration('frilvault.noteViewer')
       ) {
         return;
       }
@@ -102,14 +104,14 @@ export class FrilVaultDecorator implements vscode.Disposable {
 
   public clear(editor = vscode.window.activeTextEditor): void {
     editor?.setDecorations(this.gutterDecorationType, []);
-    editor?.setDecorations(this.inlinePreviewDecorationType, []);
+    editor?.setDecorations(this.noteViewerDecorationType, []);
     editor?.setDecorations(this.symbolDecorationType, []);
   }
 
   public dispose(): void {
     this.configListener.dispose();
     this.gutterDecorationType.dispose();
-    this.inlinePreviewDecorationType.dispose();
+    this.noteViewerDecorationType.dispose();
     this.symbolDecorationType.dispose();
   }
 
@@ -135,10 +137,7 @@ export class FrilVaultDecorator implements vscode.Disposable {
 
     this.registry.set(editor.document.uri.toString(), lineNotes);
     editor.setDecorations(this.gutterDecorationType, gutterDecorations);
-    editor.setDecorations(
-      this.inlinePreviewDecorationType,
-      this.buildInlinePreviewDecorations(editor, notes),
-    );
+    editor.setDecorations(this.noteViewerDecorationType, this.buildNoteViewerDecorations(editor, notes));
     editor.setDecorations(
       this.symbolDecorationType,
       this.buildSymbolGutterDecorations(editor, notes),
@@ -147,47 +146,34 @@ export class FrilVaultDecorator implements vscode.Disposable {
     this.pendingEditorUri = undefined;
   }
 
-  private buildInlinePreviewDecorations(
+  private buildNoteViewerDecorations(
     editor: vscode.TextEditor,
     notes: NoteView[],
   ): vscode.DecorationOptions[] {
-    const maxLength = getInlineNotesMaxLength();
-    const byLine = new Map<number, NoteView[]>();
-
-    for (const note of notes) {
-      const isLineNote = note.note.anchor.type === 'Line' && showInlineLineNotes();
-      const isSymbolNote =
-        note.note.anchor.type === 'Symbol' && note.resolved && showInlineSymbolNotes();
-
-      if (!isLineNote && !isSymbolNote) {
-        continue;
-      }
-
-      const lineNumber = resolveNoteLine(note);
-
-      if (lineNumber === undefined) {
-        continue;
-      }
-
-      const zeroBasedLine = lineNumber - 1;
-
-      if (zeroBasedLine < 0 || zeroBasedLine >= editor.document.lineCount) {
-        continue;
-      }
-
-      const group = byLine.get(zeroBasedLine) ?? [];
-      group.push(note);
-      byLine.set(zeroBasedLine, group);
+    if (!isNoteViewerEnabled()) {
+      return [];
     }
 
-    return [...byLine.entries()].map(([line, groupedNotes]) => ({
-      range: new vscode.Range(line, Number.MAX_SAFE_INTEGER, line, Number.MAX_SAFE_INTEGER),
+    const documentUri = editor.document.uri.toString();
+    const defaultState = getNoteViewerDefaultState();
+    const blocks = buildNoteViewerModel(notes, editor.document.lineCount, {
+      defaultExpanded: defaultState === 'expanded',
+      isExpanded: (groupId) => this.noteViewerState.isExpanded(documentUri, groupId, defaultState),
+      maxPreviewLines: getNoteViewerMaxPreviewLines(),
+    });
+
+    return blocks.map((block) => ({
+      range: lineDecorationRange(editor.document, block.group.line),
+      hoverMessage: buildBlockHoverMessage(
+        block.group.line,
+        block.group.notes[0]?.source_file ?? '',
+      ),
       renderOptions: {
-        after: {
-          contentText: formatInlineNotesPreview(groupedNotes, maxLength),
-          color: new vscode.ThemeColor('editorInfo.foreground'),
-          fontStyle: 'italic',
-          textDecoration: 'none',
+        before: {
+          contentText: `${block.expanded ? block.expandedText : block.collapsedText}\n`,
+          color: new vscode.ThemeColor(
+            block.expanded ? 'editorCodeLens.foreground' : 'editorInfo.foreground',
+          ),
         },
       },
     }));
@@ -221,4 +207,25 @@ export class FrilVaultDecorator implements vscode.Disposable {
     this.markerStyle = getConfiguredMarkerStyle();
     this.gutterDecorationType = createMarkerDecorationType(this.extensionPath, this.markerStyle);
   }
+}
+
+function buildBlockHoverMessage(line: number, sourceFile: string): vscode.MarkdownString {
+  const commandArgs = encodeURIComponent(JSON.stringify([line, sourceFile]));
+  const markdown = new vscode.MarkdownString(
+    `[Note Actions](command:frilvault.gutter.showActions?${commandArgs})`,
+  );
+  markdown.isTrusted = {
+    enabledCommands: ['frilvault.gutter.showActions'],
+  };
+  return markdown;
+}
+
+function lineDecorationRange(document: vscode.TextDocument, line: number): vscode.Range {
+  const lineText = document.lineAt(line);
+
+  if (lineText.text.length > 0) {
+    return new vscode.Range(line, 0, line, 1);
+  }
+
+  return lineText.rangeIncludingLineBreak;
 }

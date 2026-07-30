@@ -2,6 +2,22 @@
 
 All notable changes to the FrilVault VS Code extension are documented here.
 
+## Unreleased
+
+### Added
+
+- Block-style editor note viewers that render multi-line note content above resolved line and symbol anchors
+- Viewer settings for enabling the note viewer, choosing the default collapse state, and limiting collapsed preview lines
+
+### Changed
+
+- Replace the legacy inline after-line note preview with a single block-style editor viewer
+- Keep note actions behind hover-driven menus while reusing the existing edit, delete, open, and copy flows
+
+### Removed
+
+- Legacy inline preview settings and the duplicate editor hover-provider registration path
+
 ## 0.0.3 - 2026-07-27
 
 ### Added

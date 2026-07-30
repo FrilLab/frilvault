@@ -25,9 +25,9 @@ import { FrilVaultDecorator } from './features/decorations/decorator';
 import { GutterNoteActions } from './features/decorations/gutterActions';
 import { registerGutterCommands } from './features/decorations/gutterCommands';
 import { GutterNoteRegistry } from './features/decorations/registry';
-import { FrilVaultHoverProvider } from './features/hover/hoverProvider';
-import { registerFrilVaultHoverProvider } from './features/hover/register';
-import { registerInlineNoteCodeLensProvider } from './features/inline-editor/codelens';
+import { registerNoteViewerCodeLensProvider } from './features/note-viewer/codelens';
+import { getNoteViewerDefaultState } from './features/note-viewer/config';
+import { NoteViewerState } from './features/note-viewer/state';
 import {
   createAddNoteCommand,
   createEditNoteCommand,
@@ -49,6 +49,7 @@ let activeDecorator: FrilVaultDecorator | undefined;
 let activeNoteCountStore: WorkspaceNoteCountStore | undefined;
 let activeStore: CurrentFileNotesStore | undefined;
 let activeRegistry: GutterNoteRegistry | undefined;
+let activeNoteViewerState: NoteViewerState | undefined;
 const codeLensRefreshEmitter = new vscode.EventEmitter<void>();
 
 /**
@@ -86,6 +87,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const gutterRegistry = new GutterNoteRegistry();
   activeRegistry = gutterRegistry;
+  const noteViewerState = new NoteViewerState();
+  activeNoteViewerState = noteViewerState;
 
   const noteCountStore = new WorkspaceNoteCountStore(cliClient, getWorkspaceRoot);
   activeNoteCountStore = noteCountStore;
@@ -101,10 +104,10 @@ export function activate(context: vscode.ExtensionContext): void {
     store,
     gutterRegistry,
     getWorkspaceRoot,
+    noteViewerState,
     isEnabled,
   );
   activeDecorator = decorator;
-  const hoverProvider = new FrilVaultHoverProvider(store, getWorkspaceRoot, isEnabled);
 
   const refreshNoteState = async (editor?: vscode.TextEditor) => {
     await store.syncActiveEditor(editor ?? vscode.window.activeTextEditor);
@@ -157,6 +160,7 @@ export function activate(context: vscode.ExtensionContext): void {
     store.clear();
     noteCountStore.clear();
     gutterRegistry.clear();
+    noteViewerState.retainVisibleEditors([]);
     decorator.clear();
     notesProvider.refresh();
   };
@@ -171,6 +175,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
   store.onDidChange(onStoreChanged, undefined, context.subscriptions);
   noteCountStore.onDidChange(onStoreChanged, undefined, context.subscriptions);
+  noteViewerState.onDidChange(() => {
+    void decorator.refresh();
+    codeLensRefreshEmitter.fire();
+  }, undefined, context.subscriptions);
 
   const runWhenEnabled = <T extends unknown[]>(
     handler: (...args: T) => void | Promise<void>,
@@ -191,8 +199,8 @@ export function activate(context: vscode.ExtensionContext): void {
     cliOutputChannel,
     store,
     noteCountStore,
+    noteViewerState,
     decorator,
-    registerFrilVaultHoverProvider(context, hoverProvider),
     vscode.commands.registerCommand(COMMAND_IDS.notesPanelOpenNote, async (noteView: NoteView) => {
       if (!isEnabled()) {
         return;
@@ -273,8 +281,17 @@ export function activate(context: vscode.ExtensionContext): void {
         await refreshAfterMutation();
       }),
     ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.noteViewerToggle,
+      async (documentUri: string, groupId: string) => {
+        noteViewerState.toggle(documentUri, groupId, getNoteViewerDefaultState());
+      },
+    ),
     vscode.window.onDidChangeActiveTextEditor(async (editor) => {
       await refreshAfterMutation(editor);
+    }),
+    vscode.window.onDidChangeVisibleTextEditors((editors) => {
+      noteViewerState.retainVisibleEditors(editors);
     }),
     vscode.workspace.onDidSaveTextDocument(async () => {
       await refreshAfterMutation();
@@ -287,11 +304,12 @@ export function activate(context: vscode.ExtensionContext): void {
   registerWorkspaceWatcher(context, cliClient, isEnabled, refreshAfterMutation);
   registerNoteUriHandler(context, { cliClient, isEnabled });
   registerExplorerNoteCountDecorations(context, noteCountStore, getWorkspaceRoot, isEnabled);
-  registerInlineNoteCodeLensProvider(
+  registerNoteViewerCodeLensProvider(
     context,
     store,
     getWorkspaceRoot,
     isEnabled,
+    noteViewerState,
     codeLensRefreshEmitter.event,
   );
 
@@ -320,8 +338,10 @@ export function deactivate(): void {
   activeStore?.clear();
   activeNoteCountStore?.clear();
   activeRegistry?.clear();
+  activeNoteViewerState?.dispose();
   activeDecorator = undefined;
   activeStore = undefined;
   activeNoteCountStore = undefined;
   activeRegistry = undefined;
+  activeNoteViewerState = undefined;
 }
