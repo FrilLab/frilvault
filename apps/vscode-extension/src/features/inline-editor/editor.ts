@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 import type { CliClient } from '../../core/cliClient';
-import { getInlineNotesDebounceMs } from '../presentation/inlinePreviewSettings';
+import { getInlineNotesDebounceMs } from './config';
 import type { NoteView } from '../../types';
 import {
   getActiveEditorOrThrow,
