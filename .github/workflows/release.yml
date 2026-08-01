@@ -26,12 +26,12 @@ jobs:
 
     steps:
       - name: Check out release tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -86,7 +86,7 @@ jobs:
 
     steps:
       - name: Check out release tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
 
@@ -101,7 +101,7 @@ jobs:
           toolchain: stable
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -166,7 +166,7 @@ jobs:
             --out "frilvault-${{ needs.verify-release.outputs.extension_version }}-${{ matrix.target }}.vsix"
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: vsix-${{ matrix.target }}
           path: apps/vscode-extension/frilvault-${{ needs.verify-release.outputs.extension_version }}-${{ matrix.target }}.vsix
@@ -183,7 +183,7 @@ jobs:
 
     steps:
       - name: Download VSIX artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           pattern: vsix-*
           path: dist/release
