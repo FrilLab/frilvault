@@ -524,7 +524,7 @@ impl NoteService {
             })
             .collect();
 
-        summaries.sort_by(|a, b| a.tag.to_lowercase().cmp(&b.tag.to_lowercase()));
+        summaries.sort_by_key(|a| a.tag.to_lowercase());
         Ok(summaries)
     }
 
