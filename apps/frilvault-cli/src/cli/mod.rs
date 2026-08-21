@@ -18,6 +18,7 @@ pub mod resolve_uri;
 pub mod search;
 pub mod stats;
 pub mod sync;
+pub mod tag;
 pub mod update;
 
 use add::AddCommand;
@@ -33,6 +34,7 @@ use resolve_uri::ResolveUriCommand;
 use search::SearchCommand;
 use stats::StatsCommand;
 use sync::SyncCommand;
+use tag::TagCommand;
 use update::UpdateCommand;
 
 #[derive(Parser)]
@@ -59,4 +61,5 @@ pub enum Commands {
     Explorer(ExplorerCommand),
     Sync(SyncCommand),
     Gitignore(GitignoreCommand),
+    Tag(TagCommand),
 }

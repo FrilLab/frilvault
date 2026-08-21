@@ -65,6 +65,12 @@ pub enum FrilVaultError {
     /// `expected_updated_at`이 저장된 note revision과 일치하지 않을 때 반환됩니다.
     #[error("concurrent modification for note: {0}")]
     ConcurrentModification(Uuid),
+
+    /// Returned when a tag operation receives an invalid tag name or arguments.
+    ///
+    /// 태그 연산에 잘못된 태그 이름 또는 인자가 전달되었을 때 반환됩니다.
+    #[error("invalid tag: {0}")]
+    InvalidTag(String),
 }
 
 pub type FrilVaultResult<T> = Result<T, FrilVaultError>;

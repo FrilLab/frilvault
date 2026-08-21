@@ -114,3 +114,13 @@ export interface WorkspaceExplorer {
 export interface MutationResult {
   note: NoteView['note'] | null;
 }
+
+export interface TagOperationResult {
+  affected_notes: number;
+  affected_files: number;
+}
+
+export interface TagSummary {
+  tag: string;
+  note_count: number;
+}

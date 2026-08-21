@@ -7,6 +7,8 @@ import type {
   NoteView,
   RepairSuggestion,
   SyncResult,
+  TagOperationResult,
+  TagSummary,
   WorkspaceExplorer,
   WorkspaceHealth,
   WorkspaceIndex,
@@ -320,6 +322,59 @@ export class CliClient {
     ]);
 
     return parseJson<NoteView>(stdout);
+  }
+
+  public async tagRename(
+    workspaceRoot: string,
+    oldTag: string,
+    newTag: string,
+    dryRun = false,
+  ): Promise<TagOperationResult> {
+    const args = ['tag', 'rename', oldTag, newTag, '--format', 'json'];
+    if (dryRun) {
+      args.push('--dry-run');
+    }
+    const stdout = await this.execInWorkspace(workspaceRoot, args);
+    return parseJson<TagOperationResult>(stdout);
+  }
+
+  public async tagMerge(
+    workspaceRoot: string,
+    sources: string[],
+    into: string,
+    dryRun = false,
+  ): Promise<TagOperationResult> {
+    const args = ['tag', 'merge', ...sources, '--into', into, '--format', 'json'];
+    if (dryRun) {
+      args.push('--dry-run');
+    }
+    const stdout = await this.execInWorkspace(workspaceRoot, args);
+    return parseJson<TagOperationResult>(stdout);
+  }
+
+  public async tagRemove(
+    workspaceRoot: string,
+    tag: string,
+    dryRun = false,
+  ): Promise<TagOperationResult> {
+    const args = ['tag', 'remove', tag, '--yes', '--format', 'json'];
+    if (dryRun) {
+      args.push('--dry-run');
+    }
+    const stdout = await this.execInWorkspace(workspaceRoot, args);
+    return parseJson<TagOperationResult>(stdout);
+  }
+
+  public async tagList(
+    workspaceRoot: string,
+    unused = false,
+  ): Promise<TagSummary[]> {
+    const args = ['tag', 'list', '--format', 'json'];
+    if (unused) {
+      args.push('--unused');
+    }
+    const stdout = await this.execInWorkspace(workspaceRoot, args);
+    return parseJson<TagSummary[]>(stdout);
   }
 
   private async execInWorkspace(workspaceRoot: string, args: string[]): Promise<string> {

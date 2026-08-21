@@ -71,6 +71,10 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Gitignore(cmd) => {
             command::gitignore::execute(cmd)?;
         }
+
+        Commands::Tag(cmd) => {
+            command::tag::execute(cmd)?;
+        }
     }
 
     Ok(())
@@ -78,5 +82,7 @@ fn run(cli: Cli) -> Result<()> {
 
 #[cfg(test)]
 mod index_command;
+#[cfg(test)]
+mod tag_command_test;
 #[cfg(test)]
 mod tests;

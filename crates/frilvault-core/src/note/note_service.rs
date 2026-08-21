@@ -17,7 +17,8 @@ use uuid::Uuid;
 
 use crate::{
     AddNoteRequest, AttachmentRepository, FrilVaultError, FrilVaultResult, NoteAnchor,
-    NoteAttachment, NoteQuery, NoteView, SymbolKind, UpdateNoteRequest,
+    NoteAttachment, NoteQuery, NoteView, SymbolKind, TagOperationResult, TagSummary,
+    UpdateNoteRequest,
     note::Note,
     runtime::VaultContext,
     symbol::SymbolResolver,
@@ -400,6 +401,185 @@ impl NoteService {
         })
     }
 
+    /// Renames a tag across all notes in the workspace.
+    ///
+    /// Duplicate tags resulting from rename are automatically eliminated.
+    ///
+    /// 워크스페이스 내 모든 노트에서 태그 이름을 변경합니다.
+    /// 변경으로 인해 발생하는 중복 태그는 자동으로 제거됩니다.
+    pub fn rename_tag(&mut self, from: &str, to: &str) -> FrilVaultResult<TagOperationResult> {
+        let from = validate_tag_name(from, "source tag")?;
+        let to = validate_tag_name(to, "target tag")?;
+        let from_lower = from.to_lowercase();
+        self.apply_tag_mutation(false, |note| rename_tag_in_note(note, &from_lower, &to))
+    }
+
+    /// Previews renaming a tag across all notes in the workspace without modifying disk.
+    ///
+    /// 디스크를 수정하지 않고 워크스페이스 내 태그 이름 변경 영향을 미리 확인합니다.
+    pub fn preview_rename_tag(
+        &mut self,
+        from: &str,
+        to: &str,
+    ) -> FrilVaultResult<TagOperationResult> {
+        let from = validate_tag_name(from, "source tag")?;
+        let to = validate_tag_name(to, "target tag")?;
+        let from_lower = from.to_lowercase();
+        self.apply_tag_mutation(true, |note| rename_tag_in_note(note, &from_lower, &to))
+    }
+
+    /// Merges multiple source tags into a target tag across all notes in the workspace.
+    ///
+    /// Duplicate tags resulting from merge are automatically eliminated.
+    ///
+    /// 워크스페이스 내 여러 소스 태그를 하나의 대상 태그로 병합합니다.
+    /// 병합으로 인해 발생하는 중복 태그는 자동으로 제거됩니다.
+    pub fn merge_tags(
+        &mut self,
+        sources: &[String],
+        target: &str,
+    ) -> FrilVaultResult<TagOperationResult> {
+        let target = validate_tag_name(target, "target tag")?;
+        if sources.is_empty() {
+            return Err(FrilVaultError::InvalidTag(
+                "at least one source tag is required for merge".to_string(),
+            ));
+        }
+        let mut source_set = std::collections::HashSet::new();
+        for src in sources {
+            let valid_src = validate_tag_name(src, "source tag")?;
+            source_set.insert(valid_src.to_lowercase());
+        }
+        self.apply_tag_mutation(false, |note| merge_tags_in_note(note, &source_set, &target))
+    }
+
+    /// Previews merging multiple source tags into a target tag without modifying disk.
+    ///
+    /// 디스크를 수정하지 않고 워크스페이스 내 태그 병합 영향을 미리 확인합니다.
+    pub fn preview_merge_tags(
+        &mut self,
+        sources: &[String],
+        target: &str,
+    ) -> FrilVaultResult<TagOperationResult> {
+        let target = validate_tag_name(target, "target tag")?;
+        if sources.is_empty() {
+            return Err(FrilVaultError::InvalidTag(
+                "at least one source tag is required for merge".to_string(),
+            ));
+        }
+        let mut source_set = std::collections::HashSet::new();
+        for src in sources {
+            let valid_src = validate_tag_name(src, "source tag")?;
+            source_set.insert(valid_src.to_lowercase());
+        }
+        self.apply_tag_mutation(true, |note| merge_tags_in_note(note, &source_set, &target))
+    }
+
+    /// Removes a tag from all notes in the workspace.
+    ///
+    /// 워크스페이스 내 모든 노트에서 지정된 태그를 제거합니다.
+    pub fn remove_tag(&mut self, tag: &str) -> FrilVaultResult<TagOperationResult> {
+        let tag = validate_tag_name(tag, "tag to remove")?;
+        let tag_lower = tag.to_lowercase();
+        self.apply_tag_mutation(false, |note| remove_tag_in_note(note, &tag_lower))
+    }
+
+    /// Previews removing a tag from all notes in the workspace without modifying disk.
+    ///
+    /// 디스크를 수정하지 않고 워크스페이스 내 태그 제거 영향을 미리 확인합니다.
+    pub fn preview_remove_tag(&mut self, tag: &str) -> FrilVaultResult<TagOperationResult> {
+        let tag = validate_tag_name(tag, "tag to remove")?;
+        let tag_lower = tag.to_lowercase();
+        self.apply_tag_mutation(true, |note| remove_tag_in_note(note, &tag_lower))
+    }
+
+    /// Lists all distinct tags used across the workspace with their note counts.
+    ///
+    /// 워크스페이스 전체에서 사용 중인 고유 태그 목록과 각 태그별 노트 수를 반환합니다.
+    pub fn list_tags(&mut self) -> FrilVaultResult<Vec<TagSummary>> {
+        let records = self.vault_context.note_repository.list_all_note_files()?;
+        let mut tag_counts: std::collections::HashMap<String, (String, usize)> =
+            std::collections::HashMap::new();
+
+        for record in records {
+            for note in record.note_file.notes {
+                let mut seen_in_note = std::collections::HashSet::new();
+                for tag in note.tags {
+                    let trimmed = tag.trim().to_string();
+                    if !trimmed.is_empty() && seen_in_note.insert(trimmed.to_lowercase()) {
+                        let entry = tag_counts
+                            .entry(trimmed.to_lowercase())
+                            .or_insert_with(|| (trimmed.clone(), 0));
+                        entry.1 += 1;
+                    }
+                }
+            }
+        }
+
+        let mut summaries: Vec<TagSummary> = tag_counts
+            .into_values()
+            .map(|(display_tag, count)| TagSummary {
+                tag: display_tag,
+                note_count: count,
+            })
+            .collect();
+
+        summaries.sort_by(|a, b| a.tag.to_lowercase().cmp(&b.tag.to_lowercase()));
+        Ok(summaries)
+    }
+
+    /// Identifies tags that are no longer attached to any note.
+    ///
+    /// 어떤 노트에도 연결되지 않은 미사용 태그 목록을 반환합니다.
+    pub fn list_unused_tags(&mut self) -> FrilVaultResult<Vec<TagSummary>> {
+        let tags = self.list_tags()?;
+        Ok(tags.into_iter().filter(|t| t.note_count == 0).collect())
+    }
+
+    fn apply_tag_mutation<F>(
+        &mut self,
+        dry_run: bool,
+        mut mutate_note: F,
+    ) -> FrilVaultResult<TagOperationResult>
+    where
+        F: FnMut(&mut Note) -> bool,
+    {
+        let records = self.vault_context.note_repository.list_all_note_files()?;
+        let mut affected_notes = 0;
+        let mut affected_files = 0;
+        let mut files_to_update = Vec::new();
+
+        for mut record in records {
+            let mut file_changed = false;
+            for note in &mut record.note_file.notes {
+                if mutate_note(note) {
+                    affected_notes += 1;
+                    file_changed = true;
+                }
+            }
+            if file_changed {
+                affected_files += 1;
+                files_to_update.push((record.source_file, record.note_file));
+            }
+        }
+
+        if !dry_run {
+            for (source_file, note_file) in files_to_update {
+                self.vault_context
+                    .note_repository
+                    .save_by_source_file(&source_file, &note_file)?;
+                self.vault_context.invalidate_notes(&source_file);
+                self.vault_context
+                    .sync_index_for_source_file(&source_file)?;
+            }
+        }
+
+        Ok(TagOperationResult {
+            affected_notes,
+            affected_files,
+        })
+    }
+
     pub fn list_symbol_notes(
         &mut self,
         source_file: impl AsRef<Path>,
@@ -486,4 +666,85 @@ fn note_matches_keyword(view: &NoteView, keyword: &str) -> bool {
     );
 
     content_match || symbol_match
+}
+
+fn validate_tag_name(tag: &str, field_name: &str) -> FrilVaultResult<String> {
+    let trimmed = tag.trim();
+    if trimmed.is_empty() {
+        return Err(FrilVaultError::InvalidTag(format!(
+            "{field_name} cannot be empty"
+        )));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn deduplicate_tags(tags: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut deduplicated = Vec::new();
+    for tag in tags {
+        let trimmed = tag.trim().to_string();
+        if !trimmed.is_empty() && seen.insert(trimmed.to_lowercase()) {
+            deduplicated.push(trimmed);
+        }
+    }
+    deduplicated
+}
+
+fn rename_tag_in_note(note: &mut Note, from_lower: &str, to: &str) -> bool {
+    let mut new_tags = Vec::with_capacity(note.tags.len());
+    for tag in &note.tags {
+        if tag.to_lowercase() == from_lower {
+            new_tags.push(to.to_string());
+        } else {
+            new_tags.push(tag.clone());
+        }
+    }
+    let deduplicated = deduplicate_tags(new_tags);
+    if deduplicated != note.tags {
+        note.tags = deduplicated;
+        note.updated_at = Utc::now();
+        true
+    } else {
+        false
+    }
+}
+
+fn merge_tags_in_note(
+    note: &mut Note,
+    source_set: &std::collections::HashSet<String>,
+    target: &str,
+) -> bool {
+    let mut new_tags = Vec::with_capacity(note.tags.len());
+    for tag in &note.tags {
+        if source_set.contains(&tag.to_lowercase()) {
+            new_tags.push(target.to_string());
+        } else {
+            new_tags.push(tag.clone());
+        }
+    }
+    let deduplicated = deduplicate_tags(new_tags);
+    if deduplicated != note.tags {
+        note.tags = deduplicated;
+        note.updated_at = Utc::now();
+        true
+    } else {
+        false
+    }
+}
+
+fn remove_tag_in_note(note: &mut Note, target_lower: &str) -> bool {
+    let new_tags: Vec<String> = note
+        .tags
+        .iter()
+        .filter(|t| t.to_lowercase() != target_lower)
+        .cloned()
+        .collect();
+    let deduplicated = deduplicate_tags(new_tags);
+    if deduplicated != note.tags {
+        note.tags = deduplicated;
+        note.updated_at = Utc::now();
+        true
+    } else {
+        false
+    }
 }
