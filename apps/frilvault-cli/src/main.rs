@@ -21,6 +21,10 @@ fn main() -> Result<()> {
 
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Commands::Init(cmd) => {
+            command::init::execute(cmd)?;
+        }
+
         Commands::Add(cmd) => {
             command::add::execute(cmd)?;
         }
