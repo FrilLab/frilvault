@@ -12,6 +12,7 @@ pub mod format;
 pub mod gitignore;
 pub mod health;
 pub mod index;
+pub mod init;
 pub mod list;
 pub mod repair;
 pub mod resolve_uri;
@@ -28,6 +29,7 @@ use explorer::ExplorerCommand;
 use gitignore::GitignoreCommand;
 use health::HealthCommand;
 use index::IndexCommand;
+use init::InitCommand;
 use list::ListCommand;
 use repair::RepairCommand;
 use resolve_uri::ResolveUriCommand;
@@ -46,6 +48,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    Init(InitCommand),
     Add(AddCommand),
     Attach(AttachCommand),
     List(ListCommand),

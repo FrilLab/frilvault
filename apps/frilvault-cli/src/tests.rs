@@ -6,6 +6,26 @@ use crate::cli::{
 };
 
 #[test]
+fn parses_init_with_local_mode_by_default() {
+    let cli = Cli::parse_from(["flvt", "init"]);
+
+    match cli.command {
+        Commands::Init(command) => assert!(!command.shared),
+        _ => panic!("expected init command"),
+    }
+}
+
+#[test]
+fn parses_init_with_shared_mode() {
+    let cli = Cli::parse_from(["flvt", "init", "--shared"]);
+
+    match cli.command {
+        Commands::Init(command) => assert!(command.shared),
+        _ => panic!("expected init command"),
+    }
+}
+
+#[test]
 fn parses_list_format_json() {
     let cli = Cli::parse_from(["flvt", "list", "--file", "src/main.rs", "--format", "json"]);
 

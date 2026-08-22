@@ -4,7 +4,9 @@ use crate::{
     FrilVaultResult,
     note::{NoteRepository, NoteService},
     runtime::VaultContext,
-    workspace::{PathResolver, WorkspaceIndexRepository, WorkspaceRepository, WorkspaceService},
+    workspace::{
+        PathResolver, VaultMode, WorkspaceIndexRepository, WorkspaceRepository, WorkspaceService,
+    },
 };
 
 /// Top-level entry point for opening a FrilVault workspace.
@@ -34,6 +36,20 @@ impl FrilVault {
         Ok(Self {
             workspace_root: workspace_root.as_ref().to_path_buf(),
         })
+    }
+
+    /// Initializes the workspace with the requested storage policy.
+    ///
+    /// Existing workspace metadata is preserved, including its current mode.
+    pub fn initialize(&self, mode: VaultMode) -> FrilVaultResult<VaultMode> {
+        let resolver = PathResolver::new(&self.workspace_root);
+        let workspace_repository = WorkspaceRepository::new(resolver.clone());
+        let metadata = workspace_repository.initialize(mode)?;
+
+        let index_repository = WorkspaceIndexRepository::new(resolver);
+        index_repository.create_if_missing()?;
+
+        Ok(metadata.mode)
     }
 
     fn build_context(&self) -> FrilVaultResult<(VaultContext, WorkspaceIndexRepository)> {

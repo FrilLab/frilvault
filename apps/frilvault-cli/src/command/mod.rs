@@ -5,6 +5,7 @@ pub mod doctor;
 pub mod explorer;
 pub mod gitignore;
 pub mod index;
+pub mod init;
 pub mod list;
 pub mod repair;
 pub mod resolve_uri;
