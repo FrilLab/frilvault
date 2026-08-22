@@ -56,13 +56,9 @@ impl NoteRepository {
     ) -> FrilVaultResult<()> {
         let note_path = self.path_resolver.resolve_note_path(source_file);
 
-        if let Some(parent) = note_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
         let json = self.parser.serialize(note_file)?;
 
-        fs::write(note_path, json)?;
+        atomic_write(&note_path, &json)?;
 
         Ok(())
     }
@@ -136,4 +132,21 @@ impl NoteRepository {
     pub fn resolve_note_path(&self, source_file: impl AsRef<Path>) -> PathBuf {
         self.path_resolver.resolve_note_path(source_file)
     }
+}
+
+pub(crate) fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let temp_file_name = format!(
+        ".{}.tmp.{}",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("note"),
+        uuid::Uuid::new_v4()
+    );
+    let temp_path = parent.join(temp_file_name);
+    fs::write(&temp_path, content)?;
+    if let Err(err) = fs::rename(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err);
+    }
+    Ok(())
 }

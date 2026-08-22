@@ -2,6 +2,7 @@ use clap::Parser;
 
 use crate::cli::{
     Cli, Commands, add::SymbolKindArg, format::FormatArg, gitignore::GitignoreAction,
+    tag::TagAction,
 };
 
 #[test]
@@ -275,4 +276,87 @@ fn resolve_format_defaults_to_text() {
         resolve_format(Some(FormatArg::Json)),
         OutputFormat::Json
     ));
+}
+
+#[test]
+fn parses_tag_rename_command() {
+    let cli = Cli::parse_from([
+        "flvt",
+        "tag",
+        "rename",
+        "todo",
+        "task",
+        "--dry-run",
+        "--format",
+        "json",
+    ]);
+
+    match cli.command {
+        Commands::Tag(command) => match command.action {
+            TagAction::Rename(rename) => {
+                assert_eq!(rename.old_tag, "todo");
+                assert_eq!(rename.new_tag, "task");
+                assert!(rename.dry_run);
+                assert!(matches!(rename.format, Some(FormatArg::Json)));
+            }
+            _ => panic!("expected tag rename action"),
+        },
+        _ => panic!("expected tag command"),
+    }
+}
+
+#[test]
+fn parses_tag_merge_command() {
+    let cli = Cli::parse_from([
+        "flvt", "tag", "merge", "bug", "defect", "--into", "issue", "--format", "json",
+    ]);
+
+    match cli.command {
+        Commands::Tag(command) => match command.action {
+            TagAction::Merge(merge) => {
+                assert_eq!(merge.sources, vec!["bug", "defect"]);
+                assert_eq!(merge.into, "issue");
+                assert!(!merge.dry_run);
+                assert!(matches!(merge.format, Some(FormatArg::Json)));
+            }
+            _ => panic!("expected tag merge action"),
+        },
+        _ => panic!("expected tag command"),
+    }
+}
+
+#[test]
+fn parses_tag_remove_command() {
+    let cli = Cli::parse_from([
+        "flvt", "tag", "remove", "legacy", "--yes", "--format", "json",
+    ]);
+
+    match cli.command {
+        Commands::Tag(command) => match command.action {
+            TagAction::Remove(remove) => {
+                assert_eq!(remove.tag, "legacy");
+                assert!(remove.yes);
+                assert!(!remove.dry_run);
+                assert!(matches!(remove.format, Some(FormatArg::Json)));
+            }
+            _ => panic!("expected tag remove action"),
+        },
+        _ => panic!("expected tag command"),
+    }
+}
+
+#[test]
+fn parses_tag_list_command() {
+    let cli = Cli::parse_from(["flvt", "tag", "list", "--unused", "--format", "json"]);
+
+    match cli.command {
+        Commands::Tag(command) => match command.action {
+            TagAction::List(list) => {
+                assert!(list.unused);
+                assert!(matches!(list.format, Some(FormatArg::Json)));
+            }
+            _ => panic!("expected tag list action"),
+        },
+        _ => panic!("expected tag command"),
+    }
 }

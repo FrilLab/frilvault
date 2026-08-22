@@ -37,13 +37,9 @@ impl WorkspaceIndexRepository {
     pub fn save(&self, index: &WorkspaceIndex) -> FrilVaultResult<()> {
         let path = self.path_resolver.workspace_index_path();
 
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
         let json = serde_json::to_string(index)?;
 
-        fs::write(path, json)?;
+        crate::note::atomic_write(&path, &json)?;
 
         Ok(())
     }

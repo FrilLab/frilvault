@@ -50,3 +50,6 @@ mod repair_engin_test;
 
 #[cfg(test)]
 mod symbol_resolver_test;
+
+#[cfg(test)]
+mod tag_test;
