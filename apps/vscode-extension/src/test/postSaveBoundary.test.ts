@@ -5,48 +5,46 @@ import * as path from 'node:path';
 import { suite, test } from 'mocha';
 
 import { COMMAND_IDS } from '../constants/ids';
-import { maybePromptForGitignore } from '../features/gitignore/prompt';
+import { initializeLocalVault } from '../features/initialization/localVault';
 import { runOptionalPostSaveTasks } from '../features/post-save/tasks';
 
 suite('Post-save boundaries', () => {
-  test('maybePromptForGitignore reports CLI inspection failures without throwing', async () => {
+  test('initializeLocalVault reports tracked vaults', async () => {
     let warning = '';
 
-    await maybePromptForGitignore({
+    await initializeLocalVault({
       getWorkspaceRoot: () => '/tmp/workspace',
       cliClient: {
-        checkGitignore: async () => {
-          throw new Error('cli unavailable');
-        },
+        initializeLocal: async () => ({ mode: 'local', git_exclude: 'vault_tracked' }),
       } as never,
-      workspaceState: createWorkspaceState(),
-      showWarningMessage: async (message, _options) => {
+      showWarningMessage: async (message) => {
         warning = message;
         return undefined;
       },
     });
 
-    assert.match(warning, /could not inspect \.gitignore/i);
+    assert.match(warning, /already tracked by Git/i);
   });
 
-  test('runOptionalPostSaveTasks reports gitignore inspection failures without throwing', async () => {
+  test('runOptionalPostSaveTasks reports initialization failures without throwing', async () => {
     let warning = '';
 
-    await runOptionalPostSaveTasks({
-      getWorkspaceRoot: () => '/tmp/workspace',
-      cliClient: {
-        checkGitignore: async () => {
-          throw new Error('gitignore prompt failed');
-        },
-      } as never,
-      workspaceState: createWorkspaceState(),
-      showWarningMessage: async (message, _options) => {
+    await runOptionalPostSaveTasks(
+      {
+        getWorkspaceRoot: () => '/tmp/workspace',
+        cliClient: {
+          initializeLocal: async () => {
+            throw new Error('initialization failed');
+          },
+        } as never,
+      },
+      async (message) => {
         warning = message;
         return undefined;
       },
-    });
+    );
 
-    assert.match(warning, /could not inspect \.gitignore/i);
+    assert.match(warning, /local vault initialization failed/i);
   });
 });
 
@@ -68,15 +66,3 @@ suite('Canonical add note command registration', () => {
     assert.ok(!packageJson.activationEvents?.includes('onCommand:frilvault.createNoteHere'));
   });
 });
-
-function createWorkspaceState(): import('vscode').Memento {
-  const values = new Map<string, unknown>();
-
-  return {
-    keys: () => [...values.keys()],
-    get: <T>(key: string) => values.get(key) as T | undefined,
-    update: async (key: string, value: unknown) => {
-      values.set(key, value);
-    },
-  } as import('vscode').Memento;
-}

@@ -42,6 +42,7 @@ mod note_cache_test;
 #[cfg(test)]
 mod frilvault_app_test;
 
+mod git_exclude_test;
 #[cfg(test)]
 mod gitignore_test;
 

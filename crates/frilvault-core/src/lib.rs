@@ -17,7 +17,7 @@ mod symbol;
 mod uri;
 mod workspace;
 
-pub use app::FrilVault;
+pub use app::{FrilVault, InitializationResult};
 
 pub use error::{FrilVaultError, FrilVaultResult};
 pub use note::{
@@ -27,8 +27,8 @@ pub use note::{
 pub use symbol::{ResolvedSymbol, SymbolResolver, symbol_marker};
 pub use uri::{NOTE_URI_SCHEME, NOTE_URI_VERSION, NoteUriResolver, ParsedNoteUri};
 pub use workspace::{
-    ExplorerGroup, ExplorerNode, FileMove, RepairSuggestion, SyncResult, VaultMode,
-    WorkspaceExplorer, WorkspaceHealth, WorkspaceService, WorkspaceStats,
+    ExplorerGroup, ExplorerNode, FileMove, GitExcludeStatus, RepairSuggestion, SyncResult,
+    VaultMode, WorkspaceExplorer, WorkspaceHealth, WorkspaceService, WorkspaceStats,
 };
 
 #[cfg(test)]

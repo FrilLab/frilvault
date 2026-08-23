@@ -26,6 +26,18 @@ fn parses_init_with_shared_mode() {
 }
 
 #[test]
+fn parses_init_json_format() {
+    let cli = Cli::parse_from(["flvt", "init", "--format", "json"]);
+
+    match cli.command {
+        Commands::Init(command) => {
+            assert!(matches!(command.format, Some(FormatArg::Json)));
+        }
+        _ => panic!("expected init command"),
+    }
+}
+
+#[test]
 fn parses_list_format_json() {
     let cli = Cli::parse_from(["flvt", "list", "--file", "src/main.rs", "--format", "json"]);
 
