@@ -6,7 +6,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::FrilVaultResult;
+use crate::{FrilVaultResult, workspace::GitTrackingStatus};
 
 const VAULT_EXCLUDE_ENTRY: &str = ".vault/";
 
@@ -51,6 +51,33 @@ pub fn ensure_local_vault_excluded(workspace_root: &Path) -> FrilVaultResult<Git
     fs::write(exclude_path, updated)?;
 
     Ok(GitExcludeStatus::Added)
+}
+
+pub fn vault_git_tracking_status(workspace_root: &Path) -> FrilVaultResult<GitTrackingStatus> {
+    let inside_work_tree = git_output(workspace_root, &["rev-parse", "--is-inside-work-tree"])?;
+    if !inside_work_tree.status.success()
+        || String::from_utf8_lossy(&inside_work_tree.stdout).trim() != "true"
+    {
+        return Ok(GitTrackingStatus::NotGitRepository);
+    }
+
+    if is_vault_tracked(workspace_root) {
+        return Ok(GitTrackingStatus::Tracked);
+    }
+
+    let ignored = git_output(workspace_root, &["check-ignore", "--quiet", "--", ".vault"])?;
+    if ignored.status.success() {
+        return Ok(GitTrackingStatus::Excluded);
+    }
+
+    Ok(GitTrackingStatus::Trackable)
+}
+
+fn git_output(workspace_root: &Path, arguments: &[&str]) -> FrilVaultResult<std::process::Output> {
+    Ok(Command::new("git")
+        .args(arguments)
+        .current_dir(workspace_root)
+        .output()?)
 }
 
 fn resolve_exclude_path(workspace_root: &Path) -> Option<PathBuf> {

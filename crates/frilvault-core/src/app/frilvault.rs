@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    FrilVaultResult,
+    FrilVaultError, FrilVaultResult,
     note::{NoteRepository, NoteService},
     runtime::VaultContext,
     workspace::{
         GitExcludeStatus, PathResolver, VaultMode, WorkspaceIndexRepository, WorkspaceRepository,
-        WorkspaceService, ensure_local_vault_excluded,
+        WorkspaceService, WorkspaceStatus, ensure_local_vault_excluded, vault_git_tracking_status,
     },
 };
 
@@ -69,6 +69,40 @@ impl FrilVault {
         Ok(InitializationResult {
             mode: metadata.mode,
             git_exclude,
+        })
+    }
+
+    /// Reads a concise snapshot of the existing workspace without modifying it.
+    pub fn status(&self) -> FrilVaultResult<WorkspaceStatus> {
+        let resolver = PathResolver::new(&self.workspace_root);
+        let workspace_repository = WorkspaceRepository::new(resolver.clone());
+
+        if !workspace_repository.exists() {
+            return Err(FrilVaultError::WorkspaceNotFound);
+        }
+
+        let metadata = workspace_repository.load()?;
+        let index_repository = WorkspaceIndexRepository::new(resolver.clone());
+        let note_count = if index_repository.exists() {
+            index_repository
+                .load()?
+                .files
+                .iter()
+                .map(|file| file.note_count)
+                .sum()
+        } else {
+            NoteRepository::new(resolver.clone())
+                .list_all_note_files()?
+                .iter()
+                .map(|record| record.note_file.notes.len())
+                .sum()
+        };
+
+        Ok(WorkspaceStatus {
+            vault_path: PathBuf::from(crate::constants::VAULT_DIR_NAME),
+            mode: metadata.mode,
+            git_tracking: vault_git_tracking_status(&self.workspace_root)?,
+            note_count,
         })
     }
 

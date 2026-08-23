@@ -11,6 +11,7 @@ pub mod repair;
 pub mod resolve_uri;
 pub mod search;
 pub mod stats;
+pub mod status;
 pub mod sync;
 pub mod tag;
 pub mod update;
