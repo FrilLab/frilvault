@@ -1,17 +1,20 @@
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::path::{Path, PathBuf};
 
 use crate::{
     FrilVaultError, FrilVaultResult,
     note::{NoteRepository, NoteService},
     runtime::VaultContext,
     workspace::{
-        GitTrackingStatus, PathResolver, VaultMode, WorkspaceIndexRepository, WorkspaceRepository,
-        WorkspaceService, WorkspaceStatus,
+        GitExcludeStatus, PathResolver, VaultMode, WorkspaceIndexRepository, WorkspaceRepository,
+        WorkspaceService, WorkspaceStatus, ensure_local_vault_excluded, vault_git_tracking_status,
     },
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InitializationResult {
+    pub mode: VaultMode,
+    pub git_exclude: Option<GitExcludeStatus>,
+}
 
 /// Top-level entry point for opening a FrilVault workspace.
 ///
@@ -46,6 +49,10 @@ impl FrilVault {
     ///
     /// Existing workspace metadata is preserved, including its current mode.
     pub fn initialize(&self, mode: VaultMode) -> FrilVaultResult<VaultMode> {
+        self.initialize_with_status(mode).map(|result| result.mode)
+    }
+
+    pub fn initialize_with_status(&self, mode: VaultMode) -> FrilVaultResult<InitializationResult> {
         let resolver = PathResolver::new(&self.workspace_root);
         let workspace_repository = WorkspaceRepository::new(resolver.clone());
         let metadata = workspace_repository.initialize(mode)?;
@@ -53,7 +60,16 @@ impl FrilVault {
         let index_repository = WorkspaceIndexRepository::new(resolver);
         index_repository.create_if_missing()?;
 
-        Ok(metadata.mode)
+        let git_exclude = if metadata.mode == VaultMode::Local {
+            Some(ensure_local_vault_excluded(&self.workspace_root)?)
+        } else {
+            None
+        };
+
+        Ok(InitializationResult {
+            mode: metadata.mode,
+            git_exclude,
+        })
     }
 
     /// Reads a concise snapshot of the existing workspace without modifying it.
@@ -85,45 +101,9 @@ impl FrilVault {
         Ok(WorkspaceStatus {
             vault_path: PathBuf::from(crate::constants::VAULT_DIR_NAME),
             mode: metadata.mode,
-            git_tracking: self.git_tracking_status()?,
+            git_tracking: vault_git_tracking_status(&self.workspace_root)?,
             note_count,
         })
-    }
-
-    fn git_tracking_status(&self) -> FrilVaultResult<GitTrackingStatus> {
-        let inside_work_tree = self.git_output(["rev-parse", "--is-inside-work-tree"])?;
-        if !inside_work_tree.status.success()
-            || String::from_utf8_lossy(&inside_work_tree.stdout).trim() != "true"
-        {
-            return Ok(GitTrackingStatus::NotGitRepository);
-        }
-
-        let tracked = self.git_output(["ls-files", "--", crate::constants::VAULT_DIR_NAME])?;
-        if tracked.status.success() && !tracked.stdout.is_empty() {
-            return Ok(GitTrackingStatus::Tracked);
-        }
-
-        let ignored = self.git_output([
-            "check-ignore",
-            "--quiet",
-            "--",
-            crate::constants::VAULT_DIR_NAME,
-        ])?;
-        if ignored.status.success() {
-            return Ok(GitTrackingStatus::Excluded);
-        }
-
-        Ok(GitTrackingStatus::Trackable)
-    }
-
-    fn git_output<const N: usize>(
-        &self,
-        arguments: [&str; N],
-    ) -> FrilVaultResult<std::process::Output> {
-        Ok(Command::new("git")
-            .args(arguments)
-            .current_dir(&self.workspace_root)
-            .output()?)
     }
 
     fn build_context(&self) -> FrilVaultResult<(VaultContext, WorkspaceIndexRepository)> {

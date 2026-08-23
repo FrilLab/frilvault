@@ -82,6 +82,16 @@ export interface UpdateNoteInput {
   expectedUpdatedAt?: string;
 }
 
+export interface InitResult {
+  mode: 'local' | 'shared';
+  git_exclude:
+    | 'added'
+    | 'already_excluded'
+    | 'not_git_repository'
+    | 'vault_tracked'
+    | null;
+}
+
 export interface SearchNotesInput {
   workspaceRoot: string;
   keyword?: string;
@@ -143,6 +153,11 @@ export class CliClient {
 
     const stdout = await this.execInWorkspace(input.workspaceRoot, args);
     return parseJson<NoteView>(stdout);
+  }
+
+  public async initializeLocal(workspaceRoot: string): Promise<InitResult> {
+    const stdout = await this.execInWorkspace(workspaceRoot, ['init', '--format', 'json']);
+    return parseJson<InitResult>(stdout);
   }
 
   public async addSymbolNote(input: AddSymbolNoteInput): Promise<NoteView> {
