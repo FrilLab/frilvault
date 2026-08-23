@@ -139,7 +139,6 @@ export function activate(context: vscode.ExtensionContext): void {
       runOptionalPostSaveTasks({
         getWorkspaceRoot,
         cliClient,
-        workspaceState: context.workspaceState,
       }),
     showWarningMessage: (message) => vscode.window.showWarningMessage(message),
   });

@@ -146,6 +146,35 @@ suite('CliClient', () => {
     assert.ok(calls.some((call) => call.includes('index --format json')));
   });
 
+  test('initializes a local vault through the CLI JSON boundary', async () => {
+    const calls: string[] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (file, args) => {
+        calls.push(`${file} ${args.join(' ')}`);
+
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+
+        return {
+          stdout: JSON.stringify({ mode: 'local', git_exclude: 'added' }),
+          stderr: '',
+        };
+      },
+    });
+
+    const result = await cliClient.initializeLocal('/workspace');
+
+    assert.deepStrictEqual(result, { mode: 'local', git_exclude: 'added' });
+    assert.ok(calls.some((call) => call.endsWith('init --format json')));
+  });
+
   test('fails fast when the CLI version does not match the extension expectation', async () => {
     const cliClient = new CliClient({
       extensionPath: '/extension',

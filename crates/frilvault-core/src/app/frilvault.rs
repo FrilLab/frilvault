@@ -5,9 +5,16 @@ use crate::{
     note::{NoteRepository, NoteService},
     runtime::VaultContext,
     workspace::{
-        PathResolver, VaultMode, WorkspaceIndexRepository, WorkspaceRepository, WorkspaceService,
+        GitExcludeStatus, PathResolver, VaultMode, WorkspaceIndexRepository, WorkspaceRepository,
+        WorkspaceService, ensure_local_vault_excluded,
     },
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InitializationResult {
+    pub mode: VaultMode,
+    pub git_exclude: Option<GitExcludeStatus>,
+}
 
 /// Top-level entry point for opening a FrilVault workspace.
 ///
@@ -42,6 +49,10 @@ impl FrilVault {
     ///
     /// Existing workspace metadata is preserved, including its current mode.
     pub fn initialize(&self, mode: VaultMode) -> FrilVaultResult<VaultMode> {
+        self.initialize_with_status(mode).map(|result| result.mode)
+    }
+
+    pub fn initialize_with_status(&self, mode: VaultMode) -> FrilVaultResult<InitializationResult> {
         let resolver = PathResolver::new(&self.workspace_root);
         let workspace_repository = WorkspaceRepository::new(resolver.clone());
         let metadata = workspace_repository.initialize(mode)?;
@@ -49,7 +60,16 @@ impl FrilVault {
         let index_repository = WorkspaceIndexRepository::new(resolver);
         index_repository.create_if_missing()?;
 
-        Ok(metadata.mode)
+        let git_exclude = if metadata.mode == VaultMode::Local {
+            Some(ensure_local_vault_excluded(&self.workspace_root)?)
+        } else {
+            None
+        };
+
+        Ok(InitializationResult {
+            mode: metadata.mode,
+            git_exclude,
+        })
     }
 
     fn build_context(&self) -> FrilVaultResult<(VaultContext, WorkspaceIndexRepository)> {
