@@ -58,6 +58,8 @@ fn run(cli: Cli) -> Result<()> {
 
         Commands::Stats(cmd) => command::stats::execute(cmd)?,
 
+        Commands::Status(cmd) => command::status::execute(cmd)?,
+
         Commands::Index(cmd) => command::index::execute(cmd)?,
 
         Commands::Explorer(cmd) => command::explorer::execute(cmd)?,

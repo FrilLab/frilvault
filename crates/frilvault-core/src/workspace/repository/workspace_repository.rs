@@ -1,7 +1,7 @@
 use std::fs;
 
 use crate::{
-    FrilVaultResult,
+    FrilVaultError, FrilVaultResult,
     constants::{CACHE_DIR_NAME, IMAGES_DIR_NAME, INDEX_DIR_NAME, NOTES_DIR_NAME},
     workspace::{PathResolver, VaultMode, WorkspaceMetadata},
 };
@@ -18,10 +18,15 @@ impl WorkspaceRepository {
 
     pub fn load(&self) -> FrilVaultResult<WorkspaceMetadata> {
         let path = self.path_resolver.workspace_metadata_path();
-        let content = fs::read_to_string(path)?;
-        let metadata = serde_json::from_str(&content)?;
+        let content = fs::read_to_string(&path)?;
+        let metadata = serde_json::from_str(&content)
+            .map_err(|source| FrilVaultError::InvalidWorkspaceMetadata { path, source })?;
 
         Ok(metadata)
+    }
+
+    pub fn exists(&self) -> bool {
+        self.path_resolver.workspace_metadata_path().is_file()
     }
 
     pub fn save(&self, metadata: &WorkspaceMetadata) -> FrilVaultResult<()> {

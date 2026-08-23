@@ -96,6 +96,13 @@ fn parses_stats_json_format() {
 }
 
 #[test]
+fn parses_status_command() {
+    let cli = Cli::parse_from(["flvt", "status"]);
+
+    assert!(matches!(cli.command, Commands::Status(_)));
+}
+
+#[test]
 fn parses_index_json_format() {
     let cli = Cli::parse_from(["flvt", "index", "--format", "json"]);
 

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -11,6 +13,16 @@ pub enum FrilVaultError {
 
     #[error("json error: {0}")]
     JSON(#[from] serde_json::Error),
+
+    #[error("No FrilVault workspace found.\nRun `flvt init` to initialize one.")]
+    WorkspaceNotFound,
+
+    #[error("Failed to read FrilVault workspace metadata:\n{} is invalid.", path.display())]
+    InvalidWorkspaceMetadata {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
 
     /// Returned when a caller passes an absolute source path outside the workspace root.
     ///
