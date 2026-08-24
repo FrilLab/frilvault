@@ -6,12 +6,53 @@ notes to source code without modifying the source file.
 ## Features
 
 - Add notes to source lines and symbols
-- View notes directly inside VS Code
+- View notes directly inside VS Code with expandable block viewers above code anchors
 - Edit and delete notes from the editor
 - Navigate between code and notes
 - Search notes across the current workspace
 - Store all note data locally as JSON
 - Keep project knowledge inside `.vault`
+
+## Note Viewer
+
+FrilVault displays note content above associated source-code anchors in an expandable block format without modifying source files.
+
+- **Collapsed State**: Displays a compact one-line summary (e.g., `▶ Note · 3 lines · #todo #parser` or `▶ Notes (2)`).
+- **Expanded State**: Displays the multi-line note content, tags, and structure above the anchor line.
+- **Multiple Notes**: Grouped cleanly above the same anchor without visual duplication or overlapping widgets.
+
+### Viewer Differences
+
+| UI Surface | Purpose |
+| --- | --- |
+| **Block Note Viewer** | Inline editor reading surface displayed above code anchors (expandable/collapsible) |
+| **Gutter Markers** | Interactive line indicators showing where notes exist and quick action menus |
+| **Hover Preview** | Rich documentation popup on cursor hover with full markdown, tags, and actions |
+| **Notes Sidebar** | Workspace-wide and file-level tree navigation for browsing all notes |
+
+## Configuration
+
+| Setting | Type | Default | Description |
+| --- | --- | --- | --- |
+| `frilvault.noteViewer.enabled` | `boolean` | `true` | Show expandable block note viewers above associated source-code anchors |
+| `frilvault.noteViewer.defaultState` | `string` | `"collapsed"` | Default collapse state for note viewers (`"collapsed"` or `"expanded"`) |
+| `frilvault.gutterMarkerStyle` | `string` | `"dot"` | Visual style for interactive gutter markers (`"dot"`, `"count"`, `"bar"`) |
+| `frilvault.explorerNoteCounts.enabled` | `boolean` | `true` | Show FrilVault note counts beside files in VS Code Explorer |
+| `frilvault.hoverPreviewLength` | `number` | `800` | Maximum character length for rich hover previews |
+| `frilvault.inlineEditor.autoSaveDebounceMs` | `number` | `900` | Delay in milliseconds before auto-saving note edits |
+
+> **Note**: The legacy after-line inline preview settings (`frilvault.inlineNotes.*` and `frilvault.inlineLineNotes.*`) have been superseded by `frilvault.noteViewer.*`.
+
+## Commands
+
+| Label | Command ID | Description |
+| --- | --- | --- |
+| `Add` | `frilvault.addNote` | Add a note at the current line or symbol |
+| `Show Notes` | `frilvault.showNotesForCurrentFile` | Show notes for the active file |
+| `Search Notes` | `frilvault.searchNotes` | Search notes in the current workspace |
+| `Show Stats` | `frilvault.showStats` | Show workspace note statistics |
+| `Show Health` | `frilvault.showHealth` | Show missing-file health information |
+| `Apply Repairs` | `frilvault.applyRepairs` | Apply note repair suggestions for renamed or moved files |
 
 ## Requirements
 

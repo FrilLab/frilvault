@@ -33,6 +33,8 @@ import {
   createEditNoteCommand,
 } from './features/inline-editor/command';
 import { createInlineNoteEditor } from './features/inline-editor/editor';
+import { NoteViewerController } from './features/note-viewer/noteViewerController';
+import { createToggleNoteViewerCommand } from './features/note-viewer/noteViewerCommands';
 import { createShowNotesForCurrentFileCommand } from './features/notes-panel/command';
 import { FrilVaultNotesProvider } from './features/notes-panel/provider';
 import { registerNotesTreeDataProvider, disposeNotesTreeDataProvider } from './features/notes-panel/register';
@@ -49,6 +51,7 @@ let activeDecorator: FrilVaultDecorator | undefined;
 let activeNoteCountStore: WorkspaceNoteCountStore | undefined;
 let activeStore: CurrentFileNotesStore | undefined;
 let activeRegistry: GutterNoteRegistry | undefined;
+let activeNoteViewer: NoteViewerController | undefined;
 const codeLensRefreshEmitter = new vscode.EventEmitter<void>();
 
 /**
@@ -104,6 +107,8 @@ export function activate(context: vscode.ExtensionContext): void {
     isEnabled,
   );
   activeDecorator = decorator;
+  const noteViewer = new NoteViewerController(store, isEnabled);
+  activeNoteViewer = noteViewer;
   const hoverProvider = new FrilVaultHoverProvider(store, getWorkspaceRoot, isEnabled);
 
   const refreshNoteState = async (editor?: vscode.TextEditor) => {
@@ -158,6 +163,7 @@ export function activate(context: vscode.ExtensionContext): void {
     noteCountStore.clear();
     gutterRegistry.clear();
     decorator.clear();
+    noteViewer.clearAll();
     notesProvider.refresh();
   };
 
@@ -166,6 +172,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const onStoreChanged = () => {
     notesProvider.refresh();
     void decorator.refresh();
+    void noteViewer.refresh();
     codeLensRefreshEmitter.fire();
   };
 
@@ -192,6 +199,7 @@ export function activate(context: vscode.ExtensionContext): void {
     store,
     noteCountStore,
     decorator,
+    noteViewer,
     registerFrilVaultHoverProvider(context, hoverProvider),
     vscode.commands.registerCommand(COMMAND_IDS.notesPanelOpenNote, async (noteView: NoteView) => {
       if (!isEnabled()) {
@@ -225,6 +233,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       COMMAND_IDS.editNote,
       runWhenEnabled(createEditNoteCommand(inlineNoteEditor)),
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.noteViewerToggle,
+      runWhenEnabled(createToggleNoteViewerCommand(noteViewer)),
     ),
     vscode.commands.registerCommand(
       COMMAND_IDS.notesPanelEditNote,
@@ -317,10 +329,12 @@ export function activate(context: vscode.ExtensionContext): void {
 export function deactivate(): void {
   disposeNotesTreeDataProvider();
   activeDecorator?.clear();
+  activeNoteViewer?.clearAll();
   activeStore?.clear();
   activeNoteCountStore?.clear();
   activeRegistry?.clear();
   activeDecorator = undefined;
+  activeNoteViewer = undefined;
   activeStore = undefined;
   activeNoteCountStore = undefined;
   activeRegistry = undefined;

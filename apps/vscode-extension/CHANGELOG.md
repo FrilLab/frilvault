@@ -2,6 +2,17 @@
 
 All notable changes to the FrilVault VS Code extension are documented here.
 
+## Unreleased
+
+### Added
+
+- Expandable block note viewer displayed above associated code anchors with collapsed and expanded states
+- Configuration settings `frilvault.noteViewer.enabled` and `frilvault.noteViewer.defaultState`
+
+### Removed
+
+- Legacy after-line inline note preview decorations and obsolete `frilvault.inlineNotes.*` / `frilvault.inlineLineNotes.*` settings
+
 ## 0.0.3 - 2026-07-27
 
 ### Added

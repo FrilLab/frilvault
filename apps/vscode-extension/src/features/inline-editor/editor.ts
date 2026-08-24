@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 
 import type { CliClient } from '../../core/cliClient';
-import { getInlineNotesDebounceMs } from '../presentation/inlinePreviewSettings';
 import type { NoteView } from '../../types';
 import {
   getActiveEditorOrThrow,
@@ -77,7 +76,7 @@ export class InlineNoteEditor {
         },
       ) ??
       new DebouncedAutoSave(
-        getInlineNotesDebounceMs(),
+        getAutoSaveDebounceMs(),
         (status) => this.handleSaveStatus(status),
         async (revision) => {
           await this.persistDraft(revision);
@@ -440,4 +439,18 @@ export function createInlineNoteEditor(
   dependencies: InlineNoteEditorDependencies,
 ): InlineNoteEditor {
   return new InlineNoteEditor(dependencies);
+}
+
+const DEFAULT_DEBOUNCE_MS = 900;
+
+export function getAutoSaveDebounceMs(): number {
+  const configured = vscode.workspace
+    .getConfiguration('frilvault')
+    .get<number>('inlineEditor.autoSaveDebounceMs', DEFAULT_DEBOUNCE_MS);
+
+  if (!Number.isFinite(configured) || configured < 100) {
+    return DEFAULT_DEBOUNCE_MS;
+  }
+
+  return Math.floor(configured);
 }
