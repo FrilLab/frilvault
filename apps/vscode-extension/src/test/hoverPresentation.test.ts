@@ -3,6 +3,7 @@ import * as assert from 'node:assert';
 import { suite, test } from 'mocha';
 import * as vscode from 'vscode';
 
+import { COMMAND_IDS } from '../constants/ids';
 import { buildNoteUri } from '../features/decorations/gutterActions';
 import { deduplicateNotesById } from '../features/presentation/deduplicateNotes';
 import {
@@ -67,7 +68,7 @@ suite('Hover presentation', () => {
 
     assert.doesNotMatch(content, /\*\*test tags\*\*/);
     assert.match(content, /test context/);
-    assert.match(content, /Tags: test tags/);
+    assert.match(content, /Tags: \[#test tags\]\(command:frilvault\.searchNotesByTag/);
     assert.match(content, /Symbol: ConfigKey/);
     assert.doesNotMatch(content, /Unknown: ConfigKey/);
   });
@@ -114,7 +115,9 @@ suite('Hover presentation', () => {
     assert.match(actions, /\[Edit\]/);
     assert.match(actions, /\[Delete\]/);
     assert.match(actions, /\[Copy Link\]/);
-    assert.strictEqual(parts.contents[0]?.isTrusted, false);
+    assert.deepStrictEqual(parts.contents[0]?.isTrusted, {
+      enabledCommands: [COMMAND_IDS.searchNotesByTag],
+    });
     assert.deepStrictEqual(parts.contents[1]?.isTrusted, {
       enabledCommands: [...RICH_HOVER_COMMANDS],
     });
@@ -191,6 +194,39 @@ suite('Hover presentation', () => {
     assert.doesNotMatch(markdown, /Open Note/);
     assert.doesNotMatch(markdown, /Copy Link/);
     assert.doesNotMatch(markdown, /Copy Content/);
+  });
+
+  test('renders clickable escaped tags and truncates long tag lists', () => {
+    const note = createLineNoteView('plain body', 'note-1');
+    note.note.tags = ['todo', 'parser_[x]', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+
+    const parts = buildEditorNotesHoverParts(
+      [note],
+      '/tmp/workspace',
+      'src/a.ts',
+      800,
+    );
+    const content = parts.contents[0]?.value ?? '';
+
+    assert.match(content, /\[#todo\]\(command:frilvault\.searchNotesByTag/);
+    assert.match(content, /#parser\\_\\\[x\\\]/);
+    assert.match(content, /%22todo%22/);
+    assert.match(content, /\+1 more/);
+    assert.doesNotMatch(content, /#nine/);
+  });
+
+  test('does not render an empty tags section for untagged notes', () => {
+    const note = createLineNoteView('plain body', 'note-1');
+    note.note.tags = [];
+
+    const parts = buildEditorNotesHoverParts(
+      [note],
+      '/tmp/workspace',
+      'src/a.ts',
+      800,
+    );
+
+    assert.doesNotMatch(parts.contents[0]?.value ?? '', /Tags:/);
   });
 });
 

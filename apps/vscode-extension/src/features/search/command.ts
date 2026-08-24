@@ -7,6 +7,7 @@ import {
   formatNoteQuickPickDescription,
   noteQuickPickLabel,
 } from '../notes-panel/presentation';
+import { formatTagList } from '../presentation/tagPresentation';
 
 export type SearchQuickPickItem = vscode.QuickPickItem & {
   note: NoteView;
@@ -70,10 +71,10 @@ export function createSearchCommand(
 
 export function createSearchByTagCommand(
   dependencies: SearchByTagCommandDependencies,
-): () => Promise<void> {
-  return async () => {
+): (selectedTag?: string) => Promise<void> {
+  return async (selectedTag?: string) => {
     const showInputBox = dependencies.showInputBox ?? vscode.window.showInputBox;
-    const tag = await showInputBox({
+    const tag = selectedTag ?? await showInputBox({
       prompt: 'Search FrilVault notes by tag',
       placeHolder: 'todo or #todo',
       ignoreFocusOut: true,
@@ -110,10 +111,14 @@ export function createSearchByTagCommand(
 }
 
 export function buildTagSearchQuickPickItems(results: NoteView[]): SearchQuickPickItem[] {
-  return results.map((note) => ({
-    label: noteQuickPickLabel(note),
-    description: `${note.source_file} · ${formatNoteQuickPickDescription(note)}`,
-    detail: `Tags: ${note.note.tags?.join(', ') ?? ''}`,
-    note,
-  }));
+  return results.map((note) => {
+    const tags = formatTagList(note.note.tags);
+
+    return {
+      label: noteQuickPickLabel(note),
+      description: `${note.source_file} · ${formatNoteQuickPickDescription(note)}`,
+      detail: tags ? `Tags: ${tags}` : undefined,
+      note,
+    };
+  });
 }

@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { COMMAND_IDS, VIEW_ITEM_CONTEXT } from '../../constants/ids';
 import type { NoteView } from '../../types';
 import { formatNoteHover } from '../../utils/noteMarkdown';
+import { formatTagList, SIDEBAR_TAG_LIMIT } from '../presentation/tagPresentation';
 
 export type AnchorGroupKind = 'Line' | 'Symbol' | 'Unresolved';
 
@@ -139,13 +140,19 @@ function createPreview(noteView: NoteView): string {
 }
 
 function createDescription(noteView: NoteView): string {
+  let anchor: string;
+
   if (noteView.note.anchor.type === 'Line') {
-    return `L${noteView.note.anchor.line ?? 1}`;
+    anchor = `L${noteView.note.anchor.line ?? 1}`;
+  } else {
+    const resolvedLine = noteView.resolved?.line ?? noteView.note.anchor.line_hint;
+    const lineHint =
+      typeof resolvedLine === 'number' ? `L${resolvedLine}` : 'Unresolved';
+
+    anchor = `${lineHint} ${noteView.note.anchor.name ?? ''}`.trim();
   }
 
-  const resolvedLine = noteView.resolved?.line ?? noteView.note.anchor.line_hint;
-  const lineHint =
-    typeof resolvedLine === 'number' ? `L${resolvedLine}` : 'Unresolved';
+  const tags = formatTagList(noteView.note.tags, SIDEBAR_TAG_LIMIT);
 
-  return `${lineHint} ${noteView.note.anchor.name ?? ''}`.trim();
+  return tags ? `${anchor} · ${tags}` : anchor;
 }

@@ -1,5 +1,6 @@
 import type { NoteView, WorkspaceExplorerNode } from '../../types';
 import { createInlinePreview } from '../presentation/inlinePreview';
+import { formatTagList } from '../presentation/tagPresentation';
 
 export interface SymbolNoteGroup {
   name: string;
@@ -75,10 +76,10 @@ export function formatNoteQuickPickDescription(noteView: NoteView): string {
 }
 
 export function formatNoteQuickPickDetail(noteView: NoteView): string | undefined {
-  const tags = noteView.note.tags?.filter((tag) => tag.trim().length > 0) ?? [];
+  const tags = formatTagList(noteView.note.tags);
 
-  if (tags.length > 0) {
-    return tags.join(', ');
+  if (tags) {
+    return `Tags: ${tags}`;
   }
 
   if (noteView.note.updated_at) {

@@ -41,7 +41,7 @@ suite('Inline note editor draft', () => {
 
     assert.strictEqual(draft.mode, 'edit');
     assert.strictEqual(draft.content, 'hello');
-    assert.strictEqual(draft.tagsText, 'bug');
+    assert.strictEqual(draft.tagsText, '#bug');
     assert.strictEqual(draft.expectedUpdatedAt, '2026-01-02T00:00:00Z');
     assert.deepStrictEqual(draft.undoSnapshot?.tags, ['bug']);
   });

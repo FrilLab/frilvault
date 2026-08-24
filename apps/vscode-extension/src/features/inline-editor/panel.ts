@@ -305,7 +305,7 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
         option.className = 'tag-suggestion' + (index === activeTagSuggestion ? ' active' : '');
         option.role = 'option';
         option.setAttribute('aria-selected', String(index === activeTagSuggestion));
-        option.textContent = tag;
+        option.textContent = '#' + tag;
         option.addEventListener('mousedown', (event) => {
           event.preventDefault();
           selectTagSuggestion(index);
@@ -329,7 +329,7 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
       }
 
       const parts = tagsInput.value.split(',');
-      parts[parts.length - 1] = selected;
+      parts[parts.length - 1] = '#' + selected;
       tagsInput.value = parts.map((part) => part.trim()).filter(Boolean).join(', ') + ', ';
       hideTagSuggestions();
       scheduleChange();

@@ -52,7 +52,7 @@ suite('Tag explorer', () => {
 
     assert.strictEqual(tags.length, 1);
     assert.ok(tags[0] instanceof TagExplorerTagItem);
-    assert.strictEqual(tags[0].label, 'todo');
+    assert.strictEqual(tags[0].label, '#todo');
     assert.strictEqual(tags[0].description, '(2)');
 
     const children = await provider.getChildren(tags[0]);

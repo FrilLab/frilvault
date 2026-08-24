@@ -7,9 +7,11 @@ import { suite, test } from 'mocha';
 import { COMMAND_IDS } from '../constants/ids';
 import {
   buildWorkspaceNoteTreeFromExplorer,
+  formatNoteQuickPickDetail,
   groupNotesByAnchor,
 } from '../features/notes-panel/presentation';
 import { buildQuickPickItems } from '../features/notes-panel/quickPick';
+import { NotesPanelItem } from '../features/notes-panel/view';
 import type { NoteView, WorkspaceExplorerNode } from '../types';
 
 suite('Notes presentation', () => {
@@ -116,6 +118,27 @@ suite('Notes presentation', () => {
       buildWorkspaceNoteTreeFromExplorer(createExplorerFile('README.md', 1)),
       [],
     );
+  });
+
+  test('shows consistently formatted tags in note details and sidebar entries', () => {
+    const note = createLineNoteView('src/sample.ts', 42, 1, 'tagged note');
+    note.note.tags = ['todo', 'parser', 'error-handling', 'urgent'];
+
+    assert.strictEqual(
+      formatNoteQuickPickDetail(note),
+      'Tags: #todo  #parser  #error-handling  #urgent',
+    );
+
+    const item = new NotesPanelItem(note, '/tmp/workspace');
+    assert.strictEqual(item.description, 'L42 · #todo  #parser  #error-handling  +1 more');
+  });
+
+  test('omits tag metadata for untagged note entries', () => {
+    const note = createLineNoteView('src/sample.ts', 42, 1, 'plain note');
+    const item = new NotesPanelItem(note, '/tmp/workspace');
+
+    assert.strictEqual(formatNoteQuickPickDetail(note), 'Updated 2026-06-09T00:00:00Z');
+    assert.strictEqual(item.description, 'L42');
   });
 
   test('package.json exposes the editor title action for current-file notes', () => {

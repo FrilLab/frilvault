@@ -47,7 +47,7 @@ suite('Search notes by tag command', () => {
     });
     assert.match(pickedItems[0]?.description ?? '', /src\/main\.rs · Line 3/);
     assert.match(pickedItems[1]?.description ?? '', /src\/lib\.rs · Line 12 · parse/);
-    assert.strictEqual(pickedItems[0]?.detail, 'Tags: todo, urgent');
+    assert.strictEqual(pickedItems[0]?.detail, 'Tags: #todo  #urgent');
     assert.strictEqual(revealed, symbolNote);
   });
 
@@ -74,6 +74,30 @@ suite('Search notes by tag command', () => {
 
     assert.strictEqual(infoMessage, 'No notes found with tag "missing".');
     assert.strictEqual(quickPickShown, false);
+  });
+
+  test('uses a clicked hover tag without prompting again', async () => {
+    let prompted = false;
+    let searchedTag = '';
+    const command = createSearchByTagCommand({
+      cliClient: {
+        searchNotes: async (input) => {
+          searchedTag = input.tag ?? '';
+          return [];
+        },
+      } as Pick<CliClient, 'searchNotes'>,
+      getWorkspaceRoot: () => '/workspace',
+      showInputBox: async () => {
+        prompted = true;
+        return 'other';
+      },
+      showInformationMessage: async () => undefined,
+    });
+
+    await command('parser_[x]');
+
+    assert.strictEqual(prompted, false);
+    assert.strictEqual(searchedTag, 'parser_[x]');
   });
 
   test('uses a bounded content preview in result labels', () => {
