@@ -1,4 +1,4 @@
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 
 use super::format::FormatArg;
 
@@ -14,6 +14,7 @@ pub enum TagAction {
     Merge(TagMergeCommand),
     Remove(TagRemoveCommand),
     List(TagListCommand),
+    Stats(TagStatsCommand),
 }
 
 #[derive(Debug, Args)]
@@ -75,4 +76,24 @@ pub struct TagListCommand {
 
     #[arg(long, value_enum)]
     pub format: Option<FormatArg>,
+}
+
+#[derive(Debug, Args)]
+pub struct TagStatsCommand {
+    /// Show statistics for one tag only
+    #[arg(long)]
+    pub tag: Option<String>,
+
+    /// Break down note counts by source file or immediate parent directory
+    #[arg(long, value_enum)]
+    pub group_by: Option<TagGroupByArg>,
+
+    #[arg(long, value_enum)]
+    pub format: Option<FormatArg>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum TagGroupByArg {
+    File,
+    Directory,
 }

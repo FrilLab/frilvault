@@ -399,3 +399,33 @@ fn parses_tag_list_command() {
         _ => panic!("expected tag command"),
     }
 }
+
+#[test]
+fn parses_tag_stats_command_with_directory_breakdown() {
+    let cli = Cli::parse_from([
+        "flvt",
+        "tag",
+        "stats",
+        "--tag",
+        "architecture",
+        "--group-by",
+        "directory",
+        "--format",
+        "json",
+    ]);
+
+    match cli.command {
+        Commands::Tag(command) => match command.action {
+            TagAction::Stats(stats) => {
+                assert_eq!(stats.tag.as_deref(), Some("architecture"));
+                assert!(matches!(
+                    stats.group_by,
+                    Some(crate::cli::tag::TagGroupByArg::Directory)
+                ));
+                assert!(matches!(stats.format, Some(FormatArg::Json)));
+            }
+            _ => panic!("expected tag stats action"),
+        },
+        _ => panic!("expected tag command"),
+    }
+}

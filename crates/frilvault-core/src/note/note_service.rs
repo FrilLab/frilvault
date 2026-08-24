@@ -17,8 +17,8 @@ use uuid::Uuid;
 
 use crate::{
     AddNoteRequest, AttachmentRepository, FrilVaultError, FrilVaultResult, NoteAnchor,
-    NoteAttachment, NoteQuery, NoteView, SymbolKind, TagOperationResult, TagSummary,
-    UpdateNoteRequest,
+    NoteAttachment, NoteQuery, NoteView, SymbolKind, TagBreakdown, TagGroupBy, TagOperationResult,
+    TagStatistic, TagSummary, UpdateNoteRequest,
     note::{Note, normalize_tag, normalize_tags},
     runtime::VaultContext,
     symbol::SymbolResolver,
@@ -497,35 +497,95 @@ impl NoteService {
     ///
     /// 워크스페이스 전체에서 사용 중인 고유 태그 목록과 각 태그별 노트 수를 반환합니다.
     pub fn list_tags(&mut self) -> FrilVaultResult<Vec<TagSummary>> {
+        let mut summaries: Vec<TagSummary> = self
+            .tag_statistics(None, None)?
+            .into_iter()
+            .map(|statistic| TagSummary {
+                tag: statistic.tag,
+                note_count: statistic.note_count,
+            })
+            .collect();
+
+        summaries.sort_by_key(|summary| summary.tag.to_lowercase());
+        Ok(summaries)
+    }
+
+    /// Aggregates note counts per tag, optionally filtering by tag and grouping
+    /// each tag's distribution by source file or immediate parent directory.
+    ///
+    /// Results are recomputed from current note files and ordered by descending
+    /// note count, then tag name. A tag is counted at most once per note.
+    pub fn tag_statistics(
+        &mut self,
+        tag: Option<&str>,
+        group_by: Option<TagGroupBy>,
+    ) -> FrilVaultResult<Vec<TagStatistic>> {
         let records = self.vault_context.note_repository.list_all_note_files()?;
-        let mut tag_counts: std::collections::HashMap<String, (String, usize)> =
-            std::collections::HashMap::new();
+        let tag_filter = tag
+            .map(|tag| validate_tag_name(tag, "tag"))
+            .transpose()?
+            .map(|tag| tag.to_lowercase());
+        let mut tag_counts: std::collections::HashMap<
+            String,
+            (String, usize, std::collections::HashMap<PathBuf, usize>),
+        > = std::collections::HashMap::new();
 
         for record in records {
             for note in record.note_file.notes {
                 let mut seen_in_note = std::collections::HashSet::new();
                 for tag in note.tags {
                     let normalized = normalize_tag(&tag);
-                    if !normalized.is_empty() && seen_in_note.insert(normalized.to_lowercase()) {
-                        let entry = tag_counts
-                            .entry(normalized.to_lowercase())
-                            .or_insert_with(|| (normalized.clone(), 0));
-                        entry.1 += 1;
+                    let key = normalized.to_lowercase();
+                    if normalized.is_empty()
+                        || tag_filter.as_ref().is_some_and(|filter| filter != &key)
+                        || !seen_in_note.insert(key.clone())
+                    {
+                        continue;
+                    }
+
+                    let entry = tag_counts
+                        .entry(key)
+                        .or_insert_with(|| (normalized, 0, std::collections::HashMap::new()));
+                    entry.1 += 1;
+
+                    if let Some(group_by) = group_by {
+                        let path = tag_group_path(&record.source_file, group_by);
+                        *entry.2.entry(path).or_insert(0) += 1;
                     }
                 }
             }
         }
 
-        let mut summaries: Vec<TagSummary> = tag_counts
+        let mut statistics: Vec<TagStatistic> = tag_counts
             .into_values()
-            .map(|(display_tag, count)| TagSummary {
-                tag: display_tag,
-                note_count: count,
+            .map(|(tag, note_count, breakdown)| {
+                let mut breakdown: Vec<TagBreakdown> = breakdown
+                    .into_iter()
+                    .map(|(path, note_count)| TagBreakdown { path, note_count })
+                    .collect();
+                breakdown.sort_by(|left, right| {
+                    right.note_count.cmp(&left.note_count).then_with(|| {
+                        left.path
+                            .to_string_lossy()
+                            .cmp(&right.path.to_string_lossy())
+                    })
+                });
+
+                TagStatistic {
+                    tag,
+                    note_count,
+                    breakdown,
+                }
             })
             .collect();
 
-        summaries.sort_by_key(|a| a.tag.to_lowercase());
-        Ok(summaries)
+        statistics.sort_by(|left, right| {
+            right
+                .note_count
+                .cmp(&left.note_count)
+                .then_with(|| left.tag.to_lowercase().cmp(&right.tag.to_lowercase()))
+        });
+        Ok(statistics)
     }
 
     /// Identifies tags that are no longer attached to any note.
@@ -654,6 +714,17 @@ impl NoteService {
     /// 현재 workspace root 기준 versioned note URI를 직렬화합니다.
     pub fn note_uri(&self, note_id: Uuid) -> FrilVaultResult<String> {
         crate::uri::NoteUriResolver::serialize(note_id, &self.workspace_root())
+    }
+}
+
+fn tag_group_path(source_file: &Path, group_by: TagGroupBy) -> PathBuf {
+    match group_by {
+        TagGroupBy::File => source_file.to_path_buf(),
+        TagGroupBy::Directory => source_file
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf(),
     }
 }
 

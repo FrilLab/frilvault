@@ -178,4 +178,17 @@ fn run_dispatches_tag_commands() {
 
     let cli = Cli::parse_from(["flvt", "tag", "list", "--format", "json"]);
     run(cli).expect("run tag list");
+
+    let cli = Cli::parse_from([
+        "flvt",
+        "tag",
+        "stats",
+        "--tag",
+        "bug",
+        "--group-by",
+        "file",
+        "--format",
+        "json",
+    ]);
+    run(cli).expect("run tag stats");
 }
