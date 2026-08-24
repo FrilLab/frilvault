@@ -61,6 +61,8 @@ Release automation is split into two stages:
 | `Add` | `frilvault.addNote` | Add a note at the current line or symbol |
 | `Show Notes` | `frilvault.showNotesForCurrentFile` | Show notes for the active file |
 | `Search Notes` | `frilvault.searchNotes` | Search notes in the current workspace |
+| `Set Tag Color` | `frilvault.setTagColor` | Assign a theme-safe color from a tag's context menu |
+| `Remove Tag Color` | `frilvault.removeTagColor` | Restore a tag's default uncolored appearance |
 | `Show Stats` | `frilvault.showStats` | Show workspace note statistics |
 | `Show Health` | `frilvault.showHealth` | Show missing-file health information |
 | `Apply Repairs` | `frilvault.applyRepairs` | Apply note repair suggestions for renamed or moved files |

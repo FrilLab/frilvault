@@ -2,7 +2,7 @@ use std::fs;
 
 use super::helper::create_test_workspace;
 use crate::{
-    FrilVault, VaultMode,
+    FrilVault, TagColor, VaultMode,
     workspace::{PathResolver, WorkspaceRepository},
 };
 
@@ -131,4 +131,45 @@ fn repeated_initialization_preserves_existing_mode_and_configuration() {
         fs::read_to_string(metadata_path).unwrap(),
         original_metadata
     );
+}
+
+#[test]
+fn legacy_workspace_without_tag_settings_loads_uncolored() {
+    let workspace = create_test_workspace();
+    let resolver = PathResolver::new(workspace.root());
+    let repository = WorkspaceRepository::new(resolver.clone());
+    repository.create_if_missing().unwrap();
+
+    let metadata_path = resolver.workspace_metadata_path();
+    let mut metadata: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
+    metadata["settings"].as_object_mut().unwrap().remove("tags");
+    fs::write(&metadata_path, serde_json::to_string(&metadata).unwrap()).unwrap();
+
+    let loaded = repository.load().unwrap();
+
+    assert!(loaded.settings.tags.is_empty());
+}
+
+#[test]
+fn tag_colors_are_stored_once_in_workspace_metadata_and_can_be_removed() {
+    let workspace = create_test_workspace();
+    let resolver = PathResolver::new(workspace.root());
+    let vault = FrilVault::open(workspace.root()).unwrap();
+    vault.initialize(VaultMode::Local).unwrap();
+
+    vault.set_tag_color("#Todo", TagColor::Yellow).unwrap();
+
+    assert_eq!(
+        vault.tag_colors().unwrap().get("todo"),
+        Some(&TagColor::Yellow)
+    );
+    let persisted: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(resolver.workspace_metadata_path()).unwrap())
+            .unwrap();
+    assert_eq!(persisted["settings"]["tags"]["todo"]["color"], "yellow");
+
+    assert!(vault.remove_tag_color("TODO").unwrap());
+    assert!(vault.tag_colors().unwrap().is_empty());
+    assert!(!vault.remove_tag_color("todo").unwrap());
 }

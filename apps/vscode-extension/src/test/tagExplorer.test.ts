@@ -4,7 +4,7 @@ import * as path from 'node:path';
 
 import { suite, test } from 'mocha';
 
-import { VIEW_IDS, tagsViewActivationEvent } from '../constants/ids';
+import { COMMAND_IDS, VIEW_IDS, tagsViewActivationEvent } from '../constants/ids';
 import { FrilVaultTagExplorerProvider } from '../features/tag-explorer/provider';
 import {
   prepareTaggedNotes,
@@ -74,6 +74,14 @@ suite('Tag explorer', () => {
     assert.strictEqual(tagLoads, 2);
   });
 
+  test('uses a theme color for configured tags and keeps uncolored tags neutral', () => {
+    const colored = new TagExplorerTagItem({ tag: 'bug', note_count: 1, color: 'red' });
+    const uncolored = new TagExplorerTagItem({ tag: 'todo', note_count: 1 });
+
+    assert.strictEqual((colored.iconPath as import('vscode').ThemeIcon).color?.id, 'charts.red');
+    assert.strictEqual((uncolored.iconPath as import('vscode').ThemeIcon).color, undefined);
+  });
+
   test('supports line and symbol anchor descriptions and deterministic note ordering', () => {
     const line = createLineNote('src/b.rs', 2, 4, 'line note');
     const symbol = createSymbolNote('src/a.rs', 'run', 'symbol note', 8);
@@ -107,13 +115,23 @@ suite('Tag explorer', () => {
     const packageJsonPath = path.join(__dirname, '..', '..', 'package.json');
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as {
       activationEvents?: string[];
-      contributes?: { views?: { explorer?: Array<{ id: string }> } };
+      contributes?: {
+        views?: { explorer?: Array<{ id: string }> };
+        commands?: Array<{ command: string }>;
+        menus?: { 'view/item/context'?: Array<{ command: string; when?: string }> };
+      };
     };
 
     assert.ok(
       packageJson.contributes?.views?.explorer?.some((view) => view.id === VIEW_IDS.tags),
     );
     assert.ok(packageJson.activationEvents?.includes(tagsViewActivationEvent()));
+    for (const command of [COMMAND_IDS.setTagColor, COMMAND_IDS.removeTagColor]) {
+      assert.ok(packageJson.contributes?.commands?.some((item) => item.command === command));
+      assert.ok(packageJson.contributes?.menus?.['view/item/context']?.some(
+        (item) => item.command === command && item.when?.includes('viewItem == frilvault.tag'),
+      ));
+    }
   });
 });
 

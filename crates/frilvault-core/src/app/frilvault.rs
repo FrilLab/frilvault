@@ -1,12 +1,16 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 use crate::{
     FrilVaultError, FrilVaultResult,
     note::{NoteRepository, NoteService},
     runtime::VaultContext,
     workspace::{
-        GitExcludeStatus, PathResolver, VaultMode, WorkspaceIndexRepository, WorkspaceRepository,
-        WorkspaceService, WorkspaceStatus, ensure_local_vault_excluded, vault_git_tracking_status,
+        GitExcludeStatus, PathResolver, TagColor, TagSettings, VaultMode, WorkspaceIndexRepository,
+        WorkspaceRepository, WorkspaceService, WorkspaceStatus, ensure_local_vault_excluded,
+        vault_git_tracking_status,
     },
 };
 
@@ -104,6 +108,57 @@ impl FrilVault {
             git_tracking: vault_git_tracking_status(&self.workspace_root)?,
             note_count,
         })
+    }
+
+    /// Returns the workspace-level tag color assignments, keyed case-insensitively.
+    pub fn tag_colors(&self) -> FrilVaultResult<BTreeMap<String, TagColor>> {
+        let repository = WorkspaceRepository::new(PathResolver::new(&self.workspace_root));
+        let metadata = repository.load()?;
+
+        Ok(metadata
+            .settings
+            .tags
+            .into_iter()
+            .map(|(tag, settings)| (tag, settings.color))
+            .collect())
+    }
+
+    /// Assigns a theme-safe display color to a tag without modifying any note.
+    pub fn set_tag_color(&self, tag: &str, color: TagColor) -> FrilVaultResult<()> {
+        let tag = crate::normalize_tag(tag);
+        if tag.is_empty() {
+            return Err(FrilVaultError::InvalidTag(
+                "tag name cannot be empty".to_string(),
+            ));
+        }
+
+        let repository = WorkspaceRepository::new(PathResolver::new(&self.workspace_root));
+        let mut metadata = repository.load()?;
+        metadata
+            .settings
+            .tags
+            .insert(tag.to_lowercase(), TagSettings { color });
+        metadata.updated_at = chrono::Utc::now();
+        repository.save(&metadata)
+    }
+
+    /// Removes a tag's display color without modifying the tag or any note.
+    pub fn remove_tag_color(&self, tag: &str) -> FrilVaultResult<bool> {
+        let tag = crate::normalize_tag(tag);
+        if tag.is_empty() {
+            return Err(FrilVaultError::InvalidTag(
+                "tag name cannot be empty".to_string(),
+            ));
+        }
+
+        let repository = WorkspaceRepository::new(PathResolver::new(&self.workspace_root));
+        let mut metadata = repository.load()?;
+        let removed = metadata.settings.tags.remove(&tag.to_lowercase()).is_some();
+        if removed {
+            metadata.updated_at = chrono::Utc::now();
+            repository.save(&metadata)?;
+        }
+        Ok(removed)
     }
 
     fn build_context(&self) -> FrilVaultResult<(VaultContext, WorkspaceIndexRepository)> {

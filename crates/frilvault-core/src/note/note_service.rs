@@ -522,6 +522,7 @@ impl NoteService {
             .map(|statistic| TagSummary {
                 tag: statistic.tag,
                 note_count: statistic.note_count,
+                color: None,
             })
             .collect();
 

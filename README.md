@@ -113,6 +113,8 @@ flvt search --tag-query 'tag:bug OR tag:security'
 flvt search --tag-query 'tag:architecture NOT tag:legacy'
 flvt tag stats
 flvt tag stats --tag architecture --group-by directory --format json
+flvt tag color set bug red
+flvt tag color remove bug
 flvt resolve-uri "frilvault://note/..."
 flvt stats
 flvt doctor
@@ -125,6 +127,10 @@ without a leading `#`. Precedence is `NOT`, then `AND`, then `OR`; `A NOT B`
 means `A AND NOT B`. Wrap a complete term in double quotes inside the query when
 a tag contains spaces, for example `--tag-query '"tag:needs review" OR tag:todo'`.
 `--tag-query` cannot be combined with repeated `--tag` flags.
+
+Tag colors use the theme-safe `red`, `orange`, `yellow`, `green`, `blue`, and
+`purple` palette. They are optional workspace metadata stored once in
+`.vault/workspace.json`; note JSON continues to store tag names only.
 
 ## Documentation
 

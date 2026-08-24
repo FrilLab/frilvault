@@ -4,6 +4,7 @@ import { COMMAND_IDS, VIEW_ITEM_CONTEXT } from '../../constants/ids';
 import type { NoteView, TagSummary } from '../../types';
 import { tagNoteDescription, tagNotePreview } from './presentation';
 import { formatTag } from '../presentation/tagPresentation';
+import { tagThemeColor } from '../presentation/tagColor';
 
 export class TagExplorerStatusItem extends vscode.TreeItem {
   public constructor(message: string, icon: string) {
@@ -16,7 +17,7 @@ export class TagExplorerTagItem extends vscode.TreeItem {
   public constructor(public readonly summary: TagSummary) {
     super(formatTag(summary.tag), vscode.TreeItemCollapsibleState.Collapsed);
     this.description = `(${summary.note_count})`;
-    this.iconPath = new vscode.ThemeIcon('tag');
+    this.iconPath = new vscode.ThemeIcon('tag', tagThemeColor(summary.color));
     this.contextValue = VIEW_ITEM_CONTEXT.tag;
   }
 }

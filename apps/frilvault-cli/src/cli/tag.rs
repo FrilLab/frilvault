@@ -15,6 +15,51 @@ pub enum TagAction {
     Remove(TagRemoveCommand),
     List(TagListCommand),
     Stats(TagStatsCommand),
+    Color(TagColorCommand),
+}
+
+#[derive(Debug, Args)]
+pub struct TagColorCommand {
+    #[command(subcommand)]
+    pub action: TagColorAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TagColorAction {
+    Set(TagColorSetCommand),
+    Remove(TagColorRemoveCommand),
+}
+
+#[derive(Debug, Args)]
+pub struct TagColorSetCommand {
+    /// Tag to color
+    pub tag: String,
+
+    /// Theme-safe color name
+    #[arg(value_enum)]
+    pub color: TagColorArg,
+
+    #[arg(long, value_enum)]
+    pub format: Option<FormatArg>,
+}
+
+#[derive(Debug, Args)]
+pub struct TagColorRemoveCommand {
+    /// Tag whose color should be removed
+    pub tag: String,
+
+    #[arg(long, value_enum)]
+    pub format: Option<FormatArg>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum TagColorArg {
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Blue,
+    Purple,
 }
 
 #[derive(Debug, Args)]
