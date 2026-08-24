@@ -38,6 +38,7 @@
     "onCommand:frilvault.notesPanel.editNote",
     "onCommand:frilvault.notesPanel.openNote",
     "onCommand:frilvault.searchNotes",
+    "onCommand:frilvault.searchNotesByTag",
     "onCommand:frilvault.showNotesForCurrentFile",
     "onCommand:frilvault.showStats",
     "onCommand:frilvault.showHealth",
@@ -76,6 +77,10 @@
       {
         "command": "frilvault.searchNotes",
         "title": "Search Notes"
+      },
+      {
+        "command": "frilvault.searchNotesByTag",
+        "title": "Search Notes by Tag"
       },
       {
         "command": "frilvault.showNotesForCurrentFile",
@@ -210,6 +215,10 @@
         },
         {
           "command": "frilvault.searchNotes",
+          "when": "frilvault.enabled"
+        },
+        {
+          "command": "frilvault.searchNotesByTag",
           "when": "frilvault.enabled"
         },
         {

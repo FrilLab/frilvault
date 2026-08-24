@@ -123,12 +123,12 @@ impl NoteService {
         };
 
         if let Some(tag) = &query.tag {
-            let tag = tag.to_lowercase();
+            let tag = normalize_tag_for_search(tag);
             results.retain(|view| {
                 view.note
                     .tags
                     .iter()
-                    .any(|note_tag| note_tag.to_lowercase() == tag)
+                    .any(|note_tag| normalize_tag_for_search(note_tag) == tag)
             });
         }
 
@@ -666,6 +666,13 @@ fn note_matches_keyword(view: &NoteView, keyword: &str) -> bool {
     );
 
     content_match || symbol_match
+}
+
+fn normalize_tag_for_search(tag: &str) -> String {
+    tag.trim()
+        .strip_prefix('#')
+        .unwrap_or(tag.trim())
+        .to_lowercase()
 }
 
 fn validate_tag_name(tag: &str, field_name: &str) -> FrilVaultResult<String> {

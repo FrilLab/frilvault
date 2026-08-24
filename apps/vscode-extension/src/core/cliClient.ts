@@ -96,6 +96,7 @@ export interface SearchNotesInput {
   workspaceRoot: string;
   keyword?: string;
   sourceFile?: string;
+  tag?: string;
 }
 
 /**
@@ -212,6 +213,10 @@ export class CliClient {
 
     if (input.sourceFile) {
       args.push('--file', input.sourceFile);
+    }
+
+    if (input.tag) {
+      args.push('--tag', input.tag);
     }
 
     args.push('--format', 'json');

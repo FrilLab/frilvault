@@ -36,7 +36,7 @@ import { createInlineNoteEditor } from './features/inline-editor/editor';
 import { createShowNotesForCurrentFileCommand } from './features/notes-panel/command';
 import { FrilVaultNotesProvider } from './features/notes-panel/provider';
 import { registerNotesTreeDataProvider, disposeNotesTreeDataProvider } from './features/notes-panel/register';
-import { createSearchCommand } from './features/search/command';
+import { createSearchByTagCommand, createSearchCommand } from './features/search/command';
 import { createApplyRepairsCommand, createShowHealthCommand } from './features/workspace/health';
 import { registerSourceRenameHandler } from './features/workspace/rename';
 import { registerNoteUriHandler } from './features/uri/handler';
@@ -236,8 +236,12 @@ export function activate(context: vscode.ExtensionContext): void {
       }),
     ),
     vscode.commands.registerCommand(
-      'frilvault.searchNotes',
+      COMMAND_IDS.searchNotes,
       runWhenEnabled(createSearchCommand(cliClient, getWorkspaceRoot)),
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.searchNotesByTag,
+      runWhenEnabled(createSearchByTagCommand({ cliClient, getWorkspaceRoot })),
     ),
     vscode.commands.registerCommand(
       COMMAND_IDS.showNotesForCurrentFile,
