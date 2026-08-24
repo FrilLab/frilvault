@@ -21,7 +21,6 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode> {
   public constructor(
     private readonly loadTags: () => Promise<TagSummary[]>,
     private readonly loadNotes: (tag: string) => Promise<NoteView[]>,
-    private readonly getWorkspaceRoot: () => string,
     private readonly isEnabled: () => boolean = () => true,
   ) {}
 
@@ -78,7 +77,7 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode> {
       }
 
       return prepareTaggedNotes(await load).map(
-        (note) => new TagExplorerNoteItem(note, this.getWorkspaceRoot()),
+        (note) => new TagExplorerNoteItem(note),
       );
     } catch (error) {
       this.noteLoads.delete(tag);

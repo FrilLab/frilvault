@@ -46,7 +46,6 @@ suite('Tag explorer', () => {
         assert.strictEqual(tag, 'todo');
         return notes;
       },
-      () => '/workspace',
     );
 
     const tags = await provider.getChildren();
@@ -96,7 +95,6 @@ suite('Tag explorer', () => {
     const provider = new FrilVaultTagExplorerProvider(
       async () => [],
       async () => [],
-      () => '/workspace',
     );
 
     const children = await provider.getChildren();

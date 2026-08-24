@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 
 import { COMMAND_IDS, VIEW_ITEM_CONTEXT } from '../../constants/ids';
 import type { NoteView, TagSummary } from '../../types';
-import { formatNoteHover } from '../../utils/noteMarkdown';
 import { tagNoteDescription, tagNotePreview } from './presentation';
 
 export class TagExplorerStatusItem extends vscode.TreeItem {
@@ -22,13 +21,11 @@ export class TagExplorerTagItem extends vscode.TreeItem {
 }
 
 export class TagExplorerNoteItem extends vscode.TreeItem {
-  public constructor(
-    public readonly noteView: NoteView,
-    workspaceRoot: string,
-  ) {
+  public constructor(public readonly noteView: NoteView) {
     super(tagNotePreview(noteView), vscode.TreeItemCollapsibleState.None);
-    this.description = tagNoteDescription(noteView);
-    this.tooltip = formatNoteHover(noteView, workspaceRoot);
+    const description = tagNoteDescription(noteView);
+    this.description = description;
+    this.tooltip = `${description}\n\n${noteView.note.content}`;
     this.iconPath = new vscode.ThemeIcon('note');
     this.contextValue = VIEW_ITEM_CONTEXT.tagNote;
     this.command = {

@@ -100,7 +100,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const tagExplorerProvider = new FrilVaultTagExplorerProvider(
     () => cliClient.tagList(getWorkspaceRoot()),
     (tag) => cliClient.searchNotes({ workspaceRoot: getWorkspaceRoot(), tag }),
-    getWorkspaceRoot,
     isEnabled,
   );
   const decorator = new FrilVaultDecorator(
