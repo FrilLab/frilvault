@@ -36,6 +36,12 @@ pub enum FrilVaultError {
     #[error("note not found: {0}")]
     NoteNotFound(Uuid),
 
+    #[error("duplicate note id: {0}")]
+    DuplicateNoteId(Uuid),
+
+    #[error("invalid note anchor: {0}")]
+    InvalidAnchor(String),
+
     #[error("invalid note file path")]
     InvalidNoteFilePath,
 

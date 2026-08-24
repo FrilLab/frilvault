@@ -46,7 +46,7 @@ impl NoteUriResolver {
         let parsed = ParsedNoteUri::parse(uri)?;
         let current_workspace = service.workspace_root();
 
-        if parsed.workspace != current_workspace {
+        if !workspace_paths_match(&parsed.workspace, &current_workspace) {
             return Err(FrilVaultError::UnknownWorkspace(
                 parsed.workspace.display().to_string(),
             ));
@@ -59,6 +59,17 @@ impl NoteUriResolver {
         ensure_anchor_is_resolvable(&view, parsed.note_id)?;
 
         Ok(view)
+    }
+}
+
+fn workspace_paths_match(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+
+    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
     }
 }
 

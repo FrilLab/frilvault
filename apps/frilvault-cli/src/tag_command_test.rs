@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{Mutex, MutexGuard},
+    sync::MutexGuard,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -19,9 +19,8 @@ use crate::{
         },
     },
     command, run,
+    test_support::WORKING_DIRECTORY_LOCK,
 };
-
-static WORKING_DIRECTORY_LOCK: Mutex<()> = Mutex::new(());
 
 struct WorkingDirectoryGuard {
     _lock: MutexGuard<'static, ()>,

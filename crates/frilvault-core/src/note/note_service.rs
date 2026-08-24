@@ -73,7 +73,12 @@ impl NoteService {
     ///
     /// 해당 파일의 workspace index note count를 갱신합니다.
     pub fn add_note(&mut self, input: AddNoteRequest) -> FrilVaultResult<Note> {
-        let source_file = input.source_file.clone();
+        let mut input = input;
+        validate_anchor(&input.anchor)?;
+        let source_file = self
+            .vault_context
+            .normalize_source_file(&input.source_file)?;
+        input.source_file = source_file.clone();
         let note = Note::new(input);
 
         self.vault_context
@@ -191,23 +196,21 @@ impl NoteService {
         source_file: impl AsRef<Path>,
         note_id: Uuid,
     ) -> FrilVaultResult<()> {
-        let source_file = source_file.as_ref();
+        let source_file = self
+            .vault_context
+            .normalize_source_file(source_file.as_ref())?;
 
-        let mut notes = self.load_notes(source_file)?;
+        let mut notes = self.load_notes(&source_file)?;
 
-        let before = notes.len();
+        let note_index = unique_note_index(&notes, note_id)?;
+        notes.remove(note_index);
 
-        notes.retain(|note| note.id != note_id);
+        self.save_notes(&source_file, notes)?;
 
-        if notes.len() == before {
-            return Err(FrilVaultError::NoteNotFound(note_id));
-        }
+        self.vault_context
+            .sync_index_for_source_file(&source_file)?;
 
         self.attachment_repository().remove_all_for_note(note_id)?;
-
-        self.save_notes(source_file, notes)?;
-
-        self.vault_context.sync_index_for_source_file(source_file)?;
 
         Ok(())
     }
@@ -230,14 +233,14 @@ impl NoteService {
         note_id: Uuid,
         request: UpdateNoteRequest,
     ) -> FrilVaultResult<Note> {
-        let source_file = source_file.as_ref();
+        let source_file = self
+            .vault_context
+            .normalize_source_file(source_file.as_ref())?;
 
-        let mut notes = self.load_notes(source_file)?;
+        let mut notes = self.load_notes(&source_file)?;
 
-        let note = notes
-            .iter_mut()
-            .find(|note| note.id == note_id)
-            .ok_or(FrilVaultError::NoteNotFound(note_id))?;
+        let note_index = unique_note_index(&notes, note_id)?;
+        let note = &mut notes[note_index];
 
         if let Some(expected) = request.expected_updated_at
             && note.updated_at != expected
@@ -254,9 +257,10 @@ impl NoteService {
         note.updated_at = Utc::now();
 
         let updated = note.clone();
-        self.save_notes(source_file, notes)?;
+        self.save_notes(&source_file, notes)?;
 
-        self.vault_context.sync_index_for_source_file(source_file)?;
+        self.vault_context
+            .sync_index_for_source_file(&source_file)?;
 
         Ok(updated)
     }
@@ -267,23 +271,26 @@ impl NoteService {
         note_id: Uuid,
         image_path: impl AsRef<Path>,
     ) -> FrilVaultResult<NoteAttachment> {
-        let source_file = source_file.as_ref();
-        let mut notes = self.load_notes(source_file)?;
+        let source_file = self
+            .vault_context
+            .normalize_source_file(source_file.as_ref())?;
+        let mut notes = self.load_notes(&source_file)?;
 
-        let note = notes
-            .iter_mut()
-            .find(|note| note.id == note_id)
-            .ok_or(FrilVaultError::NoteNotFound(note_id))?;
+        let note_index = unique_note_index(&notes, note_id)?;
+        let note = &mut notes[note_index];
 
-        let attachment = self
-            .attachment_repository()
-            .store(note_id, image_path.as_ref())?;
+        let attachment_repository = self.attachment_repository();
+        let attachment = attachment_repository.store(note_id, image_path.as_ref())?;
 
         note.attachments.push(attachment.clone());
         note.updated_at = Utc::now();
 
-        self.save_notes(source_file, notes)?;
-        self.vault_context.sync_index_for_source_file(source_file)?;
+        if let Err(error) = self.save_notes(&source_file, notes) {
+            let _ = attachment_repository.remove(note_id, &attachment);
+            return Err(error);
+        }
+        self.vault_context
+            .sync_index_for_source_file(&source_file)?;
 
         Ok(attachment)
     }
@@ -294,13 +301,13 @@ impl NoteService {
         note_id: Uuid,
         attachment_id: Uuid,
     ) -> FrilVaultResult<()> {
-        let source_file = source_file.as_ref();
-        let mut notes = self.load_notes(source_file)?;
+        let source_file = self
+            .vault_context
+            .normalize_source_file(source_file.as_ref())?;
+        let mut notes = self.load_notes(&source_file)?;
 
-        let note = notes
-            .iter_mut()
-            .find(|note| note.id == note_id)
-            .ok_or(FrilVaultError::NoteNotFound(note_id))?;
+        let note_index = unique_note_index(&notes, note_id)?;
+        let note = &mut notes[note_index];
 
         let attachment_index = note
             .attachments
@@ -311,10 +318,11 @@ impl NoteService {
         let attachment = note.attachments.remove(attachment_index);
         note.updated_at = Utc::now();
 
-        self.attachment_repository().remove(note_id, &attachment)?;
+        self.save_notes(&source_file, notes)?;
+        self.vault_context
+            .sync_index_for_source_file(&source_file)?;
 
-        self.save_notes(source_file, notes)?;
-        self.vault_context.sync_index_for_source_file(source_file)?;
+        self.attachment_repository().remove(note_id, &attachment)?;
 
         Ok(())
     }
@@ -375,7 +383,9 @@ impl NoteService {
         symbol: &str,
         kind: SymbolKind,
     ) -> FrilVaultResult<Option<crate::ResolvedSymbol>> {
-        let source_file = source_file.as_ref();
+        let source_file = self
+            .vault_context
+            .normalize_source_file(source_file.as_ref())?;
         let workspace_root = self
             .vault_context
             .workspace_index_repository
@@ -712,10 +722,19 @@ impl NoteService {
     ///
     /// 인덱스된 모든 source file에서 stable id로 note를 찾습니다.
     pub fn find_note_by_id(&mut self, note_id: Uuid) -> FrilVaultResult<NoteView> {
-        self.all_note_views()?
+        let mut matches = self
+            .all_note_views()?
             .into_iter()
-            .find(|view| view.note.id == note_id)
-            .ok_or(FrilVaultError::NoteNotFound(note_id))
+            .filter(|view| view.note.id == note_id);
+        let note = matches
+            .next()
+            .ok_or(FrilVaultError::NoteNotFound(note_id))?;
+
+        if matches.next().is_some() {
+            return Err(FrilVaultError::DuplicateNoteId(note_id));
+        }
+
+        Ok(note)
     }
 
     /// Resolves a stable note URI into a current `NoteView`.
@@ -745,6 +764,38 @@ fn tag_group_path(source_file: &Path, group_by: TagGroupBy) -> PathBuf {
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."))
             .to_path_buf(),
+    }
+}
+
+fn unique_note_index(notes: &[Note], note_id: Uuid) -> FrilVaultResult<usize> {
+    let mut matches = notes
+        .iter()
+        .enumerate()
+        .filter(|(_, note)| note.id == note_id)
+        .map(|(index, _)| index);
+    let index = matches
+        .next()
+        .ok_or(FrilVaultError::NoteNotFound(note_id))?;
+
+    if matches.next().is_some() {
+        return Err(FrilVaultError::DuplicateNoteId(note_id));
+    }
+
+    Ok(index)
+}
+
+fn validate_anchor(anchor: &NoteAnchor) -> FrilVaultResult<()> {
+    match anchor {
+        NoteAnchor::Line(anchor) if anchor.line == 0 || anchor.column == 0 => Err(
+            FrilVaultError::InvalidAnchor("line and column must be 1-based".to_string()),
+        ),
+        NoteAnchor::Symbol(anchor) if anchor.name.trim().is_empty() => Err(
+            FrilVaultError::InvalidAnchor("symbol name cannot be empty".to_string()),
+        ),
+        NoteAnchor::Symbol(anchor) if anchor.line_hint == Some(0) => Err(
+            FrilVaultError::InvalidAnchor("symbol line hint must be 1-based".to_string()),
+        ),
+        _ => Ok(()),
     }
 }
 
