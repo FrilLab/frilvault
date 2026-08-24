@@ -82,6 +82,10 @@ pub fn print_note_view(view: &NoteView) {
         }
     }
 
+    if !view.note.tags.is_empty() {
+        println!("Tags: {}", view.note.tags.join(", "));
+    }
+
     println!();
 
     println!("{}", view.note.content,);

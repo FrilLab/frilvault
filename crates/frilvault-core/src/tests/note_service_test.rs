@@ -622,9 +622,14 @@ fn search_by_tag_returns_matching_notes() {
     service
         .add_note(AddNoteRequest {
             source_file: "src/lib.rs".into(),
-            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            anchor: NoteAnchor::Symbol(SymbolAnchor {
+                name: "Architecture".to_string(),
+                kind: SymbolKind::Struct,
+                signature: None,
+                line_hint: Some(7),
+            }),
             content: "architecture note".to_string(),
-            tags: Some(vec!["architecture".to_string()]),
+            tags: Some(vec!["#architecture".to_string()]),
         })
         .unwrap();
 
@@ -644,6 +649,30 @@ fn search_by_tag_returns_matching_notes() {
     let architecture_notes = service.search_by_tag("ARCHITECTURE").unwrap();
     assert_eq!(architecture_notes.len(), 1);
     assert_eq!(architecture_notes[0].note.content, "architecture note");
+    assert!(matches!(
+        architecture_notes[0].note.anchor,
+        NoteAnchor::Symbol(_)
+    ));
+
+    let prefixed_architecture_notes = service.search_by_tag("#architecture").unwrap();
+    assert_eq!(prefixed_architecture_notes.len(), 1);
+}
+
+#[test]
+fn search_by_tag_returns_empty_when_not_found() {
+    let workspace = create_test_workspace();
+    let mut service = create_test_note_service(workspace.root());
+
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "tagged note".to_string(),
+            tags: Some(vec!["todo".to_string()]),
+        })
+        .unwrap();
+
+    assert!(service.search_by_tag("architecture").unwrap().is_empty());
 }
 
 #[test]

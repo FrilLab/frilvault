@@ -17,6 +17,8 @@ export const COMMAND_IDS = {
   enable: 'frilvault.enable',
   disable: 'frilvault.disable',
   refresh: 'frilvault.refresh',
+  searchNotes: 'frilvault.searchNotes',
+  searchNotesByTag: 'frilvault.searchNotesByTag',
   showNotesForCurrentFile: 'frilvault.showNotesForCurrentFile',
   notesPanelOpenNote: 'frilvault.notesPanel.openNote',
   notesPanelEditNote: 'frilvault.notesPanel.editNote',

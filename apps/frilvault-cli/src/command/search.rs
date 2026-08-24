@@ -3,7 +3,7 @@ use frilvault_core::{FrilVault, NoteQuery};
 
 use crate::{
     cli::search::SearchCommand,
-    output::{print_notes, resolve_format},
+    output::{OutputFormat, print_notes, resolve_format},
 };
 
 pub fn execute(command: SearchCommand) -> Result<()> {
@@ -21,8 +21,13 @@ pub fn execute(command: SearchCommand) -> Result<()> {
     };
 
     let results = service.query_notes(&query)?;
+    let format = resolve_format(command.format);
 
-    print_notes(&results, resolve_format(command.format))?;
+    if results.is_empty() && matches!(format, OutputFormat::Text) {
+        println!("No notes found.");
+    } else {
+        print_notes(&results, format)?;
+    }
 
     Ok(())
 }
