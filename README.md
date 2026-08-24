@@ -108,6 +108,9 @@ flvt add --file src/main.rs --line 10 --column 5 --content "parser needs cleanup
 flvt explorer --format json
 flvt list --file src/main.rs
 flvt search parser
+flvt search --tag performance --tag parser
+flvt search --tag-query 'tag:bug OR tag:security'
+flvt search --tag-query 'tag:architecture NOT tag:legacy'
 flvt tag stats
 flvt tag stats --tag architecture --group-by directory --format json
 flvt resolve-uri "frilvault://note/..."
@@ -115,6 +118,13 @@ flvt stats
 flvt doctor
 flvt repair --apply
 ```
+
+Repeated `--tag` flags use AND semantics. `--tag-query` supports case-insensitive
+`AND`, `OR`, and `NOT` operators, parentheses, and exact tag names with or
+without a leading `#`. Precedence is `NOT`, then `AND`, then `OR`; `A NOT B`
+means `A AND NOT B`. Wrap a complete term in double quotes inside the query when
+a tag contains spaces, for example `--tag-query '"tag:needs review" OR tag:todo'`.
+`--tag-query` cannot be combined with repeated `--tag` flags.
 
 ## Documentation
 

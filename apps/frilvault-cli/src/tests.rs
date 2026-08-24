@@ -249,16 +249,49 @@ fn parses_add_command_with_tags() {
 }
 
 #[test]
-fn parses_search_with_tag() {
-    let cli = Cli::parse_from(["flvt", "search", "--tag", "bug", "--format", "json"]);
+fn parses_search_with_repeated_tags() {
+    let cli = Cli::parse_from([
+        "flvt", "search", "--tag", "bug", "--tag", "security", "--format", "json",
+    ]);
 
     match cli.command {
         Commands::Search(command) => {
-            assert_eq!(command.tag.as_deref(), Some("bug"));
+            assert_eq!(command.tags, ["bug", "security"]);
             assert!(matches!(command.format, Some(FormatArg::Json)));
         }
         _ => panic!("expected search command"),
     }
+}
+
+#[test]
+fn parses_search_with_tag_query() {
+    let cli = Cli::parse_from(["flvt", "search", "--tag-query", "tag:bug OR tag:security"]);
+
+    match cli.command {
+        Commands::Search(command) => {
+            assert_eq!(
+                command.tag_query.as_deref(),
+                Some("tag:bug OR tag:security")
+            );
+        }
+        _ => panic!("expected search command"),
+    }
+}
+
+#[test]
+fn rejects_mixed_repeated_tags_and_tag_query() {
+    let error = Cli::try_parse_from([
+        "flvt",
+        "search",
+        "--tag",
+        "bug",
+        "--tag-query",
+        "tag:security",
+    ])
+    .err()
+    .unwrap();
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
 }
 
 #[test]

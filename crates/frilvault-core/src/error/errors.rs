@@ -83,6 +83,10 @@ pub enum FrilVaultError {
     /// 태그 연산에 잘못된 태그 이름 또는 인자가 전달되었을 때 반환됩니다.
     #[error("invalid tag: {0}")]
     InvalidTag(String),
+
+    /// Returned when a tag query cannot be parsed or validated.
+    #[error("invalid tag query: {0}")]
+    InvalidTagQuery(String),
 }
 
 pub type FrilVaultResult<T> = Result<T, FrilVaultError>;

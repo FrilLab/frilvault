@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::{
     AddNoteRequest, AttachmentRepository, FrilVaultError, FrilVaultResult, NoteAnchor,
     NoteAttachment, NoteQuery, NoteView, SymbolKind, TagBreakdown, TagGroupBy, TagOperationResult,
-    TagStatistic, TagSummary, UpdateNoteRequest,
+    TagQuery, TagStatistic, TagSummary, UpdateNoteRequest,
     note::{Note, normalize_tag, normalize_tags},
     runtime::VaultContext,
     symbol::SymbolResolver,
@@ -114,28 +114,47 @@ impl NoteService {
     ///
     /// 선택적 file, keyword, tag 필터를 note view에 적용합니다.
     pub fn query_notes(&mut self, query: &NoteQuery) -> FrilVaultResult<Vec<NoteView>> {
+        self.query_notes_with_tag_query(query, None)
+    }
+
+    /// Applies a parsed tag expression together with optional file and keyword filters.
+    pub fn query_notes_with_tag_query(
+        &mut self,
+        query: &NoteQuery,
+        tag_query: Option<&TagQuery>,
+    ) -> FrilVaultResult<Vec<NoteView>> {
+        let exact_tag_query = query
+            .tag
+            .as_deref()
+            .map(|tag| TagQuery::all([tag]))
+            .transpose()?;
         let mut results = if let Some(source_file) = &query.source_file {
             self.note_views_for_source_file(source_file)?
-        } else if query.keyword.is_some() || query.tag.is_some() {
+        } else if query.keyword.is_some() || exact_tag_query.is_some() || tag_query.is_some() {
             self.all_note_views()?
         } else {
             Vec::new()
         };
 
-        if let Some(tag) = &query.tag {
-            let tag = normalize_tag(tag).to_lowercase();
-            results.retain(|view| {
-                view.note
-                    .tags
-                    .iter()
-                    .any(|note_tag| normalize_tag(note_tag).to_lowercase() == tag)
-            });
+        if let Some(exact_tag_query) = &exact_tag_query {
+            results.retain(|view| exact_tag_query.matches(&view.note.tags));
+        }
+
+        if let Some(tag_query) = tag_query {
+            results.retain(|view| tag_query.matches(&view.note.tags));
         }
 
         if let Some(keyword) = &query.keyword {
             let keyword = keyword.to_lowercase();
             results.retain(|view| note_matches_keyword(view, &keyword));
         }
+
+        results.sort_by(|left, right| {
+            left.source_file
+                .cmp(&right.source_file)
+                .then_with(|| left.note.created_at.cmp(&right.note.created_at))
+                .then_with(|| left.note.id.cmp(&right.note.id))
+        });
 
         Ok(results)
     }

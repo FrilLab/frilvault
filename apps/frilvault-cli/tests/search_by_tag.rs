@@ -27,11 +27,7 @@ impl TestWorkspace {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        let output = Command::new(env!("CARGO_BIN_EXE_flvt"))
-            .args(args)
-            .current_dir(&self.root)
-            .output()
-            .unwrap();
+        let output = self.run_raw(args);
 
         assert!(
             output.status.success(),
@@ -40,6 +36,14 @@ impl TestWorkspace {
         );
 
         output
+    }
+
+    fn run_raw(&self, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_flvt"))
+            .args(args)
+            .current_dir(&self.root)
+            .output()
+            .unwrap()
     }
 
     fn root(&self) -> &Path {
@@ -164,5 +168,107 @@ fn search_tag_prints_result_details_and_a_clear_empty_state() {
     assert_eq!(
         String::from_utf8(empty.stdout).unwrap(),
         "No notes found.\n"
+    );
+}
+
+#[test]
+fn repeated_tags_use_and_semantics_and_return_deterministic_results() {
+    let workspace = TestWorkspace::new();
+
+    for (file, line, content, tags) in [
+        ("src/z.rs", "1", "both z", ["performance", "parser"]),
+        ("src/lib.rs", "2", "both lib", ["PERFORMANCE", "#parser"]),
+        (
+            "src/lib.rs",
+            "3",
+            "performance only",
+            ["performance", "other"],
+        ),
+    ] {
+        fs::write(workspace.root().join(file), "fn example() {}\n").unwrap();
+        workspace.run(&[
+            "add",
+            "--file",
+            file,
+            "--line",
+            line,
+            "--content",
+            content,
+            "--tag",
+            tags[0],
+            "--tag",
+            tags[1],
+        ]);
+    }
+
+    let output = workspace.run(&[
+        "search",
+        "--tag",
+        "#performance",
+        "--tag",
+        "PARSER",
+        "--format",
+        "json",
+    ]);
+    let notes: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let notes = notes.as_array().unwrap();
+
+    assert_eq!(notes.len(), 2);
+    assert_eq!(notes[0]["source_file"], "src/lib.rs");
+    assert_eq!(notes[1]["source_file"], "src/z.rs");
+}
+
+#[test]
+fn tag_query_supports_or_exclusion_and_parentheses() {
+    let workspace = TestWorkspace::new();
+
+    for (line, content, tags) in [
+        ("1", "bug", ["bug", "active"]),
+        ("2", "security", ["security", "active"]),
+        ("3", "legacy security", ["security", "legacy"]),
+        ("4", "unrelated", ["docs", "active"]),
+    ] {
+        workspace.run(&[
+            "add",
+            "--file",
+            "src/lib.rs",
+            "--line",
+            line,
+            "--content",
+            content,
+            "--tag",
+            tags[0],
+            "--tag",
+            tags[1],
+        ]);
+    }
+
+    let output = workspace.run(&[
+        "search",
+        "--tag-query",
+        "(tag:bug OR tag:security) NOT tag:legacy",
+        "--format",
+        "json",
+    ]);
+    let notes: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let contents = notes
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|view| view["note"]["content"].as_str().unwrap())
+        .collect::<Vec<_>>();
+
+    assert_eq!(contents, ["bug", "security"]);
+}
+
+#[test]
+fn malformed_tag_query_reports_an_actionable_error() {
+    let workspace = TestWorkspace::new();
+    let output = workspace.run_raw(&["search", "--tag-query", "tag:bug OR"]);
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("invalid tag query: OR must be followed by a tag expression")
     );
 }

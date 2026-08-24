@@ -43,7 +43,7 @@ suite('Search notes by tag command', () => {
 
     assert.deepStrictEqual(searchInput, {
       workspaceRoot: '/workspace',
-      tag: '#todo',
+      tagQuery: '#todo',
     });
     assert.match(pickedItems[0]?.description ?? '', /src\/main\.rs · Line 3/);
     assert.match(pickedItems[1]?.description ?? '', /src\/lib\.rs · Line 12 · parse/);
@@ -72,7 +72,7 @@ suite('Search notes by tag command', () => {
 
     await command();
 
-    assert.strictEqual(infoMessage, 'No notes found with tag "missing".');
+    assert.strictEqual(infoMessage, 'No notes found for tag query "missing".');
     assert.strictEqual(quickPickShown, false);
   });
 
@@ -98,6 +98,28 @@ suite('Search notes by tag command', () => {
 
     assert.strictEqual(prompted, false);
     assert.strictEqual(searchedTag, 'parser_[x]');
+  });
+
+  test('passes boolean tag expressions to the shared CLI query path', async () => {
+    let searchInput: SearchNotesInput | undefined;
+    const command = createSearchByTagCommand({
+      cliClient: {
+        searchNotes: async (input) => {
+          searchInput = input;
+          return [];
+        },
+      } as Pick<CliClient, 'searchNotes'>,
+      getWorkspaceRoot: () => '/workspace',
+      showInputBox: async () => 'tag:bug OR tag:security NOT tag:legacy',
+      showInformationMessage: async () => undefined,
+    });
+
+    await command();
+
+    assert.deepStrictEqual(searchInput, {
+      workspaceRoot: '/workspace',
+      tagQuery: 'tag:bug OR tag:security NOT tag:legacy',
+    });
   });
 
   test('uses a bounded content preview in result labels', () => {

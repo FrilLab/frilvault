@@ -204,6 +204,40 @@ suite('CliClient', () => {
     assert.ok(calls.some((call) => call.endsWith('search --tag #todo --format json')));
   });
 
+  test('searches notes with repeated tags and a tag query through the CLI boundary', async () => {
+    const calls: string[][] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+
+        calls.push(args);
+        return { stdout: '[]', stderr: '' };
+      },
+    });
+
+    await cliClient.searchNotes({
+      workspaceRoot: '/workspace',
+      tags: ['performance', 'parser'],
+    });
+    await cliClient.searchNotes({
+      workspaceRoot: '/workspace',
+      tagQuery: 'tag:bug OR tag:security',
+    });
+
+    assert.deepStrictEqual(calls, [
+      ['search', '--tag', 'performance', '--tag', 'parser', '--format', 'json'],
+      ['search', '--tag-query', 'tag:bug OR tag:security', '--format', 'json'],
+    ]);
+  });
+
   test('fails fast when the CLI version does not match the extension expectation', async () => {
     const cliClient = new CliClient({
       extensionPath: '/extension',

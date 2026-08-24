@@ -97,6 +97,8 @@ export interface SearchNotesInput {
   keyword?: string;
   sourceFile?: string;
   tag?: string;
+  tags?: string[];
+  tagQuery?: string;
 }
 
 /**
@@ -217,6 +219,14 @@ export class CliClient {
 
     if (input.tag) {
       args.push('--tag', input.tag);
+    }
+
+    for (const tag of input.tags ?? []) {
+      args.push('--tag', tag);
+    }
+
+    if (input.tagQuery) {
+      args.push('--tag-query', input.tagQuery);
     }
 
     args.push('--format', 'json');
