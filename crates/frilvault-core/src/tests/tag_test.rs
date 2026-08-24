@@ -433,3 +433,130 @@ fn list_tags_aggregates_and_counts_tags() {
     let unused = service.list_unused_tags().unwrap();
     assert!(unused.is_empty());
 }
+
+#[test]
+fn tag_statistics_orders_tags_by_usage_and_counts_each_tag_once_per_note() {
+    let workspace = create_test_workspace();
+    let mut service = create_test_note_service(workspace.root());
+
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/core/a.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "note 1".into(),
+            tags: Some(vec![
+                "architecture".into(),
+                "ARCHITECTURE".into(),
+                "todo".into(),
+            ]),
+        })
+        .unwrap();
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/parser/b.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 2, column: 1 }),
+            content: "note 2".into(),
+            tags: Some(vec!["Architecture".into()]),
+        })
+        .unwrap();
+
+    let statistics = service.tag_statistics(None, None).unwrap();
+
+    assert_eq!(statistics.len(), 2);
+    assert_eq!(statistics[0].tag.to_lowercase(), "architecture");
+    assert_eq!(statistics[0].note_count, 2);
+    assert!(statistics[0].breakdown.is_empty());
+    assert_eq!(statistics[1].tag, "todo");
+    assert_eq!(statistics[1].note_count, 1);
+}
+
+#[test]
+fn tag_statistics_filters_and_groups_by_file_or_directory() {
+    let workspace = create_test_workspace();
+    let mut service = create_test_note_service(workspace.root());
+
+    for (source_file, line) in [
+        ("src/core/a.rs", 1),
+        ("src/core/b.rs", 2),
+        ("src/parser/c.rs", 3),
+    ] {
+        service
+            .add_note(AddNoteRequest {
+                source_file: source_file.into(),
+                anchor: NoteAnchor::Line(LineAnchor { line, column: 1 }),
+                content: "architecture note".into(),
+                tags: Some(vec!["architecture".into()]),
+            })
+            .unwrap();
+    }
+
+    let by_directory = service
+        .tag_statistics(Some("ARCHITECTURE"), Some(crate::TagGroupBy::Directory))
+        .unwrap();
+    assert_eq!(by_directory.len(), 1);
+    assert_eq!(by_directory[0].note_count, 3);
+    assert_eq!(
+        by_directory[0].breakdown,
+        vec![
+            crate::TagBreakdown {
+                path: "src/core".into(),
+                note_count: 2,
+            },
+            crate::TagBreakdown {
+                path: "src/parser".into(),
+                note_count: 1,
+            },
+        ]
+    );
+
+    let by_file = service
+        .tag_statistics(Some("architecture"), Some(crate::TagGroupBy::File))
+        .unwrap();
+    assert_eq!(by_file[0].breakdown.len(), 3);
+    assert_eq!(
+        by_file[0].breakdown[0].path,
+        std::path::PathBuf::from("src/core/a.rs")
+    );
+}
+
+#[test]
+fn tag_statistics_recomputes_after_note_changes() {
+    let workspace = create_test_workspace();
+    let mut service = create_test_note_service(workspace.root());
+
+    let note = service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "note".into(),
+            tags: Some(vec!["todo".into()]),
+        })
+        .unwrap();
+    assert_eq!(
+        service.tag_statistics(Some("todo"), None).unwrap()[0].note_count,
+        1
+    );
+
+    service
+        .update_note(
+            "src/main.rs",
+            note.id,
+            UpdateNoteRequest {
+                content: "updated".into(),
+                tags: Some(vec!["architecture".into()]),
+                expected_updated_at: None,
+            },
+        )
+        .unwrap();
+
+    assert!(
+        service
+            .tag_statistics(Some("todo"), None)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        service.tag_statistics(Some("architecture"), None).unwrap()[0].note_count,
+        1
+    );
+}

@@ -108,6 +108,8 @@ flvt add --file src/main.rs --line 10 --column 5 --content "parser needs cleanup
 flvt explorer --format json
 flvt list --file src/main.rs
 flvt search parser
+flvt tag stats
+flvt tag stats --tag architecture --group-by directory --format json
 flvt resolve-uri "frilvault://note/..."
 flvt stats
 flvt doctor

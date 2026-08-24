@@ -1,11 +1,12 @@
 use std::io::{self, Write};
 
 use anyhow::{Context, Result, bail};
-use frilvault_core::FrilVault;
+use frilvault_core::{FrilVault, TagGroupBy, TagStatistic};
 
 use crate::{
     cli::tag::{
-        TagAction, TagCommand, TagListCommand, TagMergeCommand, TagRemoveCommand, TagRenameCommand,
+        TagAction, TagCommand, TagGroupByArg, TagListCommand, TagMergeCommand, TagRemoveCommand,
+        TagRenameCommand, TagStatsCommand,
     },
     output::{OutputFormat, print_json, resolve_format},
 };
@@ -16,6 +17,7 @@ pub fn execute(command: TagCommand) -> Result<()> {
         TagAction::Merge(merge) => execute_merge(merge),
         TagAction::Remove(remove) => execute_remove(remove),
         TagAction::List(list) => execute_list(list),
+        TagAction::Stats(stats) => execute_stats(stats),
     }
 }
 
@@ -233,4 +235,41 @@ fn execute_list(command: TagListCommand) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn execute_stats(command: TagStatsCommand) -> Result<()> {
+    let vault = FrilVault::open(std::env::current_dir()?)?;
+    let mut service = vault.notes()?;
+    let format = resolve_format(command.format);
+    let group_by = command.group_by.map(|group_by| match group_by {
+        TagGroupByArg::File => TagGroupBy::File,
+        TagGroupByArg::Directory => TagGroupBy::Directory,
+    });
+    let statistics = service.tag_statistics(command.tag.as_deref(), group_by)?;
+
+    if matches!(format, OutputFormat::Json) {
+        print_json(&statistics)?;
+        return Ok(());
+    }
+
+    print_tag_statistics(&statistics);
+    Ok(())
+}
+
+fn print_tag_statistics(statistics: &[TagStatistic]) {
+    println!("Tag Statistics");
+
+    if statistics.is_empty() {
+        println!();
+        println!("No matching tags found.");
+        return;
+    }
+
+    for statistic in statistics {
+        println!();
+        println!("{} ({})", statistic.tag, statistic.note_count);
+        for item in &statistic.breakdown {
+            println!("  {} {}", item.path.display(), item.note_count);
+        }
+    }
 }
