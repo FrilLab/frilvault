@@ -123,20 +123,8 @@ export function formatResolutionWarning(anchor: ResolvedNoteAnchor): string | un
 
 export {
   createInlinePreview,
-  formatInlineNotesPreview,
-  normalizeInlineContent,
   normalizeNoteForInlineDisplay,
-  truncateInlineContent,
 } from './inlinePreview';
-
-export {
-  getInlineLineNotesMaxLength,
-  getInlineNotesMaxLength,
-  isInlineLineNotesEnabled,
-  isInlineNotesEnabled,
-  showInlineLineNotes,
-  showInlineSymbolNotes,
-} from './inlinePreviewSettings';
 
 function resolveNoteAnchor(note: NoteView): ResolvedNoteAnchor {
   if (note.note.anchor.type === 'Line') {

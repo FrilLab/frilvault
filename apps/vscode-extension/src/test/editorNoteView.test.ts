@@ -55,7 +55,7 @@ suite('Editor note presentation', () => {
     assert.strictEqual(groups[0]?.notes.length, 2);
   });
 
-  test('truncateInlineContent normalizes whitespace and truncates long previews', () => {
+  test('createInlinePreview normalizes whitespace and truncates long previews', () => {
     const truncated = createInlinePreview('abcdefghijklmnop', 12);
 
     assert.strictEqual(truncated, 'abcdefghijkl…');
