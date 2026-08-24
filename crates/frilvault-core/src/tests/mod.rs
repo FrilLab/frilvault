@@ -54,3 +54,6 @@ mod symbol_resolver_test;
 
 #[cfg(test)]
 mod tag_test;
+
+#[cfg(test)]
+mod tag_query_test;

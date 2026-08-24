@@ -75,8 +75,8 @@ export function createSearchByTagCommand(
   return async (selectedTag?: string) => {
     const showInputBox = dependencies.showInputBox ?? vscode.window.showInputBox;
     const tag = selectedTag ?? await showInputBox({
-      prompt: 'Search FrilVault notes by tag',
-      placeHolder: 'todo or #todo',
+      prompt: 'Search FrilVault notes by tag query',
+      placeHolder: 'tag:performance AND NOT tag:legacy',
       ignoreFocusOut: true,
     });
 
@@ -88,20 +88,20 @@ export function createSearchByTagCommand(
     const workspaceRoot = dependencies.getWorkspaceRoot();
     const results = await dependencies.cliClient.searchNotes({
       workspaceRoot,
-      tag: normalizedInput,
+      ...(selectedTag ? { tag: normalizedInput } : { tagQuery: normalizedInput }),
     });
 
     if (results.length === 0) {
       const showInformationMessage =
         dependencies.showInformationMessage ?? vscode.window.showInformationMessage;
-      await showInformationMessage(`No notes found with tag "${normalizedInput}".`);
+      await showInformationMessage(`No notes found for tag query "${normalizedInput}".`);
       return;
     }
 
     const showQuickPick = dependencies.showQuickPick ?? vscode.window.showQuickPick;
     const picked = await showQuickPick(
       buildTagSearchQuickPickItems(results),
-      { placeHolder: `Found ${results.length} note(s) tagged "${normalizedInput}"` },
+      { placeHolder: `Found ${results.length} note(s) for "${normalizedInput}"` },
     );
 
     if (picked) {

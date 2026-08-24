@@ -7,6 +7,7 @@ mod entity;
 mod note_repository;
 mod note_service;
 mod tag;
+mod tag_query;
 
 pub use attachment_repository::*;
 pub use dto::*;
@@ -14,3 +15,4 @@ pub use entity::*;
 pub use note_repository::*;
 pub use note_service::*;
 pub use tag::*;
+pub use tag_query::*;
