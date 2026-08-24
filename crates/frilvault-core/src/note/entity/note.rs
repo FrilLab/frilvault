@@ -2,7 +2,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{AddNoteRequest, note::NoteAnchor};
+use crate::{
+    AddNoteRequest,
+    note::{NoteAnchor, normalize_tags},
+};
 
 /// Persistent note record stored inside a source-file note JSON file.
 ///
@@ -68,7 +71,7 @@ impl Note {
             id: Uuid::new_v4(),
             anchor: input.anchor,
             content: input.content,
-            tags: input.tags.unwrap_or_default(),
+            tags: normalize_tags(input.tags.unwrap_or_default()),
             attachments: Vec::new(),
             created_at: now,
             updated_at: now,

@@ -31,6 +31,7 @@
   ],
   "activationEvents": [
     "onView:frilvault.notes",
+    "onView:frilvault.tags",
     "onCommand:frilvault.enable",
     "onCommand:frilvault.disable",
     "onCommand:frilvault.addNote",
@@ -38,6 +39,7 @@
     "onCommand:frilvault.notesPanel.editNote",
     "onCommand:frilvault.notesPanel.openNote",
     "onCommand:frilvault.searchNotes",
+    "onCommand:frilvault.searchNotesByTag",
     "onCommand:frilvault.showNotesForCurrentFile",
     "onCommand:frilvault.showStats",
     "onCommand:frilvault.showHealth",
@@ -54,6 +56,10 @@
         {
           "id": "frilvault.notes",
           "name": "FrilVault Notes"
+        },
+        {
+          "id": "frilvault.tags",
+          "name": "FrilVault Tags"
         }
       ]
     },
@@ -77,6 +83,18 @@
       {
         "command": "frilvault.searchNotes",
         "title": "Search Notes"
+      },
+      {
+        "command": "frilvault.searchNotesByTag",
+        "title": "Search Notes by Tag"
+      },
+      {
+        "command": "frilvault.setTagColor",
+        "title": "Set Tag Color"
+      },
+      {
+        "command": "frilvault.removeTagColor",
+        "title": "Remove Tag Color"
       },
       {
         "command": "frilvault.showNotesForCurrentFile",
@@ -163,6 +181,26 @@
           "command": "frilvault.refresh",
           "when": "view == frilvault.notes && frilvault.enabled",
           "group": "navigation"
+        },
+        {
+          "command": "frilvault.enable",
+          "when": "view == frilvault.tags && !frilvault.enabled",
+          "group": "navigation@0"
+        },
+        {
+          "command": "frilvault.disable",
+          "when": "view == frilvault.tags && frilvault.enabled",
+          "group": "navigation@0"
+        },
+        {
+          "command": "frilvault.addNote",
+          "when": "view == frilvault.tags && frilvault.enabled",
+          "group": "navigation"
+        },
+        {
+          "command": "frilvault.refresh",
+          "when": "view == frilvault.tags && frilvault.enabled",
+          "group": "navigation"
         }
       ],
       "editor/title": [
@@ -194,6 +232,16 @@
           "command": "frilvault.notesPanel.openNote",
           "when": "view == frilvault.notes && viewItem == frilvault.note && frilvault.enabled",
           "group": "inline@1"
+        },
+        {
+          "command": "frilvault.setTagColor",
+          "when": "view == frilvault.tags && viewItem == frilvault.tag && frilvault.enabled",
+          "group": "inline"
+        },
+        {
+          "command": "frilvault.removeTagColor",
+          "when": "view == frilvault.tags && viewItem == frilvault.tag && frilvault.enabled",
+          "group": "inline@1"
         }
       ],
       "commandPalette": [
@@ -215,6 +263,10 @@
         },
         {
           "command": "frilvault.searchNotes",
+          "when": "frilvault.enabled"
+        },
+        {
+          "command": "frilvault.searchNotesByTag",
           "when": "frilvault.enabled"
         },
         {
@@ -321,7 +373,7 @@
     "@types/node": "26.1.0",
     "@types/vscode": "^1.125.0",
     "@vscode/test-cli": "^0.0.15",
-    "@vscode/test-electron": "^3.0.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.1",
     "eslint": "^10.6.0",

@@ -17,18 +17,20 @@ mod symbol;
 mod uri;
 mod workspace;
 
-pub use app::FrilVault;
+pub use app::{FrilVault, InitializationResult};
 
 pub use error::{FrilVaultError, FrilVaultResult};
 pub use note::{
     AddNoteRequest, AttachmentRepository, LineAnchor, Note, NoteAnchor, NoteAttachment, NoteQuery,
-    NoteView, SymbolAnchor, SymbolKind, TagOperationResult, TagSummary, UpdateNoteRequest,
+    NoteView, SymbolAnchor, SymbolKind, TagBreakdown, TagGroupBy, TagOperationResult, TagQuery,
+    TagStatistic, TagSummary, UpdateNoteRequest, normalize_tag, normalize_tags,
 };
 pub use symbol::{ResolvedSymbol, SymbolResolver, symbol_marker};
 pub use uri::{NOTE_URI_SCHEME, NOTE_URI_VERSION, NoteUriResolver, ParsedNoteUri};
 pub use workspace::{
-    ExplorerGroup, ExplorerNode, FileMove, RepairSuggestion, SyncResult, VaultMode,
-    WorkspaceExplorer, WorkspaceHealth, WorkspaceService, WorkspaceStats,
+    ExplorerGroup, ExplorerNode, FileMove, GitExcludeStatus, GitTrackingStatus, RepairSuggestion,
+    SyncResult, TagColor, TagSettings, VaultMode, WorkspaceExplorer, WorkspaceHealth,
+    WorkspaceService, WorkspaceStats, WorkspaceStatus,
 };
 
 #[cfg(test)]

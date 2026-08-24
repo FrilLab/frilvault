@@ -8,6 +8,7 @@ import type {
   RepairSuggestion,
   SyncResult,
   TagOperationResult,
+  TagColor,
   TagSummary,
   WorkspaceExplorer,
   WorkspaceHealth,
@@ -82,10 +83,23 @@ export interface UpdateNoteInput {
   expectedUpdatedAt?: string;
 }
 
+export interface InitResult {
+  mode: 'local' | 'shared';
+  git_exclude:
+    | 'added'
+    | 'already_excluded'
+    | 'not_git_repository'
+    | 'vault_tracked'
+    | null;
+}
+
 export interface SearchNotesInput {
   workspaceRoot: string;
   keyword?: string;
   sourceFile?: string;
+  tag?: string;
+  tags?: string[];
+  tagQuery?: string;
 }
 
 /**
@@ -145,6 +159,11 @@ export class CliClient {
     return parseJson<NoteView>(stdout);
   }
 
+  public async initializeLocal(workspaceRoot: string): Promise<InitResult> {
+    const stdout = await this.execInWorkspace(workspaceRoot, ['init', '--format', 'json']);
+    return parseJson<InitResult>(stdout);
+  }
+
   public async addSymbolNote(input: AddSymbolNoteInput): Promise<NoteView> {
     const args = [
       'add',
@@ -197,6 +216,18 @@ export class CliClient {
 
     if (input.sourceFile) {
       args.push('--file', input.sourceFile);
+    }
+
+    if (input.tag) {
+      args.push('--tag', input.tag);
+    }
+
+    for (const tag of input.tags ?? []) {
+      args.push('--tag', tag);
+    }
+
+    if (input.tagQuery) {
+      args.push('--tag-query', input.tagQuery);
     }
 
     args.push('--format', 'json');
@@ -375,6 +406,22 @@ export class CliClient {
     }
     const stdout = await this.execInWorkspace(workspaceRoot, args);
     return parseJson<TagSummary[]>(stdout);
+  }
+
+  public async tagColorSet(
+    workspaceRoot: string,
+    tag: string,
+    color: TagColor,
+  ): Promise<void> {
+    await this.execInWorkspace(workspaceRoot, [
+      'tag', 'color', 'set', tag, color, '--format', 'json',
+    ]);
+  }
+
+  public async tagColorRemove(workspaceRoot: string, tag: string): Promise<void> {
+    await this.execInWorkspace(workspaceRoot, [
+      'tag', 'color', 'remove', tag, '--format', 'json',
+    ]);
   }
 
   private async execInWorkspace(workspaceRoot: string, args: string[]): Promise<string> {

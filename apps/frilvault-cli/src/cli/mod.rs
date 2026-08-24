@@ -18,6 +18,7 @@ pub mod repair;
 pub mod resolve_uri;
 pub mod search;
 pub mod stats;
+pub mod status;
 pub mod sync;
 pub mod tag;
 pub mod update;
@@ -35,6 +36,7 @@ use repair::RepairCommand;
 use resolve_uri::ResolveUriCommand;
 use search::SearchCommand;
 use stats::StatsCommand;
+use status::StatusCommand;
 use sync::SyncCommand;
 use tag::TagCommand;
 use update::UpdateCommand;
@@ -60,6 +62,7 @@ pub enum Commands {
     Doctor(HealthCommand),
     Health(HealthCommand),
     Stats(StatsCommand),
+    Status(StatusCommand),
     Index(IndexCommand),
     Explorer(ExplorerCommand),
     Sync(SyncCommand),

@@ -2,11 +2,14 @@ import * as vscode from 'vscode';
 
 import type { InlineNoteDraft } from './draft';
 import type { AutoSaveStatus } from './autoSave';
+import type { TagSummary } from '../../types';
+import { TAG_COLOR_MARKERS } from '../presentation/tagColor';
 
 export type InlineNotePanelMessage =
   | { type: 'change'; content: string; tagsText: string }
   | { type: 'compositionStart' }
   | { type: 'compositionEnd'; content: string; tagsText: string }
+  | { type: 'requestTagSuggestions' }
   | { type: 'close' }
   | { type: 'delete' }
   | { type: 'retry' }
@@ -29,6 +32,8 @@ export interface InlineNotePanelLike {
       replaceInputs?: boolean;
     },
   ): void;
+  updateTagSuggestions?(tags: string[]): void;
+  updateTagMetadata?(tags: TagSummary[]): void;
   close(): void;
   isOpen(): boolean;
 }
@@ -124,6 +129,14 @@ export class InlineNotePanel implements InlineNotePanelLike {
     this.onDispose = undefined;
   }
 
+  public updateTagSuggestions(tags: string[]): void {
+    void this.panel?.webview.postMessage({ type: 'tagSuggestions', tags });
+  }
+
+  public updateTagMetadata(tags: TagSummary[]): void {
+    void this.panel?.webview.postMessage({ type: 'tagMetadata', tags });
+  }
+
   public isOpen(): boolean {
     return this.panel !== undefined;
   }
@@ -179,6 +192,29 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
     .error { color: var(--vscode-errorForeground); min-height: 1.2em; }
     .status { color: var(--vscode-descriptionForeground); min-height: 1.2em; }
     .hint { color: var(--vscode-descriptionForeground); font-size: 0.92em; }
+    .tag-field { position: relative; }
+    .tag-suggestions {
+      position: absolute;
+      z-index: 1;
+      top: 100%;
+      right: 0;
+      left: 0;
+      max-height: 180px;
+      margin: 2px 0 0;
+      padding: 4px 0;
+      overflow-y: auto;
+      border: 1px solid var(--vscode-dropdown-border, #888);
+      background: var(--vscode-dropdown-background);
+      color: var(--vscode-dropdown-foreground);
+      border-radius: 4px;
+      list-style: none;
+    }
+    .tag-suggestions[hidden] { display: none; }
+    .tag-suggestion { padding: 6px 8px; cursor: pointer; }
+    .tag-suggestion.active,
+    .tag-suggestion:hover { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+    .tag-preview { display: flex; min-height: 1.4em; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .tag-chip { color: var(--vscode-foreground); font-size: 0.92em; }
   </style>
 </head>
 <body>
@@ -194,10 +230,14 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
       <textarea id="content" name="content" aria-label="Markdown content" spellcheck="true">${escapeHtml(draft.content)}</textarea>
     </label>
 
-    <label for="tags">
-      Tags
-      <input id="tags" name="tags" aria-label="Comma-separated tags" value="${escapeHtml(draft.tagsText)}" />
-    </label>
+    <div class="tag-field">
+      <label for="tags">
+        Tags
+        <input id="tags" name="tags" role="combobox" aria-label="Comma-separated tags" aria-autocomplete="list" aria-controls="tag-suggestions" aria-expanded="false" value="${escapeHtml(draft.tagsText)}" />
+      </label>
+      <div id="tag-preview" class="tag-preview" aria-label="Selected tags"></div>
+      <ul id="tag-suggestions" class="tag-suggestions" role="listbox" hidden></ul>
+    </div>
 
     <div id="status" class="status" aria-live="polite">Editing</div>
     <div id="error" class="error" role="alert" aria-live="assertive"></div>
@@ -214,8 +254,11 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
 
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
+    const form = document.getElementById('note-form');
     const contentInput = document.getElementById('content');
     const tagsInput = document.getElementById('tags');
+    const tagSuggestionsEl = document.getElementById('tag-suggestions');
+    const tagPreviewEl = document.getElementById('tag-preview');
     const errorEl = document.getElementById('error');
     const statusEl = document.getElementById('status');
     const closeButton = document.getElementById('close-button');
@@ -226,6 +269,101 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
 
     let changeTimer;
     let isComposing = false;
+    let tagSuggestions = [];
+    let filteredTagSuggestions = [];
+    let activeTagSuggestion = -1;
+    let tagColors = new Map();
+    const colorMarkers = ${JSON.stringify(TAG_COLOR_MARKERS)};
+
+    function tagLabel(tag) {
+      const color = tagColors.get(tag.toLowerCase());
+      return (color ? colorMarkers[color] + ' ' : '') + '#' + tag;
+    }
+
+    function renderSelectedTags() {
+      const tags = tagsInput.value.split(',').map(normalizeTag).filter(Boolean);
+      tagPreviewEl.replaceChildren();
+      tags.forEach((tag) => {
+        const chip = document.createElement('span');
+        chip.className = 'tag-chip';
+        chip.textContent = tagLabel(tag);
+        tagPreviewEl.append(chip);
+      });
+    }
+
+    function selectedTagKeys() {
+      const parts = tagsInput.value.split(',');
+      parts.pop();
+      return new Set(parts.map((tag) => normalizeTag(tag).toLowerCase()).filter(Boolean));
+    }
+
+    function normalizeTag(tag) {
+      const trimmed = tag.trim();
+      return (trimmed.startsWith('#') ? trimmed.slice(1) : trimmed).trim();
+    }
+
+    function activeTagQuery() {
+      return normalizeTag(tagsInput.value.split(',').at(-1) ?? '').toLowerCase();
+    }
+
+    function hideTagSuggestions() {
+      filteredTagSuggestions = [];
+      activeTagSuggestion = -1;
+      tagSuggestionsEl.hidden = true;
+      tagsInput.setAttribute('aria-expanded', 'false');
+      tagsInput.removeAttribute('aria-activedescendant');
+    }
+
+    function renderTagSuggestions() {
+      const query = activeTagQuery();
+      const selected = selectedTagKeys();
+      filteredTagSuggestions = tagSuggestions.filter((tag) =>
+        !selected.has(tag.toLowerCase()) && tag.toLowerCase().includes(query)
+      );
+
+      tagSuggestionsEl.replaceChildren();
+      if (filteredTagSuggestions.length === 0) {
+        hideTagSuggestions();
+        return;
+      }
+
+      activeTagSuggestion = Math.min(activeTagSuggestion, filteredTagSuggestions.length - 1);
+      filteredTagSuggestions.forEach((tag, index) => {
+        const option = document.createElement('li');
+        option.id = 'tag-suggestion-' + index;
+        option.className = 'tag-suggestion' + (index === activeTagSuggestion ? ' active' : '');
+        option.role = 'option';
+        option.setAttribute('aria-selected', String(index === activeTagSuggestion));
+        option.textContent = tagLabel(tag);
+        option.addEventListener('mousedown', (event) => {
+          event.preventDefault();
+          selectTagSuggestion(index);
+        });
+        tagSuggestionsEl.append(option);
+      });
+
+      tagSuggestionsEl.hidden = false;
+      tagsInput.setAttribute('aria-expanded', 'true');
+      if (activeTagSuggestion >= 0) {
+        tagsInput.setAttribute('aria-activedescendant', 'tag-suggestion-' + activeTagSuggestion);
+      } else {
+        tagsInput.removeAttribute('aria-activedescendant');
+      }
+    }
+
+    function selectTagSuggestion(index) {
+      const selected = filteredTagSuggestions[index];
+      if (!selected) {
+        return;
+      }
+
+      const parts = tagsInput.value.split(',');
+      parts[parts.length - 1] = '#' + selected;
+      tagsInput.value = parts.map((part) => part.trim()).filter(Boolean).join(', ') + ', ';
+      hideTagSuggestions();
+      scheduleChange();
+      tagsInput.focus();
+    }
 
     function currentPayload() {
       return { content: contentInput.value, tagsText: tagsInput.value };
@@ -268,7 +406,44 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
     }
 
     contentInput.addEventListener('input', scheduleChange);
-    tagsInput.addEventListener('input', scheduleChange);
+    tagsInput.addEventListener('input', () => {
+      renderSelectedTags();
+      activeTagSuggestion = -1;
+      renderTagSuggestions();
+      scheduleChange();
+    });
+    form.addEventListener('submit', (event) => event.preventDefault());
+    tagsInput.addEventListener('focus', () => {
+      vscode.postMessage({ type: 'requestTagSuggestions' });
+      renderTagSuggestions();
+    });
+    tagsInput.addEventListener('blur', () => setTimeout(hideTagSuggestions, 100));
+    tagsInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        hideTagSuggestions();
+        return;
+      }
+
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (tagSuggestionsEl.hidden) {
+          renderTagSuggestions();
+        }
+        if (filteredTagSuggestions.length > 0) {
+          const direction = event.key === 'ArrowDown' ? 1 : -1;
+          activeTagSuggestion = activeTagSuggestion < 0
+            ? (direction > 0 ? 0 : filteredTagSuggestions.length - 1)
+            : (activeTagSuggestion + direction + filteredTagSuggestions.length) % filteredTagSuggestions.length;
+          renderTagSuggestions();
+        }
+        return;
+      }
+
+      if ((event.key === 'Enter' || event.key === 'Tab') && activeTagSuggestion >= 0) {
+        event.preventDefault();
+        selectTagSuggestion(activeTagSuggestion);
+      }
+    });
     contentInput.addEventListener('compositionstart', handleCompositionStart);
     tagsInput.addEventListener('compositionstart', handleCompositionStart);
     contentInput.addEventListener('compositionend', handleCompositionEnd);
@@ -292,12 +467,36 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
     window.addEventListener('message', (event) => {
       const message = event.data;
       if (!message || message.type !== 'state') {
+        if (message?.type === 'tagSuggestions' && Array.isArray(message.tags)) {
+          const seen = new Set();
+          tagSuggestions = message.tags.filter((tag) => {
+            const key = tag.toLowerCase();
+            if (tag.length === 0 || seen.has(key)) {
+              return false;
+            }
+            seen.add(key);
+            return true;
+          });
+          if (document.activeElement === tagsInput) {
+            renderTagSuggestions();
+          }
+        }
+        if (message?.type === 'tagMetadata' && Array.isArray(message.tags)) {
+          tagColors = new Map(message.tags
+            .filter((tag) => tag && typeof tag.tag === 'string' && typeof tag.color === 'string')
+            .map((tag) => [tag.tag.toLowerCase(), tag.color]));
+          renderSelectedTags();
+          if (document.activeElement === tagsInput) {
+            renderTagSuggestions();
+          }
+        }
         return;
       }
 
       if (message.replaceInputs && message.draft) {
         contentInput.value = message.draft.content ?? contentInput.value;
         tagsInput.value = message.draft.tagsText ?? tagsInput.value;
+        renderSelectedTags();
       }
 
       errorEl.textContent = message.errorMessage ?? '';
@@ -316,6 +515,7 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
       loadExternalButton.hidden = message.status !== 'conflict';
       deleteButton.hidden = !message.canDelete;
     });
+    renderSelectedTags();
   </script>
 </body>
 </html>`;

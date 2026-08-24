@@ -14,7 +14,7 @@
 import * as vscode from 'vscode';
 
 import { CliClient } from './core/cliClient';
-import { COMMAND_IDS } from './constants/ids';
+import { COMMAND_IDS, VIEW_IDS } from './constants/ids';
 import { CurrentFileNotesStore } from './features/current-file/store';
 import { createDisableCommand, createEnableCommand } from './features/enablement/command';
 import { isFrilVaultEnabled, syncEnabledContext } from './features/enablement/state';
@@ -38,7 +38,13 @@ import { createToggleNoteViewerCommand } from './features/note-viewer/noteViewer
 import { createShowNotesForCurrentFileCommand } from './features/notes-panel/command';
 import { FrilVaultNotesProvider } from './features/notes-panel/provider';
 import { registerNotesTreeDataProvider, disposeNotesTreeDataProvider } from './features/notes-panel/register';
-import { createSearchCommand } from './features/search/command';
+import { createSearchByTagCommand, createSearchCommand } from './features/search/command';
+import { FrilVaultTagExplorerProvider } from './features/tag-explorer/provider';
+import {
+  createRemoveTagColorCommand,
+  createSetTagColorCommand,
+} from './features/tag-explorer/commands';
+import { TagColorStore } from './features/presentation/tagColor';
 import { createApplyRepairsCommand, createShowHealthCommand } from './features/workspace/health';
 import { registerSourceRenameHandler } from './features/workspace/rename';
 import { registerNoteUriHandler } from './features/uri/handler';
@@ -53,6 +59,17 @@ let activeStore: CurrentFileNotesStore | undefined;
 let activeRegistry: GutterNoteRegistry | undefined;
 let activeNoteViewer: NoteViewerController | undefined;
 const codeLensRefreshEmitter = new vscode.EventEmitter<void>();
+
+export async function runBackgroundRefresh(
+  refresh: () => Promise<void>,
+  reportError: (message: string) => void,
+): Promise<void> {
+  try {
+    await refresh();
+  } catch (error) {
+    reportError(error instanceof Error ? error.message : 'Failed to refresh FrilVault views.');
+  }
+}
 
 /**
  * Registers FrilVault commands, providers, and workspace listeners.
@@ -99,6 +116,12 @@ export function activate(context: vscode.ExtensionContext): void {
     getWorkspaceRoot,
     isEnabled,
   );
+  const tagColorStore = new TagColorStore(() => cliClient.tagList(getWorkspaceRoot()));
+  const tagExplorerProvider = new FrilVaultTagExplorerProvider(
+    () => tagColorStore.load(),
+    (tag) => cliClient.searchNotes({ workspaceRoot: getWorkspaceRoot(), tag }),
+    isEnabled,
+  );
   const decorator = new FrilVaultDecorator(
     context.extensionPath,
     store,
@@ -109,7 +132,12 @@ export function activate(context: vscode.ExtensionContext): void {
   activeDecorator = decorator;
   const noteViewer = new NoteViewerController(store, isEnabled);
   activeNoteViewer = noteViewer;
-  const hoverProvider = new FrilVaultHoverProvider(store, getWorkspaceRoot, isEnabled);
+  const hoverProvider = new FrilVaultHoverProvider(
+    store,
+    getWorkspaceRoot,
+    isEnabled,
+    (tag) => tagColorStore.colorFor(tag),
+  );
 
   const refreshNoteState = async (editor?: vscode.TextEditor) => {
     await store.syncActiveEditor(editor ?? vscode.window.activeTextEditor);
@@ -132,6 +160,9 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const refreshAfterMutation = async (editor?: vscode.TextEditor) => {
+    tagColorStore.refresh();
+    tagExplorerProvider.refresh();
+    await tagColorStore.load();
     await refreshNoteState(editor);
     await refreshWorkspaceNoteCounts();
   };
@@ -144,7 +175,6 @@ export function activate(context: vscode.ExtensionContext): void {
       runOptionalPostSaveTasks({
         getWorkspaceRoot,
         cliClient,
-        workspaceState: context.workspaceState,
       }),
     showWarningMessage: (message) => vscode.window.showWarningMessage(message),
   });
@@ -165,6 +195,21 @@ export function activate(context: vscode.ExtensionContext): void {
     decorator.clear();
     noteViewer.clearAll();
     notesProvider.refresh();
+    tagExplorerProvider.refresh();
+  };
+
+  const refreshAfterWorkspaceEvent = async (editor?: vscode.TextEditor) => {
+    await runBackgroundRefresh(
+      async () => {
+        if (!isEnabled()) {
+          clearUi();
+          return;
+        }
+
+        await refreshAfterMutation(editor);
+      },
+      (message) => cliOutputChannel.appendLine(`FrilVault: ${message}`),
+    );
   };
 
   registerGutterCommands(context, gutterActions);
@@ -249,8 +294,28 @@ export function activate(context: vscode.ExtensionContext): void {
       }),
     ),
     vscode.commands.registerCommand(
-      'frilvault.searchNotes',
+      COMMAND_IDS.searchNotes,
       runWhenEnabled(createSearchCommand(cliClient, getWorkspaceRoot)),
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.searchNotesByTag,
+      runWhenEnabled(createSearchByTagCommand({ cliClient, getWorkspaceRoot })),
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.setTagColor,
+      runWhenEnabled(createSetTagColorCommand({
+        cliClient,
+        getWorkspaceRoot,
+        refresh: refreshAfterMutation,
+      })),
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.removeTagColor,
+      runWhenEnabled(createRemoveTagColorCommand({
+        cliClient,
+        getWorkspaceRoot,
+        refresh: refreshAfterMutation,
+      })),
     ),
     vscode.commands.registerCommand(
       COMMAND_IDS.showNotesForCurrentFile,
@@ -285,15 +350,14 @@ export function activate(context: vscode.ExtensionContext): void {
         await refreshAfterMutation();
       }),
     ),
-    vscode.window.onDidChangeActiveTextEditor(async (editor) => {
-      await refreshAfterMutation(editor);
-    }),
-    vscode.workspace.onDidSaveTextDocument(async () => {
-      await refreshAfterMutation();
-    }),
+    vscode.window.onDidChangeActiveTextEditor(refreshAfterWorkspaceEvent),
+    vscode.workspace.onDidSaveTextDocument(() => refreshAfterWorkspaceEvent()),
   );
 
   registerNotesTreeDataProvider(context, notesProvider);
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider(VIEW_IDS.tags, tagExplorerProvider),
+  );
 
   registerSourceRenameHandler(context, cliClient, isEnabled, refreshAfterMutation);
   registerWorkspaceWatcher(context, cliClient, isEnabled, refreshAfterMutation);

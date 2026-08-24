@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 
-import type { GitignorePromptDependencies } from '../gitignore/prompt';
-import { maybePromptForGitignore } from '../gitignore/prompt';
+import {
+  initializeLocalVault,
+  type LocalVaultInitializationDependencies,
+} from '../initialization/localVault';
 
 export function formatOptionalPostSaveFailure(action: string, error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error);
@@ -9,14 +11,14 @@ export function formatOptionalPostSaveFailure(action: string, error: unknown): s
 }
 
 export async function runOptionalPostSaveTasks(
-  dependencies: GitignorePromptDependencies,
+  dependencies: LocalVaultInitializationDependencies,
   showWarningMessage: (
     message: string,
   ) => Thenable<string | undefined> = vscode.window.showWarningMessage,
 ): Promise<void> {
   try {
-    await maybePromptForGitignore(dependencies);
+    await initializeLocalVault(dependencies);
   } catch (error) {
-    await showWarningMessage(formatOptionalPostSaveFailure('the .gitignore prompt', error));
+    await showWarningMessage(formatOptionalPostSaveFailure('local vault initialization', error));
   }
 }

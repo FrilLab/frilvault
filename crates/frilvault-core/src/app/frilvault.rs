@@ -1,13 +1,24 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 use crate::{
-    FrilVaultResult,
+    FrilVaultError, FrilVaultResult,
     note::{NoteRepository, NoteService},
     runtime::VaultContext,
     workspace::{
-        PathResolver, VaultMode, WorkspaceIndexRepository, WorkspaceRepository, WorkspaceService,
+        GitExcludeStatus, PathResolver, TagColor, TagSettings, VaultMode, WorkspaceIndexRepository,
+        WorkspaceRepository, WorkspaceService, WorkspaceStatus, ensure_local_vault_excluded,
+        vault_git_tracking_status,
     },
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InitializationResult {
+    pub mode: VaultMode,
+    pub git_exclude: Option<GitExcludeStatus>,
+}
 
 /// Top-level entry point for opening a FrilVault workspace.
 ///
@@ -42,6 +53,10 @@ impl FrilVault {
     ///
     /// Existing workspace metadata is preserved, including its current mode.
     pub fn initialize(&self, mode: VaultMode) -> FrilVaultResult<VaultMode> {
+        self.initialize_with_status(mode).map(|result| result.mode)
+    }
+
+    pub fn initialize_with_status(&self, mode: VaultMode) -> FrilVaultResult<InitializationResult> {
         let resolver = PathResolver::new(&self.workspace_root);
         let workspace_repository = WorkspaceRepository::new(resolver.clone());
         let metadata = workspace_repository.initialize(mode)?;
@@ -49,7 +64,101 @@ impl FrilVault {
         let index_repository = WorkspaceIndexRepository::new(resolver);
         index_repository.create_if_missing()?;
 
-        Ok(metadata.mode)
+        let git_exclude = if metadata.mode == VaultMode::Local {
+            Some(ensure_local_vault_excluded(&self.workspace_root)?)
+        } else {
+            None
+        };
+
+        Ok(InitializationResult {
+            mode: metadata.mode,
+            git_exclude,
+        })
+    }
+
+    /// Reads a concise snapshot of the existing workspace without modifying it.
+    pub fn status(&self) -> FrilVaultResult<WorkspaceStatus> {
+        let resolver = PathResolver::new(&self.workspace_root);
+        let workspace_repository = WorkspaceRepository::new(resolver.clone());
+
+        if !workspace_repository.exists() {
+            return Err(FrilVaultError::WorkspaceNotFound);
+        }
+
+        let metadata = workspace_repository.load()?;
+        let index_repository = WorkspaceIndexRepository::new(resolver.clone());
+        let note_count = if index_repository.exists() {
+            index_repository
+                .load()?
+                .files
+                .iter()
+                .map(|file| file.note_count)
+                .sum()
+        } else {
+            NoteRepository::new(resolver.clone())
+                .list_all_note_files()?
+                .iter()
+                .map(|record| record.note_file.notes.len())
+                .sum()
+        };
+
+        Ok(WorkspaceStatus {
+            vault_path: PathBuf::from(crate::constants::VAULT_DIR_NAME),
+            mode: metadata.mode,
+            git_tracking: vault_git_tracking_status(&self.workspace_root)?,
+            note_count,
+        })
+    }
+
+    /// Returns the workspace-level tag color assignments, keyed case-insensitively.
+    pub fn tag_colors(&self) -> FrilVaultResult<BTreeMap<String, TagColor>> {
+        let repository = WorkspaceRepository::new(PathResolver::new(&self.workspace_root));
+        let metadata = repository.load()?;
+
+        Ok(metadata
+            .settings
+            .tags
+            .into_iter()
+            .map(|(tag, settings)| (tag, settings.color))
+            .collect())
+    }
+
+    /// Assigns a theme-safe display color to a tag without modifying any note.
+    pub fn set_tag_color(&self, tag: &str, color: TagColor) -> FrilVaultResult<()> {
+        let tag = crate::normalize_tag(tag);
+        if tag.is_empty() {
+            return Err(FrilVaultError::InvalidTag(
+                "tag name cannot be empty".to_string(),
+            ));
+        }
+
+        let repository = WorkspaceRepository::new(PathResolver::new(&self.workspace_root));
+        let mut metadata = repository.load()?;
+        metadata
+            .settings
+            .tags
+            .insert(tag.to_lowercase(), TagSettings { color });
+        metadata.updated_at = chrono::Utc::now();
+        repository.save(&metadata)
+    }
+
+    /// Removes a tag's display color without modifying the tag or any note.
+    pub fn remove_tag_color(&self, tag: &str) -> FrilVaultResult<bool> {
+        let tag = crate::normalize_tag(tag);
+        if tag.is_empty() {
+            return Err(FrilVaultError::InvalidTag(
+                "tag name cannot be empty".to_string(),
+            ));
+        }
+
+        let repository = WorkspaceRepository::new(PathResolver::new(&self.workspace_root));
+        let mut metadata = repository.load()?;
+        let removed = metadata.settings.tags.remove(&tag.to_lowercase()).is_some();
+        if removed {
+            metadata.updated_at = chrono::Utc::now();
+            repository.save(&metadata)?;
+        }
+        Ok(removed)
     }
 
     fn build_context(&self) -> FrilVaultResult<(VaultContext, WorkspaceIndexRepository)> {

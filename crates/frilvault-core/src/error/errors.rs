@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -12,6 +14,16 @@ pub enum FrilVaultError {
     #[error("json error: {0}")]
     JSON(#[from] serde_json::Error),
 
+    #[error("No FrilVault workspace found.\nRun `flvt init` to initialize one.")]
+    WorkspaceNotFound,
+
+    #[error("Failed to read FrilVault workspace metadata:\n{} is invalid.", path.display())]
+    InvalidWorkspaceMetadata {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+
     /// Returned when a caller passes an absolute source path outside the workspace root.
     ///
     /// 호출자가 워크스페이스 루트 밖의 절대 source path를 전달했을 때 반환됩니다.
@@ -23,6 +35,12 @@ pub enum FrilVaultError {
     /// 요청한 source note 파일에 note id가 없을 때 반환됩니다.
     #[error("note not found: {0}")]
     NoteNotFound(Uuid),
+
+    #[error("duplicate note id: {0}")]
+    DuplicateNoteId(Uuid),
+
+    #[error("invalid note anchor: {0}")]
+    InvalidAnchor(String),
 
     #[error("invalid note file path")]
     InvalidNoteFilePath,
@@ -71,6 +89,10 @@ pub enum FrilVaultError {
     /// 태그 연산에 잘못된 태그 이름 또는 인자가 전달되었을 때 반환됩니다.
     #[error("invalid tag: {0}")]
     InvalidTag(String),
+
+    /// Returned when a tag query cannot be parsed or validated.
+    #[error("invalid tag query: {0}")]
+    InvalidTagQuery(String),
 }
 
 pub type FrilVaultResult<T> = Result<T, FrilVaultError>;

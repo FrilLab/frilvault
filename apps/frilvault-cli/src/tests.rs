@@ -1,8 +1,11 @@
 use clap::Parser;
 
 use crate::cli::{
-    Cli, Commands, add::SymbolKindArg, format::FormatArg, gitignore::GitignoreAction,
-    tag::TagAction,
+    Cli, Commands,
+    add::SymbolKindArg,
+    format::FormatArg,
+    gitignore::GitignoreAction,
+    tag::{TagAction, TagColorAction, TagColorArg},
 };
 
 #[test]
@@ -21,6 +24,18 @@ fn parses_init_with_shared_mode() {
 
     match cli.command {
         Commands::Init(command) => assert!(command.shared),
+        _ => panic!("expected init command"),
+    }
+}
+
+#[test]
+fn parses_init_json_format() {
+    let cli = Cli::parse_from(["flvt", "init", "--format", "json"]);
+
+    match cli.command {
+        Commands::Init(command) => {
+            assert!(matches!(command.format, Some(FormatArg::Json)));
+        }
         _ => panic!("expected init command"),
     }
 }
@@ -93,6 +108,13 @@ fn parses_stats_json_format() {
         }
         _ => panic!("expected stats command"),
     }
+}
+
+#[test]
+fn parses_status_command() {
+    let cli = Cli::parse_from(["flvt", "status"]);
+
+    assert!(matches!(cli.command, Commands::Status(_)));
 }
 
 #[test]
@@ -230,16 +252,49 @@ fn parses_add_command_with_tags() {
 }
 
 #[test]
-fn parses_search_with_tag() {
-    let cli = Cli::parse_from(["flvt", "search", "--tag", "bug", "--format", "json"]);
+fn parses_search_with_repeated_tags() {
+    let cli = Cli::parse_from([
+        "flvt", "search", "--tag", "bug", "--tag", "security", "--format", "json",
+    ]);
 
     match cli.command {
         Commands::Search(command) => {
-            assert_eq!(command.tag.as_deref(), Some("bug"));
+            assert_eq!(command.tags, ["bug", "security"]);
             assert!(matches!(command.format, Some(FormatArg::Json)));
         }
         _ => panic!("expected search command"),
     }
+}
+
+#[test]
+fn parses_search_with_tag_query() {
+    let cli = Cli::parse_from(["flvt", "search", "--tag-query", "tag:bug OR tag:security"]);
+
+    match cli.command {
+        Commands::Search(command) => {
+            assert_eq!(
+                command.tag_query.as_deref(),
+                Some("tag:bug OR tag:security")
+            );
+        }
+        _ => panic!("expected search command"),
+    }
+}
+
+#[test]
+fn rejects_mixed_repeated_tags_and_tag_query() {
+    let error = Cli::try_parse_from([
+        "flvt",
+        "search",
+        "--tag",
+        "bug",
+        "--tag-query",
+        "tag:security",
+    ])
+    .err()
+    .unwrap();
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
 }
 
 #[test]
@@ -376,6 +431,69 @@ fn parses_tag_list_command() {
                 assert!(matches!(list.format, Some(FormatArg::Json)));
             }
             _ => panic!("expected tag list action"),
+        },
+        _ => panic!("expected tag command"),
+    }
+}
+
+#[test]
+fn parses_tag_color_commands() {
+    let set = Cli::parse_from([
+        "flvt", "tag", "color", "set", "bug", "red", "--format", "json",
+    ]);
+    match set.command {
+        Commands::Tag(command) => match command.action {
+            TagAction::Color(color) => match color.action {
+                TagColorAction::Set(set) => {
+                    assert_eq!(set.tag, "bug");
+                    assert!(matches!(set.color, TagColorArg::Red));
+                    assert!(matches!(set.format, Some(FormatArg::Json)));
+                }
+                _ => panic!("expected tag color set action"),
+            },
+            _ => panic!("expected tag color action"),
+        },
+        _ => panic!("expected tag command"),
+    }
+
+    let remove = Cli::parse_from(["flvt", "tag", "color", "remove", "bug"]);
+    match remove.command {
+        Commands::Tag(command) => match command.action {
+            TagAction::Color(color) => match color.action {
+                TagColorAction::Remove(remove) => assert_eq!(remove.tag, "bug"),
+                _ => panic!("expected tag color remove action"),
+            },
+            _ => panic!("expected tag color action"),
+        },
+        _ => panic!("expected tag command"),
+    }
+}
+
+#[test]
+fn parses_tag_stats_command_with_directory_breakdown() {
+    let cli = Cli::parse_from([
+        "flvt",
+        "tag",
+        "stats",
+        "--tag",
+        "architecture",
+        "--group-by",
+        "directory",
+        "--format",
+        "json",
+    ]);
+
+    match cli.command {
+        Commands::Tag(command) => match command.action {
+            TagAction::Stats(stats) => {
+                assert_eq!(stats.tag.as_deref(), Some("architecture"));
+                assert!(matches!(
+                    stats.group_by,
+                    Some(crate::cli::tag::TagGroupByArg::Directory)
+                ));
+                assert!(matches!(stats.format, Some(FormatArg::Json)));
+            }
+            _ => panic!("expected tag stats action"),
         },
         _ => panic!("expected tag command"),
     }

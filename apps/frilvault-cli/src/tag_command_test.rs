@@ -1,23 +1,26 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{Mutex, MutexGuard},
+    sync::MutexGuard,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use clap::Parser;
-use frilvault_core::{AddNoteRequest, FrilVault, LineAnchor, NoteAnchor};
+use frilvault_core::{AddNoteRequest, FrilVault, LineAnchor, NoteAnchor, TagColor};
 
 use crate::{
     cli::{
         Cli,
         format::FormatArg,
-        tag::{TagCommand, TagListCommand, TagMergeCommand, TagRemoveCommand, TagRenameCommand},
+        tag::{
+            TagColorAction, TagColorArg, TagColorCommand, TagColorRemoveCommand,
+            TagColorSetCommand, TagCommand, TagListCommand, TagMergeCommand, TagRemoveCommand,
+            TagRenameCommand,
+        },
     },
     command, run,
+    test_support::WORKING_DIRECTORY_LOCK,
 };
-
-static WORKING_DIRECTORY_LOCK: Mutex<()> = Mutex::new(());
 
 struct WorkingDirectoryGuard {
     _lock: MutexGuard<'static, ()>,
@@ -160,6 +163,45 @@ fn tag_list_executes_successfully() {
 }
 
 #[test]
+fn tag_color_can_be_assigned_and_removed_without_changing_notes() {
+    let workspace = create_tag_fixture();
+    let _guard = WorkingDirectoryGuard::change_to(&workspace);
+
+    command::tag::execute(TagCommand {
+        action: crate::cli::tag::TagAction::Color(TagColorCommand {
+            action: TagColorAction::Set(TagColorSetCommand {
+                tag: "bug".into(),
+                color: TagColorArg::Red,
+                format: Some(FormatArg::Json),
+            }),
+        }),
+    })
+    .expect("set color");
+
+    let vault = FrilVault::open(&workspace).expect("open workspace");
+    assert_eq!(vault.tag_colors().unwrap().get("bug"), Some(&TagColor::Red));
+    let mut notes = vault.notes().unwrap();
+    assert!(
+        notes.list_notes("src/main.rs").unwrap()[0]
+            .note
+            .tags
+            .contains(&"bug".to_string())
+    );
+
+    command::tag::execute(TagCommand {
+        action: crate::cli::tag::TagAction::Color(TagColorCommand {
+            action: TagColorAction::Remove(TagColorRemoveCommand {
+                tag: "#BUG".into(),
+                format: Some(FormatArg::Json),
+            }),
+        }),
+    })
+    .expect("remove color");
+
+    assert!(vault.tag_colors().unwrap().is_empty());
+}
+
+#[test]
 fn run_dispatches_tag_commands() {
     let workspace = create_tag_fixture();
     let _guard = WorkingDirectoryGuard::change_to(&workspace);
@@ -178,4 +220,17 @@ fn run_dispatches_tag_commands() {
 
     let cli = Cli::parse_from(["flvt", "tag", "list", "--format", "json"]);
     run(cli).expect("run tag list");
+
+    let cli = Cli::parse_from([
+        "flvt",
+        "tag",
+        "stats",
+        "--tag",
+        "bug",
+        "--group-by",
+        "file",
+        "--format",
+        "json",
+    ]);
+    run(cli).expect("run tag stats");
 }

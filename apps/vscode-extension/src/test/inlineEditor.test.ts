@@ -27,6 +27,13 @@ suite('Inline note editor draft', () => {
     ]);
   });
 
+  test('parseTagsText normalizes hashes and prevents case-insensitive duplicates', () => {
+    assert.deepStrictEqual(
+      parseTagsText(' #Performance, performance, # permission, new-tag '),
+      ['Performance', 'permission', 'new-tag'],
+    );
+  });
+
   test('createEditDraft preserves undo snapshot and updated_at', () => {
     const noteView = createLineNoteView('hello', ['bug']);
 
@@ -34,7 +41,7 @@ suite('Inline note editor draft', () => {
 
     assert.strictEqual(draft.mode, 'edit');
     assert.strictEqual(draft.content, 'hello');
-    assert.strictEqual(draft.tagsText, 'bug');
+    assert.strictEqual(draft.tagsText, '#bug');
     assert.strictEqual(draft.expectedUpdatedAt, '2026-01-02T00:00:00Z');
     assert.deepStrictEqual(draft.undoSnapshot?.tags, ['bug']);
   });

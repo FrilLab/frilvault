@@ -109,7 +109,7 @@ suite('Rich hover preview', () => {
     const actions = parts.contents[1];
 
     assert.match(content, /Line 4:2/);
-    assert.match(content, /Tags: bug/);
+    assert.match(content, /Tags: \[#bug\]\(command:frilvault\.searchNotesByTag/);
     assert.match(content, /```ts/);
     assert.strictEqual(content.includes('[Edit]'), false);
     assert.match(actions?.value ?? '', /\[Edit\]/);

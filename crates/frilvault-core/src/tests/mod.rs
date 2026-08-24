@@ -42,6 +42,7 @@ mod note_cache_test;
 #[cfg(test)]
 mod frilvault_app_test;
 
+mod git_exclude_test;
 #[cfg(test)]
 mod gitignore_test;
 
@@ -53,3 +54,6 @@ mod symbol_resolver_test;
 
 #[cfg(test)]
 mod tag_test;
+
+#[cfg(test)]
+mod tag_query_test;

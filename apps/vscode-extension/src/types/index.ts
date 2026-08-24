@@ -123,4 +123,7 @@ export interface TagOperationResult {
 export interface TagSummary {
   tag: string;
   note_count: number;
+  color?: TagColor;
 }
+
+export type TagColor = 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple';

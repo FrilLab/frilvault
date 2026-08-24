@@ -9,8 +9,13 @@ pub struct SearchCommand {
     #[arg(long)]
     pub file: Option<String>,
 
-    #[arg(long)]
-    pub tag: Option<String>,
+    /// Require every repeated tag (AND semantics).
+    #[arg(long = "tag", conflicts_with = "tag_query")]
+    pub tags: Vec<String>,
+
+    /// Boolean tag expression using AND, OR, NOT, and parentheses.
+    #[arg(long, conflicts_with = "tags")]
+    pub tag_query: Option<String>,
 
     #[arg(long, value_enum)]
     pub format: Option<FormatArg>,

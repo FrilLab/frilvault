@@ -39,6 +39,44 @@ fn add_line_type_note_creates_json_file() {
 }
 
 #[test]
+fn add_note_rejects_zero_based_anchor_coordinates() {
+    let workspace = create_test_workspace();
+    let workspace_root = workspace.root();
+    let mut service = create_test_note_service(workspace_root);
+
+    for anchor in [
+        NoteAnchor::Line(LineAnchor { line: 0, column: 1 }),
+        NoteAnchor::Line(LineAnchor { line: 1, column: 0 }),
+        NoteAnchor::Symbol(SymbolAnchor {
+            name: "main".to_string(),
+            kind: SymbolKind::Function,
+            signature: None,
+            line_hint: Some(0),
+        }),
+        NoteAnchor::Symbol(SymbolAnchor {
+            name: "   ".to_string(),
+            kind: SymbolKind::Unknown,
+            signature: None,
+            line_hint: None,
+        }),
+    ] {
+        let result = service.add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor,
+            content: "invalid anchor".to_string(),
+            tags: None,
+        });
+        assert!(result.is_err());
+    }
+
+    assert!(
+        !workspace_root
+            .join(format!(".vault/notes/src/main.rs.{NOTE_FILE_EXTENSION}"))
+            .exists()
+    );
+}
+
+#[test]
 fn add_symbol_type_note_creates_json_file() {
     let workspace = create_test_workspace();
     let workspace_root = workspace.root();
@@ -139,6 +177,159 @@ fn add_note_and_load_note() {
 }
 
 #[test]
+fn add_note_accepts_absolute_workspace_path_without_writing_a_sidecar() {
+    let workspace = create_test_workspace();
+    let workspace_root = workspace.root();
+    let source_file = workspace_root.join("src/main.rs");
+    fs::create_dir_all(source_file.parent().unwrap()).unwrap();
+    fs::write(&source_file, "fn main() {}\n").unwrap();
+    let mut service = create_test_note_service(workspace_root);
+
+    service
+        .add_note(AddNoteRequest {
+            source_file: source_file.clone(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "absolute workspace path".to_string(),
+            tags: None,
+        })
+        .unwrap();
+
+    let notes = service.list_notes("src/main.rs").unwrap();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].note.content, "absolute workspace path");
+    assert!(!workspace_root.join("src/main.rs.json").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn add_note_accepts_an_absolute_path_through_a_workspace_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = create_test_workspace();
+    let workspace_root = workspace.root();
+    let source_file = workspace_root.join("src/main.rs");
+    fs::create_dir_all(source_file.parent().unwrap()).unwrap();
+    fs::write(&source_file, "fn main() {}\n").unwrap();
+    let alias = workspace_root.with_extension("alias");
+    symlink(workspace_root, &alias).unwrap();
+    let mut service = create_test_note_service(workspace_root);
+
+    let result = service.add_note(AddNoteRequest {
+        source_file: alias.join("src/main.rs"),
+        anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+        content: "same workspace through a symlink".to_string(),
+        tags: None,
+    });
+    fs::remove_file(&alias).unwrap();
+
+    result.unwrap();
+    assert_eq!(service.list_notes("src/main.rs").unwrap().len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn add_note_rejects_a_relative_symlink_that_escapes_the_workspace() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = create_test_workspace();
+    let outside = create_test_workspace();
+    symlink(outside.root(), workspace.root().join("outside-link")).unwrap();
+    let mut service = create_test_note_service(workspace.root());
+
+    let result = service.add_note(AddNoteRequest {
+        source_file: "outside-link/escape.rs".into(),
+        anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+        content: "must not follow the symlink".to_string(),
+        tags: None,
+    });
+
+    assert!(matches!(
+        result,
+        Err(FrilVaultError::SourcePathOutsideWorkspace)
+    ));
+    assert!(!outside.root().join("escape.rs.json").exists());
+}
+
+#[test]
+fn add_note_rejects_parent_traversal_without_writing_outside_notes_root() {
+    let workspace = create_test_workspace();
+    let workspace_root = workspace.root();
+    let mut service = create_test_note_service(workspace_root);
+
+    let result = service.add_note(AddNoteRequest {
+        source_file: "../../escaped.rs".into(),
+        anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+        content: "must not escape".to_string(),
+        tags: None,
+    });
+
+    assert!(matches!(
+        result,
+        Err(FrilVaultError::SourcePathOutsideWorkspace)
+    ));
+    assert!(!workspace_root.join("escaped.rs.json").exists());
+}
+
+#[test]
+fn add_note_rejects_absolute_path_outside_workspace_without_writing() {
+    let workspace = create_test_workspace();
+    let outside = create_test_workspace();
+    let outside_source = outside.root().join("outside.rs");
+    let mut service = create_test_note_service(workspace.root());
+
+    let result = service.add_note(AddNoteRequest {
+        source_file: outside_source.clone(),
+        anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+        content: "must stay in the vault".to_string(),
+        tags: None,
+    });
+
+    assert!(matches!(
+        result,
+        Err(FrilVaultError::SourcePathOutsideWorkspace)
+    ));
+    assert!(!outside_source.with_extension("rs.json").exists());
+}
+
+#[test]
+fn update_and_delete_accept_absolute_workspace_paths() {
+    let workspace = create_test_workspace();
+    let workspace_root = workspace.root();
+    let source_file = workspace_root.join("src/main.rs");
+    fs::create_dir_all(source_file.parent().unwrap()).unwrap();
+    fs::write(&source_file, "fn main() {}\n").unwrap();
+    let mut service = create_test_note_service(workspace_root);
+    let note = service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "before".to_string(),
+            tags: None,
+        })
+        .unwrap();
+
+    service
+        .update_note(
+            &source_file,
+            note.id,
+            UpdateNoteRequest {
+                content: "after".to_string(),
+                tags: None,
+                expected_updated_at: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        service.list_notes("src/main.rs").unwrap()[0].note.content,
+        "after"
+    );
+
+    service.delete_note(&source_file, note.id).unwrap();
+    assert!(service.list_notes("src/main.rs").unwrap().is_empty());
+    assert!(!workspace_root.join("src/main.rs.json").exists());
+}
+
+#[test]
 fn delete_note_removes_note() {
     let workspace = create_test_workspace();
     let workspace_root = workspace.root();
@@ -161,6 +352,81 @@ fn delete_note_removes_note() {
     let notes = service.list_notes("src/main.rs").unwrap();
 
     assert_eq!(notes.len(), 0);
+}
+
+#[test]
+fn delete_note_rejects_duplicate_ids_without_deleting_any_note() {
+    let workspace = create_test_workspace();
+    let workspace_root = workspace.root();
+    let mut service = create_test_note_service(workspace_root);
+    let first = service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "first".to_string(),
+            tags: None,
+        })
+        .unwrap();
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 2, column: 1 }),
+            content: "second".to_string(),
+            tags: None,
+        })
+        .unwrap();
+    let note_path = workspace_root
+        .join(".vault/notes")
+        .join(format!("src/main.rs.{NOTE_FILE_EXTENSION}"));
+    let mut note_file: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&note_path).unwrap()).unwrap();
+    note_file["notes"][1]["id"] = note_file["notes"][0]["id"].clone();
+    fs::write(&note_path, serde_json::to_string(&note_file).unwrap()).unwrap();
+
+    let mut fresh_service = create_test_note_service(workspace_root);
+    let result = fresh_service.delete_note("src/main.rs", first.id);
+
+    assert!(result.is_err());
+    let persisted: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(note_path).unwrap()).unwrap();
+    assert_eq!(persisted["notes"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn find_note_by_id_rejects_duplicate_ids_across_files() {
+    let workspace = create_test_workspace();
+    let workspace_root = workspace.root();
+    let mut service = create_test_note_service(workspace_root);
+    let first = service
+        .add_note(AddNoteRequest {
+            source_file: "src/first.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "first".to_string(),
+            tags: None,
+        })
+        .unwrap();
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/second.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "second".to_string(),
+            tags: None,
+        })
+        .unwrap();
+    let second_note_path = workspace_root
+        .join(".vault/notes")
+        .join(format!("src/second.rs.{NOTE_FILE_EXTENSION}"));
+    let mut note_file: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&second_note_path).unwrap()).unwrap();
+    note_file["notes"][0]["id"] = serde_json::Value::String(first.id.to_string());
+    fs::write(
+        &second_note_path,
+        serde_json::to_string(&note_file).unwrap(),
+    )
+    .unwrap();
+
+    let mut fresh_service = create_test_note_service(workspace_root);
+    assert!(fresh_service.find_note_by_id(first.id).is_err());
 }
 
 #[test]
@@ -622,9 +888,14 @@ fn search_by_tag_returns_matching_notes() {
     service
         .add_note(AddNoteRequest {
             source_file: "src/lib.rs".into(),
-            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            anchor: NoteAnchor::Symbol(SymbolAnchor {
+                name: "Architecture".to_string(),
+                kind: SymbolKind::Struct,
+                signature: None,
+                line_hint: Some(7),
+            }),
             content: "architecture note".to_string(),
-            tags: Some(vec!["architecture".to_string()]),
+            tags: Some(vec!["#architecture".to_string()]),
         })
         .unwrap();
 
@@ -644,6 +915,30 @@ fn search_by_tag_returns_matching_notes() {
     let architecture_notes = service.search_by_tag("ARCHITECTURE").unwrap();
     assert_eq!(architecture_notes.len(), 1);
     assert_eq!(architecture_notes[0].note.content, "architecture note");
+    assert!(matches!(
+        architecture_notes[0].note.anchor,
+        NoteAnchor::Symbol(_)
+    ));
+
+    let prefixed_architecture_notes = service.search_by_tag("#architecture").unwrap();
+    assert_eq!(prefixed_architecture_notes.len(), 1);
+}
+
+#[test]
+fn search_by_tag_returns_empty_when_not_found() {
+    let workspace = create_test_workspace();
+    let mut service = create_test_note_service(workspace.root());
+
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "tagged note".to_string(),
+            tags: Some(vec!["todo".to_string()]),
+        })
+        .unwrap();
+
+    assert!(service.search_by_tag("architecture").unwrap().is_empty());
 }
 
 #[test]

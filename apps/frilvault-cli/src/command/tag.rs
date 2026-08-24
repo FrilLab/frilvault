@@ -1,11 +1,13 @@
 use std::io::{self, Write};
 
 use anyhow::{Context, Result, bail};
-use frilvault_core::FrilVault;
+use frilvault_core::{FrilVault, TagColor, TagGroupBy, TagStatistic, TagSummary};
 
 use crate::{
     cli::tag::{
-        TagAction, TagCommand, TagListCommand, TagMergeCommand, TagRemoveCommand, TagRenameCommand,
+        TagAction, TagColorAction, TagColorArg, TagColorCommand, TagColorRemoveCommand,
+        TagColorSetCommand, TagCommand, TagGroupByArg, TagListCommand, TagMergeCommand,
+        TagRemoveCommand, TagRenameCommand, TagStatsCommand,
     },
     output::{OutputFormat, print_json, resolve_format},
 };
@@ -16,6 +18,8 @@ pub fn execute(command: TagCommand) -> Result<()> {
         TagAction::Merge(merge) => execute_merge(merge),
         TagAction::Remove(remove) => execute_remove(remove),
         TagAction::List(list) => execute_list(list),
+        TagAction::Stats(stats) => execute_stats(stats),
+        TagAction::Color(color) => execute_color(color),
     }
 }
 
@@ -186,12 +190,21 @@ fn execute_list(command: TagListCommand) -> Result<()> {
     let vault = FrilVault::open(std::env::current_dir()?)?;
     let mut service = vault.notes()?;
     let format = resolve_format(command.format);
+    let mut tags = service.list_tags()?;
+    let mut colors = vault.tag_colors()?;
 
-    let tags = if command.unused {
-        service.list_unused_tags()?
-    } else {
-        service.list_tags()?
-    };
+    for summary in &mut tags {
+        summary.color = colors.remove(&summary.tag.to_lowercase());
+    }
+    tags.extend(colors.into_iter().map(|(tag, color)| TagSummary {
+        tag,
+        note_count: 0,
+        color: Some(color),
+    }));
+    tags.sort_by_key(|summary| summary.tag.to_lowercase());
+    if command.unused {
+        tags.retain(|summary| summary.note_count == 0);
+    }
 
     if matches!(format, OutputFormat::Json) {
         print_json(&tags)?;
@@ -233,4 +246,84 @@ fn execute_list(command: TagListCommand) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn execute_color(command: TagColorCommand) -> Result<()> {
+    match command.action {
+        TagColorAction::Set(command) => execute_color_set(command),
+        TagColorAction::Remove(command) => execute_color_remove(command),
+    }
+}
+
+fn execute_color_set(command: TagColorSetCommand) -> Result<()> {
+    let vault = FrilVault::open(std::env::current_dir()?)?;
+    let format = resolve_format(command.format);
+    let color = match command.color {
+        TagColorArg::Red => TagColor::Red,
+        TagColorArg::Orange => TagColor::Orange,
+        TagColorArg::Yellow => TagColor::Yellow,
+        TagColorArg::Green => TagColor::Green,
+        TagColorArg::Blue => TagColor::Blue,
+        TagColorArg::Purple => TagColor::Purple,
+    };
+    vault.set_tag_color(&command.tag, color)?;
+
+    if matches!(format, OutputFormat::Json) {
+        print_json(&serde_json::json!({ "tag": command.tag, "color": color }))?;
+    } else {
+        println!("Set tag '{}' color to {}.", command.tag, color.as_str());
+    }
+    Ok(())
+}
+
+fn execute_color_remove(command: TagColorRemoveCommand) -> Result<()> {
+    let vault = FrilVault::open(std::env::current_dir()?)?;
+    let format = resolve_format(command.format);
+    let removed = vault.remove_tag_color(&command.tag)?;
+
+    if matches!(format, OutputFormat::Json) {
+        print_json(&serde_json::json!({ "tag": command.tag, "removed": removed }))?;
+    } else if removed {
+        println!("Removed color from tag '{}'.", command.tag);
+    } else {
+        println!("Tag '{}' has no configured color.", command.tag);
+    }
+    Ok(())
+}
+
+fn execute_stats(command: TagStatsCommand) -> Result<()> {
+    let vault = FrilVault::open(std::env::current_dir()?)?;
+    let mut service = vault.notes()?;
+    let format = resolve_format(command.format);
+    let group_by = command.group_by.map(|group_by| match group_by {
+        TagGroupByArg::File => TagGroupBy::File,
+        TagGroupByArg::Directory => TagGroupBy::Directory,
+    });
+    let statistics = service.tag_statistics(command.tag.as_deref(), group_by)?;
+
+    if matches!(format, OutputFormat::Json) {
+        print_json(&statistics)?;
+        return Ok(());
+    }
+
+    print_tag_statistics(&statistics);
+    Ok(())
+}
+
+fn print_tag_statistics(statistics: &[TagStatistic]) {
+    println!("Tag Statistics");
+
+    if statistics.is_empty() {
+        println!();
+        println!("No matching tags found.");
+        return;
+    }
+
+    for statistic in statistics {
+        println!();
+        println!("{} ({})", statistic.tag, statistic.note_count);
+        for item in &statistic.breakdown {
+            println!("  {} {}", item.path.display(), item.note_count);
+        }
+    }
 }

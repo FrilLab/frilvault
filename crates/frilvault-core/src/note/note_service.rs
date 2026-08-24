@@ -17,9 +17,9 @@ use uuid::Uuid;
 
 use crate::{
     AddNoteRequest, AttachmentRepository, FrilVaultError, FrilVaultResult, NoteAnchor,
-    NoteAttachment, NoteQuery, NoteView, SymbolKind, TagOperationResult, TagSummary,
-    UpdateNoteRequest,
-    note::Note,
+    NoteAttachment, NoteQuery, NoteView, SymbolKind, TagBreakdown, TagGroupBy, TagOperationResult,
+    TagQuery, TagStatistic, TagSummary, UpdateNoteRequest,
+    note::{Note, normalize_tag, normalize_tags},
     runtime::VaultContext,
     symbol::SymbolResolver,
     workspace::{PathResolver, read_source_file_content},
@@ -73,7 +73,12 @@ impl NoteService {
     ///
     /// 해당 파일의 workspace index note count를 갱신합니다.
     pub fn add_note(&mut self, input: AddNoteRequest) -> FrilVaultResult<Note> {
-        let source_file = input.source_file.clone();
+        let mut input = input;
+        validate_anchor(&input.anchor)?;
+        let source_file = self
+            .vault_context
+            .normalize_source_file(&input.source_file)?;
+        input.source_file = source_file.clone();
         let note = Note::new(input);
 
         self.vault_context
@@ -114,28 +119,47 @@ impl NoteService {
     ///
     /// 선택적 file, keyword, tag 필터를 note view에 적용합니다.
     pub fn query_notes(&mut self, query: &NoteQuery) -> FrilVaultResult<Vec<NoteView>> {
+        self.query_notes_with_tag_query(query, None)
+    }
+
+    /// Applies a parsed tag expression together with optional file and keyword filters.
+    pub fn query_notes_with_tag_query(
+        &mut self,
+        query: &NoteQuery,
+        tag_query: Option<&TagQuery>,
+    ) -> FrilVaultResult<Vec<NoteView>> {
+        let exact_tag_query = query
+            .tag
+            .as_deref()
+            .map(|tag| TagQuery::all([tag]))
+            .transpose()?;
         let mut results = if let Some(source_file) = &query.source_file {
             self.note_views_for_source_file(source_file)?
-        } else if query.keyword.is_some() || query.tag.is_some() {
+        } else if query.keyword.is_some() || exact_tag_query.is_some() || tag_query.is_some() {
             self.all_note_views()?
         } else {
             Vec::new()
         };
 
-        if let Some(tag) = &query.tag {
-            let tag = tag.to_lowercase();
-            results.retain(|view| {
-                view.note
-                    .tags
-                    .iter()
-                    .any(|note_tag| note_tag.to_lowercase() == tag)
-            });
+        if let Some(exact_tag_query) = &exact_tag_query {
+            results.retain(|view| exact_tag_query.matches(&view.note.tags));
+        }
+
+        if let Some(tag_query) = tag_query {
+            results.retain(|view| tag_query.matches(&view.note.tags));
         }
 
         if let Some(keyword) = &query.keyword {
             let keyword = keyword.to_lowercase();
             results.retain(|view| note_matches_keyword(view, &keyword));
         }
+
+        results.sort_by(|left, right| {
+            left.source_file
+                .cmp(&right.source_file)
+                .then_with(|| left.note.created_at.cmp(&right.note.created_at))
+                .then_with(|| left.note.id.cmp(&right.note.id))
+        });
 
         Ok(results)
     }
@@ -172,23 +196,21 @@ impl NoteService {
         source_file: impl AsRef<Path>,
         note_id: Uuid,
     ) -> FrilVaultResult<()> {
-        let source_file = source_file.as_ref();
+        let source_file = self
+            .vault_context
+            .normalize_source_file(source_file.as_ref())?;
 
-        let mut notes = self.load_notes(source_file)?;
+        let mut notes = self.load_notes(&source_file)?;
 
-        let before = notes.len();
+        let note_index = unique_note_index(&notes, note_id)?;
+        notes.remove(note_index);
 
-        notes.retain(|note| note.id != note_id);
+        self.save_notes(&source_file, notes)?;
 
-        if notes.len() == before {
-            return Err(FrilVaultError::NoteNotFound(note_id));
-        }
+        self.vault_context
+            .sync_index_for_source_file(&source_file)?;
 
         self.attachment_repository().remove_all_for_note(note_id)?;
-
-        self.save_notes(source_file, notes)?;
-
-        self.vault_context.sync_index_for_source_file(source_file)?;
 
         Ok(())
     }
@@ -211,14 +233,14 @@ impl NoteService {
         note_id: Uuid,
         request: UpdateNoteRequest,
     ) -> FrilVaultResult<Note> {
-        let source_file = source_file.as_ref();
+        let source_file = self
+            .vault_context
+            .normalize_source_file(source_file.as_ref())?;
 
-        let mut notes = self.load_notes(source_file)?;
+        let mut notes = self.load_notes(&source_file)?;
 
-        let note = notes
-            .iter_mut()
-            .find(|note| note.id == note_id)
-            .ok_or(FrilVaultError::NoteNotFound(note_id))?;
+        let note_index = unique_note_index(&notes, note_id)?;
+        let note = &mut notes[note_index];
 
         if let Some(expected) = request.expected_updated_at
             && note.updated_at != expected
@@ -229,15 +251,16 @@ impl NoteService {
         note.content = request.content;
 
         if let Some(tags) = request.tags {
-            note.tags = tags;
+            note.tags = normalize_tags(tags);
         }
 
         note.updated_at = Utc::now();
 
         let updated = note.clone();
-        self.save_notes(source_file, notes)?;
+        self.save_notes(&source_file, notes)?;
 
-        self.vault_context.sync_index_for_source_file(source_file)?;
+        self.vault_context
+            .sync_index_for_source_file(&source_file)?;
 
         Ok(updated)
     }
@@ -248,23 +271,26 @@ impl NoteService {
         note_id: Uuid,
         image_path: impl AsRef<Path>,
     ) -> FrilVaultResult<NoteAttachment> {
-        let source_file = source_file.as_ref();
-        let mut notes = self.load_notes(source_file)?;
+        let source_file = self
+            .vault_context
+            .normalize_source_file(source_file.as_ref())?;
+        let mut notes = self.load_notes(&source_file)?;
 
-        let note = notes
-            .iter_mut()
-            .find(|note| note.id == note_id)
-            .ok_or(FrilVaultError::NoteNotFound(note_id))?;
+        let note_index = unique_note_index(&notes, note_id)?;
+        let note = &mut notes[note_index];
 
-        let attachment = self
-            .attachment_repository()
-            .store(note_id, image_path.as_ref())?;
+        let attachment_repository = self.attachment_repository();
+        let attachment = attachment_repository.store(note_id, image_path.as_ref())?;
 
         note.attachments.push(attachment.clone());
         note.updated_at = Utc::now();
 
-        self.save_notes(source_file, notes)?;
-        self.vault_context.sync_index_for_source_file(source_file)?;
+        if let Err(error) = self.save_notes(&source_file, notes) {
+            let _ = attachment_repository.remove(note_id, &attachment);
+            return Err(error);
+        }
+        self.vault_context
+            .sync_index_for_source_file(&source_file)?;
 
         Ok(attachment)
     }
@@ -275,13 +301,13 @@ impl NoteService {
         note_id: Uuid,
         attachment_id: Uuid,
     ) -> FrilVaultResult<()> {
-        let source_file = source_file.as_ref();
-        let mut notes = self.load_notes(source_file)?;
+        let source_file = self
+            .vault_context
+            .normalize_source_file(source_file.as_ref())?;
+        let mut notes = self.load_notes(&source_file)?;
 
-        let note = notes
-            .iter_mut()
-            .find(|note| note.id == note_id)
-            .ok_or(FrilVaultError::NoteNotFound(note_id))?;
+        let note_index = unique_note_index(&notes, note_id)?;
+        let note = &mut notes[note_index];
 
         let attachment_index = note
             .attachments
@@ -292,10 +318,11 @@ impl NoteService {
         let attachment = note.attachments.remove(attachment_index);
         note.updated_at = Utc::now();
 
-        self.attachment_repository().remove(note_id, &attachment)?;
+        self.save_notes(&source_file, notes)?;
+        self.vault_context
+            .sync_index_for_source_file(&source_file)?;
 
-        self.save_notes(source_file, notes)?;
-        self.vault_context.sync_index_for_source_file(source_file)?;
+        self.attachment_repository().remove(note_id, &attachment)?;
 
         Ok(())
     }
@@ -356,7 +383,9 @@ impl NoteService {
         symbol: &str,
         kind: SymbolKind,
     ) -> FrilVaultResult<Option<crate::ResolvedSymbol>> {
-        let source_file = source_file.as_ref();
+        let source_file = self
+            .vault_context
+            .normalize_source_file(source_file.as_ref())?;
         let workspace_root = self
             .vault_context
             .workspace_index_repository
@@ -497,35 +526,96 @@ impl NoteService {
     ///
     /// 워크스페이스 전체에서 사용 중인 고유 태그 목록과 각 태그별 노트 수를 반환합니다.
     pub fn list_tags(&mut self) -> FrilVaultResult<Vec<TagSummary>> {
+        let mut summaries: Vec<TagSummary> = self
+            .tag_statistics(None, None)?
+            .into_iter()
+            .map(|statistic| TagSummary {
+                tag: statistic.tag,
+                note_count: statistic.note_count,
+                color: None,
+            })
+            .collect();
+
+        summaries.sort_by_key(|summary| summary.tag.to_lowercase());
+        Ok(summaries)
+    }
+
+    /// Aggregates note counts per tag, optionally filtering by tag and grouping
+    /// each tag's distribution by source file or immediate parent directory.
+    ///
+    /// Results are recomputed from current note files and ordered by descending
+    /// note count, then tag name. A tag is counted at most once per note.
+    pub fn tag_statistics(
+        &mut self,
+        tag: Option<&str>,
+        group_by: Option<TagGroupBy>,
+    ) -> FrilVaultResult<Vec<TagStatistic>> {
         let records = self.vault_context.note_repository.list_all_note_files()?;
-        let mut tag_counts: std::collections::HashMap<String, (String, usize)> =
-            std::collections::HashMap::new();
+        let tag_filter = tag
+            .map(|tag| validate_tag_name(tag, "tag"))
+            .transpose()?
+            .map(|tag| tag.to_lowercase());
+        let mut tag_counts: std::collections::HashMap<
+            String,
+            (String, usize, std::collections::HashMap<PathBuf, usize>),
+        > = std::collections::HashMap::new();
 
         for record in records {
             for note in record.note_file.notes {
                 let mut seen_in_note = std::collections::HashSet::new();
                 for tag in note.tags {
-                    let trimmed = tag.trim().to_string();
-                    if !trimmed.is_empty() && seen_in_note.insert(trimmed.to_lowercase()) {
-                        let entry = tag_counts
-                            .entry(trimmed.to_lowercase())
-                            .or_insert_with(|| (trimmed.clone(), 0));
-                        entry.1 += 1;
+                    let normalized = normalize_tag(&tag);
+                    let key = normalized.to_lowercase();
+                    if normalized.is_empty()
+                        || tag_filter.as_ref().is_some_and(|filter| filter != &key)
+                        || !seen_in_note.insert(key.clone())
+                    {
+                        continue;
+                    }
+
+                    let entry = tag_counts
+                        .entry(key)
+                        .or_insert_with(|| (normalized, 0, std::collections::HashMap::new()));
+                    entry.1 += 1;
+
+                    if let Some(group_by) = group_by {
+                        let path = tag_group_path(&record.source_file, group_by);
+                        *entry.2.entry(path).or_insert(0) += 1;
                     }
                 }
             }
         }
 
-        let mut summaries: Vec<TagSummary> = tag_counts
+        let mut statistics: Vec<TagStatistic> = tag_counts
             .into_values()
-            .map(|(display_tag, count)| TagSummary {
-                tag: display_tag,
-                note_count: count,
+            .map(|(tag, note_count, breakdown)| {
+                let mut breakdown: Vec<TagBreakdown> = breakdown
+                    .into_iter()
+                    .map(|(path, note_count)| TagBreakdown { path, note_count })
+                    .collect();
+                breakdown.sort_by(|left, right| {
+                    right.note_count.cmp(&left.note_count).then_with(|| {
+                        left.path
+                            .to_string_lossy()
+                            .cmp(&right.path.to_string_lossy())
+                    })
+                });
+
+                TagStatistic {
+                    tag,
+                    note_count,
+                    breakdown,
+                }
             })
             .collect();
 
-        summaries.sort_by_key(|a| a.tag.to_lowercase());
-        Ok(summaries)
+        statistics.sort_by(|left, right| {
+            right
+                .note_count
+                .cmp(&left.note_count)
+                .then_with(|| left.tag.to_lowercase().cmp(&right.tag.to_lowercase()))
+        });
+        Ok(statistics)
     }
 
     /// Identifies tags that are no longer attached to any note.
@@ -632,10 +722,19 @@ impl NoteService {
     ///
     /// 인덱스된 모든 source file에서 stable id로 note를 찾습니다.
     pub fn find_note_by_id(&mut self, note_id: Uuid) -> FrilVaultResult<NoteView> {
-        self.all_note_views()?
+        let mut matches = self
+            .all_note_views()?
             .into_iter()
-            .find(|view| view.note.id == note_id)
-            .ok_or(FrilVaultError::NoteNotFound(note_id))
+            .filter(|view| view.note.id == note_id);
+        let note = matches
+            .next()
+            .ok_or(FrilVaultError::NoteNotFound(note_id))?;
+
+        if matches.next().is_some() {
+            return Err(FrilVaultError::DuplicateNoteId(note_id));
+        }
+
+        Ok(note)
     }
 
     /// Resolves a stable note URI into a current `NoteView`.
@@ -657,6 +756,49 @@ impl NoteService {
     }
 }
 
+fn tag_group_path(source_file: &Path, group_by: TagGroupBy) -> PathBuf {
+    match group_by {
+        TagGroupBy::File => source_file.to_path_buf(),
+        TagGroupBy::Directory => source_file
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf(),
+    }
+}
+
+fn unique_note_index(notes: &[Note], note_id: Uuid) -> FrilVaultResult<usize> {
+    let mut matches = notes
+        .iter()
+        .enumerate()
+        .filter(|(_, note)| note.id == note_id)
+        .map(|(index, _)| index);
+    let index = matches
+        .next()
+        .ok_or(FrilVaultError::NoteNotFound(note_id))?;
+
+    if matches.next().is_some() {
+        return Err(FrilVaultError::DuplicateNoteId(note_id));
+    }
+
+    Ok(index)
+}
+
+fn validate_anchor(anchor: &NoteAnchor) -> FrilVaultResult<()> {
+    match anchor {
+        NoteAnchor::Line(anchor) if anchor.line == 0 || anchor.column == 0 => Err(
+            FrilVaultError::InvalidAnchor("line and column must be 1-based".to_string()),
+        ),
+        NoteAnchor::Symbol(anchor) if anchor.name.trim().is_empty() => Err(
+            FrilVaultError::InvalidAnchor("symbol name cannot be empty".to_string()),
+        ),
+        NoteAnchor::Symbol(anchor) if anchor.line_hint == Some(0) => Err(
+            FrilVaultError::InvalidAnchor("symbol line hint must be 1-based".to_string()),
+        ),
+        _ => Ok(()),
+    }
+}
+
 fn note_matches_keyword(view: &NoteView, keyword: &str) -> bool {
     let content_match = view.note.content.to_lowercase().contains(keyword);
 
@@ -669,31 +811,23 @@ fn note_matches_keyword(view: &NoteView, keyword: &str) -> bool {
 }
 
 fn validate_tag_name(tag: &str, field_name: &str) -> FrilVaultResult<String> {
-    let trimmed = tag.trim();
-    if trimmed.is_empty() {
+    let normalized = normalize_tag(tag);
+    if normalized.is_empty() {
         return Err(FrilVaultError::InvalidTag(format!(
             "{field_name} cannot be empty"
         )));
     }
-    Ok(trimmed.to_string())
+    Ok(normalized)
 }
 
 fn deduplicate_tags(tags: Vec<String>) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut deduplicated = Vec::new();
-    for tag in tags {
-        let trimmed = tag.trim().to_string();
-        if !trimmed.is_empty() && seen.insert(trimmed.to_lowercase()) {
-            deduplicated.push(trimmed);
-        }
-    }
-    deduplicated
+    normalize_tags(tags)
 }
 
 fn rename_tag_in_note(note: &mut Note, from_lower: &str, to: &str) -> bool {
     let mut new_tags = Vec::with_capacity(note.tags.len());
     for tag in &note.tags {
-        if tag.to_lowercase() == from_lower {
+        if normalize_tag(tag).to_lowercase() == from_lower {
             new_tags.push(to.to_string());
         } else {
             new_tags.push(tag.clone());
@@ -716,7 +850,7 @@ fn merge_tags_in_note(
 ) -> bool {
     let mut new_tags = Vec::with_capacity(note.tags.len());
     for tag in &note.tags {
-        if source_set.contains(&tag.to_lowercase()) {
+        if source_set.contains(&normalize_tag(tag).to_lowercase()) {
             new_tags.push(target.to_string());
         } else {
             new_tags.push(tag.clone());
@@ -736,7 +870,7 @@ fn remove_tag_in_note(note: &mut Note, target_lower: &str) -> bool {
     let new_tags: Vec<String> = note
         .tags
         .iter()
-        .filter(|t| t.to_lowercase() != target_lower)
+        .filter(|t| normalize_tag(t).to_lowercase() != target_lower)
         .cloned()
         .collect();
     let deduplicated = deduplicate_tags(new_tags);

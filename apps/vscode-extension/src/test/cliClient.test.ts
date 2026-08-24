@@ -146,6 +146,98 @@ suite('CliClient', () => {
     assert.ok(calls.some((call) => call.includes('index --format json')));
   });
 
+  test('initializes a local vault through the CLI JSON boundary', async () => {
+    const calls: string[] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (file, args) => {
+        calls.push(`${file} ${args.join(' ')}`);
+
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+
+        return {
+          stdout: JSON.stringify({ mode: 'local', git_exclude: 'added' }),
+          stderr: '',
+        };
+      },
+    });
+
+    const result = await cliClient.initializeLocal('/workspace');
+
+    assert.deepStrictEqual(result, { mode: 'local', git_exclude: 'added' });
+    assert.ok(calls.some((call) => call.endsWith('init --format json')));
+  });
+
+  test('searches notes by tag through the CLI JSON boundary', async () => {
+    const calls: string[] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (file, args) => {
+        calls.push(`${file} ${args.join(' ')}`);
+
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+
+        return { stdout: '[]', stderr: '' };
+      },
+    });
+
+    const notes = await cliClient.searchNotes({
+      workspaceRoot: '/workspace',
+      tag: '#todo',
+    });
+
+    assert.deepStrictEqual(notes, []);
+    assert.ok(calls.some((call) => call.endsWith('search --tag #todo --format json')));
+  });
+
+  test('searches notes with repeated tags and a tag query through the CLI boundary', async () => {
+    const calls: string[][] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+
+        calls.push(args);
+        return { stdout: '[]', stderr: '' };
+      },
+    });
+
+    await cliClient.searchNotes({
+      workspaceRoot: '/workspace',
+      tags: ['performance', 'parser'],
+    });
+    await cliClient.searchNotes({
+      workspaceRoot: '/workspace',
+      tagQuery: 'tag:bug OR tag:security',
+    });
+
+    assert.deepStrictEqual(calls, [
+      ['search', '--tag', 'performance', '--tag', 'parser', '--format', 'json'],
+      ['search', '--tag-query', 'tag:bug OR tag:security', '--format', 'json'],
+    ]);
+  });
+
   test('fails fast when the CLI version does not match the extension expectation', async () => {
     const cliClient = new CliClient({
       extensionPath: '/extension',
@@ -176,5 +268,32 @@ suite('CliClient', () => {
         return true;
       },
     );
+  });
+
+  test('assigns and removes tag colors through the existing CLI boundary', async () => {
+    const calls: string[][] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+        calls.push(args);
+        return { stdout: '{}', stderr: '' };
+      },
+    });
+
+    await cliClient.tagColorSet('/workspace', 'bug', 'red');
+    await cliClient.tagColorRemove('/workspace', 'bug');
+
+    assert.deepStrictEqual(calls, [
+      ['tag', 'color', 'set', 'bug', 'red', '--format', 'json'],
+      ['tag', 'color', 'remove', 'bug', '--format', 'json'],
+    ]);
   });
 });

@@ -9,6 +9,7 @@
  */
 export const VIEW_IDS = {
   notes: 'frilvault.notes',
+  tags: 'frilvault.tags',
 } as const;
 
 export const COMMAND_IDS = {
@@ -17,6 +18,10 @@ export const COMMAND_IDS = {
   enable: 'frilvault.enable',
   disable: 'frilvault.disable',
   refresh: 'frilvault.refresh',
+  searchNotes: 'frilvault.searchNotes',
+  searchNotesByTag: 'frilvault.searchNotesByTag',
+  setTagColor: 'frilvault.setTagColor',
+  removeTagColor: 'frilvault.removeTagColor',
   showNotesForCurrentFile: 'frilvault.showNotesForCurrentFile',
   notesPanelOpenNote: 'frilvault.notesPanel.openNote',
   notesPanelEditNote: 'frilvault.notesPanel.editNote',
@@ -41,6 +46,8 @@ export const VIEW_ITEM_CONTEXT = {
   notesLineGroup: 'frilvault.notesLineGroup',
   notesSymbolGroup: 'frilvault.notesSymbolGroup',
   notesUnresolvedGroup: 'frilvault.notesUnresolvedGroup',
+  tag: 'frilvault.tag',
+  tagNote: 'frilvault.tagNote',
 } as const;
 
 /** VS Code focus command for the notes sidebar view. */
@@ -51,4 +58,9 @@ export function notesViewFocusCommand(): string {
 /** Activation event emitted when the notes view becomes visible. */
 export function notesViewActivationEvent(): string {
   return `onView:${VIEW_IDS.notes}`;
+}
+
+/** Activation event emitted when the tags view becomes visible. */
+export function tagsViewActivationEvent(): string {
+  return `onView:${VIEW_IDS.tags}`;
 }

@@ -7,12 +7,10 @@ import { suite, test, teardown } from 'mocha';
 import * as vscode from 'vscode';
 
 import { CliClient } from '../core/cliClient';
+import { runBackgroundRefresh } from '../extension';
 import { CurrentFileNotesStore } from '../features/current-file/store';
 import { createAddNoteCommand } from '../features/inline-editor/command';
-import {
-  GITIGNORE_PROMPT_DISABLED_KEY,
-  maybePromptForGitignore,
-} from '../features/gitignore/prompt';
+import { initializeLocalVault } from '../features/initialization/localVault';
 import {
   FRILVAULT_ENABLED_KEY,
   isFrilVaultEnabled,
@@ -57,6 +55,37 @@ suite('Extension Test Suite', () => {
         fs.rmSync(workspace, { recursive: true, force: true });
       }
     }
+  });
+
+  test('extension activates and registers every contributed command', async () => {
+    const extension = vscode.extensions.getExtension('frillab.frilvault');
+    assert.ok(extension, 'FrilVault extension is available in the Extension Host');
+    await extension.activate();
+
+    const registered = new Set(await vscode.commands.getCommands(true));
+    const contributed = (extension.packageJSON.contributes?.commands ?? []) as Array<{
+      command: string;
+    }>;
+    const missing = contributed
+      .map(({ command }) => command)
+      .filter((command) => !registered.has(command));
+
+    assert.deepStrictEqual(missing, []);
+  });
+
+  test('background refresh reports failures without leaking a rejected promise', async () => {
+    let reported = '';
+
+    await runBackgroundRefresh(
+      async () => {
+        throw new Error('refresh failed');
+      },
+      (message) => {
+        reported = message;
+      },
+    );
+
+    assert.strictEqual(reported, 'refresh failed');
   });
 
   test('NotesPanelService parses JSON output from flvt list', async () => {
@@ -358,79 +387,57 @@ suite('Extension Test Suite', () => {
     assert.strictEqual(overviewLoadCount, 2);
   });
 
-  test('Gitignore prompt reports inspection failures without throwing', async () => {
+  test('Local vault initialization skips warnings after adding the exclude', async () => {
     const workspace = createTestWorkspace();
     let warningMessage = '';
 
-    await maybePromptForGitignore({
+    await initializeLocalVault({
       getWorkspaceRoot: () => workspace.root,
       cliClient: {
-        checkGitignore: async () => {
-          throw new Error('cli unavailable');
-        },
+        initializeLocal: async () => ({ mode: 'local', git_exclude: 'added' }),
       } as unknown as CliClient,
-      workspaceState: createMockWorkspaceState(),
-      showWarningMessage: async (message, _options) => {
+      showWarningMessage: async (message) => {
         warningMessage = message;
         return undefined;
       },
     });
 
-    assert.match(warningMessage, /could not inspect \.gitignore/i);
+    assert.strictEqual(warningMessage, '');
   });
 
-  test('Gitignore prompt appends entry when user accepts', async () => {
+  test('Local vault initialization reports an already tracked vault', async () => {
     const workspace = createTestWorkspace();
-    let addCalled = false;
-    let infoMessage = '';
+    let warningMessage = '';
 
-    const workspaceState = createMockWorkspaceState();
-
-    await maybePromptForGitignore({
+    await initializeLocalVault({
       getWorkspaceRoot: () => workspace.root,
       cliClient: {
-        checkGitignore: async () => ({ ignored: false }),
-        addGitignoreEntry: async () => {
-          addCalled = true;
-        },
+        initializeLocal: async () => ({ mode: 'local', git_exclude: 'vault_tracked' }),
       } as unknown as CliClient,
-      workspaceState,
-      showWarningMessage: async (_message, _options, ...items) => items[0],
-      showInformationMessage: async (message) => {
-        infoMessage = message;
+      showWarningMessage: async (message) => {
+        warningMessage = message;
         return undefined;
       },
     });
 
-    assert.strictEqual(addCalled, true);
-    assert.strictEqual(infoMessage, 'Added `.vault/` to `.gitignore`.');
+    assert.match(warningMessage, /git rm -r --cached \.vault/);
   });
 
-  test('Gitignore prompt respects never ask again preference', async () => {
+  test('Local vault initialization delegates to the CLI once', async () => {
     const workspace = createTestWorkspace();
-    let checkCount = 0;
+    let initializeCount = 0;
 
-    const workspaceState = createMockWorkspaceState();
-    await workspaceState.update(GITIGNORE_PROMPT_DISABLED_KEY, {
-      [workspace.root]: true,
-    });
-
-    await maybePromptForGitignore({
+    await initializeLocalVault({
       getWorkspaceRoot: () => workspace.root,
       cliClient: {
-        checkGitignore: async () => {
-          checkCount += 1;
-          return { ignored: false };
-        },
-        addGitignoreEntry: async () => {
-          throw new Error('should not append when prompt is disabled');
+        initializeLocal: async () => {
+          initializeCount += 1;
+          return { mode: 'local', git_exclude: 'already_excluded' };
         },
       } as unknown as CliClient,
-      workspaceState,
-      showWarningMessage: async () => 'Add to .gitignore',
     });
 
-    assert.strictEqual(checkCount, 0);
+    assert.strictEqual(initializeCount, 1);
   });
 
   test('Source rename handler ignores vault paths and outside workspace renames', () => {
