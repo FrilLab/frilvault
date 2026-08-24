@@ -21,6 +21,24 @@ import {
 import type { NoteView } from '../types';
 
 suite('Inline note editor race handling', () => {
+  test('loads current workspace tags when the editor opens', async () => {
+    const panel = new FakeInlineNotePanel();
+    const editor = createTestEditor({
+      cliClient: {
+        tagList: async () => [
+          { tag: 'performance', note_count: 2 },
+          { tag: 'permission', note_count: 1 },
+        ],
+      } as unknown as CliClient,
+      panel,
+    });
+
+    editor.openEdit(createLineNoteView('note'));
+    await waitFor(() => panel.tagSuggestions.length === 2);
+
+    assert.deepStrictEqual(panel.tagSuggestions, ['performance', 'permission']);
+  });
+
   test('rapid typing persists the latest draft without replacing active input state', async () => {
     const panel = new FakeInlineNotePanel();
     const firstSave = deferred<NoteView>();
@@ -28,6 +46,7 @@ suite('Inline note editor race handling', () => {
     const savedContents: string[] = [];
 
     const cliClient = {
+      tagList: async () => [],
       updateNote: async (input: UpdateNoteInput) => {
         savedContents.push(input.content);
 
@@ -70,6 +89,7 @@ suite('Inline note editor race handling', () => {
     const autoSave = new ManualAutoSaveController();
 
     const cliClient = {
+      tagList: async () => [],
       updateNote: async (input: UpdateNoteInput) => {
         persistCalls.push(input.content);
         return createSavedLineNoteView(input.content, '2026-07-23T00:00:03Z');
@@ -99,6 +119,7 @@ suite('Inline note editor race handling', () => {
     const savedContents: string[] = [];
 
     const cliClient = {
+      tagList: async () => [],
       updateNote: async (input: UpdateNoteInput) => {
         savedContents.push(input.content);
         return createSavedLineNoteView(input.content, '2026-07-23T00:00:04Z');
@@ -129,6 +150,7 @@ suite('Inline note editor race handling', () => {
 });
 
 class FakeInlineNotePanel implements InlineNotePanelLike {
+  public tagSuggestions: string[] = [];
   public readonly updates: Array<{
     draft: { content: string; tagsText: string };
     options?: {
@@ -168,6 +190,10 @@ class FakeInlineNotePanel implements InlineNotePanelLike {
 
   public close(): void {
     this.onMessage = undefined;
+  }
+
+  public updateTagSuggestions(tags: string[]): void {
+    this.tagSuggestions = tags;
   }
 
   public isOpen(): boolean {
@@ -222,7 +248,7 @@ function createTestEditor(
   overrides: Partial<InlineNoteEditorDependencies>,
 ) {
   const editor = createInlineNoteEditor({
-    cliClient: {} as CliClient,
+    cliClient: { tagList: async () => [] } as unknown as CliClient,
     getWorkspaceRoot: () => '/tmp/workspace',
     refreshNoteState: async () => undefined,
     ...overrides,

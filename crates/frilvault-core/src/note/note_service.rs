@@ -19,7 +19,7 @@ use crate::{
     AddNoteRequest, AttachmentRepository, FrilVaultError, FrilVaultResult, NoteAnchor,
     NoteAttachment, NoteQuery, NoteView, SymbolKind, TagOperationResult, TagSummary,
     UpdateNoteRequest,
-    note::Note,
+    note::{Note, normalize_tag, normalize_tags},
     runtime::VaultContext,
     symbol::SymbolResolver,
     workspace::{PathResolver, read_source_file_content},
@@ -123,12 +123,12 @@ impl NoteService {
         };
 
         if let Some(tag) = &query.tag {
-            let tag = normalize_tag_for_search(tag);
+            let tag = normalize_tag(tag).to_lowercase();
             results.retain(|view| {
                 view.note
                     .tags
                     .iter()
-                    .any(|note_tag| normalize_tag_for_search(note_tag) == tag)
+                    .any(|note_tag| normalize_tag(note_tag).to_lowercase() == tag)
             });
         }
 
@@ -229,7 +229,7 @@ impl NoteService {
         note.content = request.content;
 
         if let Some(tags) = request.tags {
-            note.tags = tags;
+            note.tags = normalize_tags(tags);
         }
 
         note.updated_at = Utc::now();
@@ -505,11 +505,11 @@ impl NoteService {
             for note in record.note_file.notes {
                 let mut seen_in_note = std::collections::HashSet::new();
                 for tag in note.tags {
-                    let trimmed = tag.trim().to_string();
-                    if !trimmed.is_empty() && seen_in_note.insert(trimmed.to_lowercase()) {
+                    let normalized = normalize_tag(&tag);
+                    if !normalized.is_empty() && seen_in_note.insert(normalized.to_lowercase()) {
                         let entry = tag_counts
-                            .entry(trimmed.to_lowercase())
-                            .or_insert_with(|| (trimmed.clone(), 0));
+                            .entry(normalized.to_lowercase())
+                            .or_insert_with(|| (normalized.clone(), 0));
                         entry.1 += 1;
                     }
                 }
@@ -668,39 +668,24 @@ fn note_matches_keyword(view: &NoteView, keyword: &str) -> bool {
     content_match || symbol_match
 }
 
-fn normalize_tag_for_search(tag: &str) -> String {
-    tag.trim()
-        .strip_prefix('#')
-        .unwrap_or(tag.trim())
-        .to_lowercase()
-}
-
 fn validate_tag_name(tag: &str, field_name: &str) -> FrilVaultResult<String> {
-    let trimmed = tag.trim();
-    if trimmed.is_empty() {
+    let normalized = normalize_tag(tag);
+    if normalized.is_empty() {
         return Err(FrilVaultError::InvalidTag(format!(
             "{field_name} cannot be empty"
         )));
     }
-    Ok(trimmed.to_string())
+    Ok(normalized)
 }
 
 fn deduplicate_tags(tags: Vec<String>) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut deduplicated = Vec::new();
-    for tag in tags {
-        let trimmed = tag.trim().to_string();
-        if !trimmed.is_empty() && seen.insert(trimmed.to_lowercase()) {
-            deduplicated.push(trimmed);
-        }
-    }
-    deduplicated
+    normalize_tags(tags)
 }
 
 fn rename_tag_in_note(note: &mut Note, from_lower: &str, to: &str) -> bool {
     let mut new_tags = Vec::with_capacity(note.tags.len());
     for tag in &note.tags {
-        if tag.to_lowercase() == from_lower {
+        if normalize_tag(tag).to_lowercase() == from_lower {
             new_tags.push(to.to_string());
         } else {
             new_tags.push(tag.clone());
@@ -723,7 +708,7 @@ fn merge_tags_in_note(
 ) -> bool {
     let mut new_tags = Vec::with_capacity(note.tags.len());
     for tag in &note.tags {
-        if source_set.contains(&tag.to_lowercase()) {
+        if source_set.contains(&normalize_tag(tag).to_lowercase()) {
             new_tags.push(target.to_string());
         } else {
             new_tags.push(tag.clone());
@@ -743,7 +728,7 @@ fn remove_tag_in_note(note: &mut Note, target_lower: &str) -> bool {
     let new_tags: Vec<String> = note
         .tags
         .iter()
-        .filter(|t| t.to_lowercase() != target_lower)
+        .filter(|t| normalize_tag(t).to_lowercase() != target_lower)
         .cloned()
         .collect();
     let deduplicated = deduplicate_tags(new_tags);
