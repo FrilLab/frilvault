@@ -86,7 +86,7 @@ suite('Gutter marker helpers', () => {
     const combined = parts.map((part) => part.value).join('\n');
 
     assert.match(combined, /Line 2/);
-    assert.match(combined, /Tags: bug/);
+    assert.match(combined, /Tags: \[#bug\]\(command:frilvault\.searchNotesByTag/);
     assert.match(combined, /\[Open Note\]/);
     assert.match(combined, /frilvault\.gutter\.viewNote/);
   });

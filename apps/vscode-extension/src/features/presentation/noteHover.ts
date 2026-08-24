@@ -13,6 +13,7 @@ import {
   type ResolvedNoteAnchor,
 } from './editorNoteView';
 import { truncateMarkdownContent } from '../hover/richHover';
+import { formatTag, HOVER_TAG_LIMIT, presentTags } from './tagPresentation';
 
 export const NOTE_HOVER_COMMANDS = [
   'frilvault.gutter.showActions',
@@ -23,6 +24,7 @@ export const NOTE_HOVER_COMMANDS = [
   COMMAND_IDS.gutterCopyNoteContent,
   COMMAND_IDS.gutterCopyNoteMarkdown,
   COMMAND_IDS.notesPanelOpenNote,
+  COMMAND_IDS.searchNotesByTag,
 ] as const;
 
 export interface HoverNotePresentation {
@@ -63,7 +65,7 @@ export function buildEditorNotesHoverParts(
     return { contents: [] };
   }
 
-  const contentMarkdown = createUntrustedMarkdown();
+  const contentMarkdown = createContentMarkdown();
   const actionMarkdown = createTrustedActionsMarkdown();
   const presentations = uniqueNotes.map((note) =>
     toHoverNotePresentation(toEditorNoteView(note, workspaceRoot)),
@@ -96,7 +98,7 @@ export function formatEditorNotesHover(
   previewLength: number,
 ): vscode.MarkdownString {
   const parts = buildEditorNotesHoverParts(notes, workspaceRoot, sourceFile, previewLength);
-  const combined = createUntrustedMarkdown();
+  const combined = createContentMarkdown();
 
   for (const part of parts.contents) {
     combined.appendMarkdown(part.value);
@@ -181,17 +183,31 @@ function buildHoverContent(
 function buildHoverMetadata(markdown: vscode.MarkdownString, presentation: HoverNotePresentation): void {
   markdown.appendMarkdown(`${escapeMarkdownInline(formatAnchorLabel(presentation.anchor))}\n`);
 
-  if (presentation.tags.length > 0) {
-    markdown.appendMarkdown(
-      `Tags: ${presentation.tags.map(escapeMarkdownInline).join(', ')}\n`,
-    );
-  }
+  buildHoverTags(markdown, presentation.tags);
 
   if (presentation.updatedAt) {
     markdown.appendMarkdown(`Updated: ${escapeMarkdownInline(formatUpdatedAt(presentation.updatedAt))}\n`);
   }
 
   markdown.appendMarkdown('\n');
+}
+
+function buildHoverTags(markdown: vscode.MarkdownString, tags: string[]): void {
+  const presented = presentTags(tags, HOVER_TAG_LIMIT);
+
+  if (presented.tags.length === 0) {
+    return;
+  }
+
+  const links = presented.tags.map((tag) =>
+    `[${escapeMarkdownInline(formatTag(tag))}](${commandUri(COMMAND_IDS.searchNotesByTag, [tag])})`
+  );
+
+  if (presented.hiddenCount > 0) {
+    links.push(`+${presented.hiddenCount} more`);
+  }
+
+  markdown.appendMarkdown(`Tags: ${links.join('  ')}\n`);
 }
 
 function buildHoverWarning(markdown: vscode.MarkdownString, warning: string | undefined): void {
@@ -226,9 +242,9 @@ function buildHoverActions(
   markdown.appendMarkdown(`${links.join(' · ')}\n`);
 }
 
-function createUntrustedMarkdown(): vscode.MarkdownString {
+function createContentMarkdown(): vscode.MarkdownString {
   const markdown = new vscode.MarkdownString(undefined, true);
-  markdown.isTrusted = false;
+  markdown.isTrusted = { enabledCommands: [COMMAND_IDS.searchNotesByTag] };
   markdown.supportHtml = false;
   return markdown;
 }

@@ -76,7 +76,11 @@ export function normalizeTag(tag: string): string {
 }
 
 export function formatTagsText(tags: string[] | undefined): string {
-  return (tags ?? []).join(', ');
+  return (tags ?? [])
+    .map(normalizeTag)
+    .filter((tag) => tag.length > 0)
+    .map((tag) => `#${tag}`)
+    .join(', ');
 }
 
 export function createEditDraft(
