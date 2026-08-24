@@ -57,6 +57,17 @@ let activeStore: CurrentFileNotesStore | undefined;
 let activeRegistry: GutterNoteRegistry | undefined;
 const codeLensRefreshEmitter = new vscode.EventEmitter<void>();
 
+export async function runBackgroundRefresh(
+  refresh: () => Promise<void>,
+  reportError: (message: string) => void,
+): Promise<void> {
+  try {
+    await refresh();
+  } catch (error) {
+    reportError(error instanceof Error ? error.message : 'Failed to refresh FrilVault views.');
+  }
+}
+
 /**
  * Registers FrilVault commands, providers, and workspace listeners.
  *
@@ -179,6 +190,20 @@ export function activate(context: vscode.ExtensionContext): void {
     decorator.clear();
     notesProvider.refresh();
     tagExplorerProvider.refresh();
+  };
+
+  const refreshAfterWorkspaceEvent = async (editor?: vscode.TextEditor) => {
+    await runBackgroundRefresh(
+      async () => {
+        if (!isEnabled()) {
+          clearUi();
+          return;
+        }
+
+        await refreshAfterMutation(editor);
+      },
+      (message) => cliOutputChannel.appendLine(`FrilVault: ${message}`),
+    );
   };
 
   registerGutterCommands(context, gutterActions);
@@ -313,12 +338,8 @@ export function activate(context: vscode.ExtensionContext): void {
         await refreshAfterMutation();
       }),
     ),
-    vscode.window.onDidChangeActiveTextEditor(async (editor) => {
-      await refreshAfterMutation(editor);
-    }),
-    vscode.workspace.onDidSaveTextDocument(async () => {
-      await refreshAfterMutation();
-    }),
+    vscode.window.onDidChangeActiveTextEditor(refreshAfterWorkspaceEvent),
+    vscode.workspace.onDidSaveTextDocument(() => refreshAfterWorkspaceEvent()),
   );
 
   registerNotesTreeDataProvider(context, notesProvider);

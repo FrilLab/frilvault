@@ -7,6 +7,7 @@ import { suite, test, teardown } from 'mocha';
 import * as vscode from 'vscode';
 
 import { CliClient } from '../core/cliClient';
+import { runBackgroundRefresh } from '../extension';
 import { CurrentFileNotesStore } from '../features/current-file/store';
 import { createAddNoteCommand } from '../features/inline-editor/command';
 import { initializeLocalVault } from '../features/initialization/localVault';
@@ -54,6 +55,37 @@ suite('Extension Test Suite', () => {
         fs.rmSync(workspace, { recursive: true, force: true });
       }
     }
+  });
+
+  test('extension activates and registers every contributed command', async () => {
+    const extension = vscode.extensions.getExtension('frillab.frilvault');
+    assert.ok(extension, 'FrilVault extension is available in the Extension Host');
+    await extension.activate();
+
+    const registered = new Set(await vscode.commands.getCommands(true));
+    const contributed = (extension.packageJSON.contributes?.commands ?? []) as Array<{
+      command: string;
+    }>;
+    const missing = contributed
+      .map(({ command }) => command)
+      .filter((command) => !registered.has(command));
+
+    assert.deepStrictEqual(missing, []);
+  });
+
+  test('background refresh reports failures without leaking a rejected promise', async () => {
+    let reported = '';
+
+    await runBackgroundRefresh(
+      async () => {
+        throw new Error('refresh failed');
+      },
+      (message) => {
+        reported = message;
+      },
+    );
+
+    assert.strictEqual(reported, 'refresh failed');
   });
 
   test('NotesPanelService parses JSON output from flvt list', async () => {

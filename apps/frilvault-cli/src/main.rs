@@ -92,3 +92,10 @@ mod index_command;
 mod tag_command_test;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod test_support {
+    use std::sync::Mutex;
+
+    pub static WORKING_DIRECTORY_LOCK: Mutex<()> = Mutex::new(());
+}

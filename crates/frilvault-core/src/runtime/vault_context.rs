@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::{
     FrilVaultResult,
@@ -38,30 +38,33 @@ impl VaultContext {
     }
 
     pub fn load_notes(&mut self, source_file: &Path) -> FrilVaultResult<NoteFile> {
+        let source_file = self.normalize_source_file(source_file)?;
+
         // Serve cached note files when possible to avoid repeated JSON reads.
         // 가능하면 캐시된 note file을 제공해 JSON 반복 읽기를 줄입니다.
-        if let Some(cached) = self.note_cache.get(source_file) {
+        if let Some(cached) = self.note_cache.get(&source_file) {
             return Ok(cached.clone());
         }
 
         // 2. REPOSITORY LOAD
-        let note_file = self.note_repository.load_by_source_file(source_file)?;
+        let note_file = self.note_repository.load_by_source_file(&source_file)?;
 
         // Populate the cache after a repository miss.
         // repository miss 이후 cache를 채웁니다.
-        self.note_cache
-            .insert(source_file.to_path_buf(), note_file.clone());
+        self.note_cache.insert(source_file, note_file.clone());
 
         Ok(note_file)
     }
 
     pub fn preload_notes(&mut self, source_file: &Path) -> FrilVaultResult<()> {
-        if self.note_cache.contains(source_file) {
+        let source_file = self.normalize_source_file(source_file)?;
+
+        if self.note_cache.contains(&source_file) {
             return Ok(());
         }
 
-        let note_file = self.note_repository.load_by_source_file(source_file)?;
-        self.note_cache.insert(source_file.to_path_buf(), note_file);
+        let note_file = self.note_repository.load_by_source_file(&source_file)?;
+        self.note_cache.insert(source_file, note_file);
 
         Ok(())
     }
@@ -85,7 +88,8 @@ impl VaultContext {
     }
 
     pub fn sync_index_for_source_file(&self, source_file: &Path) -> FrilVaultResult<()> {
-        let note_file = self.note_repository.load_by_source_file(source_file)?;
+        let source_file = self.normalize_source_file(source_file)?;
+        let note_file = self.note_repository.load_by_source_file(&source_file)?;
         let source_file = source_file.to_string_lossy();
 
         self.workspace_index_repository
@@ -130,14 +134,48 @@ impl VaultContext {
     }
 
     pub fn normalize_source_file(&self, source_file: &Path) -> FrilVaultResult<PathBuf> {
-        if source_file.is_absolute() {
-            return source_file
-                .strip_prefix(self.workspace_index_repository.workspace_root())
-                .map(|path| path.to_path_buf())
-                .map_err(|_| crate::FrilVaultError::SourcePathOutsideWorkspace);
+        let workspace_root = self.workspace_index_repository.workspace_root();
+        let absolute_workspace_root = if workspace_root.is_absolute() {
+            workspace_root.to_path_buf()
+        } else {
+            std::env::current_dir()?.join(workspace_root)
+        };
+        let canonical_workspace_root = std::fs::canonicalize(&absolute_workspace_root)?;
+        let relative = if source_file.is_absolute() {
+            if let Ok(relative) = source_file.strip_prefix(&absolute_workspace_root) {
+                relative.to_path_buf()
+            } else {
+                canonicalize_with_missing_components(source_file)?
+                    .strip_prefix(&canonical_workspace_root)
+                    .map_err(|_| crate::FrilVaultError::SourcePathOutsideWorkspace)?
+                    .to_path_buf()
+            }
+        } else {
+            source_file.to_path_buf()
+        };
+        let mut normalized = PathBuf::new();
+
+        for component in relative.components() {
+            match component {
+                Component::Normal(value) => normalized.push(value),
+                Component::CurDir => {}
+                Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                    return Err(crate::FrilVaultError::SourcePathOutsideWorkspace);
+                }
+            }
         }
 
-        Ok(source_file.to_path_buf())
+        if normalized.as_os_str().is_empty() {
+            return Err(crate::FrilVaultError::SourcePathOutsideWorkspace);
+        }
+
+        let candidate = absolute_workspace_root.join(&normalized);
+        let canonical_candidate = canonicalize_with_missing_components(&candidate)?;
+        if !canonical_candidate.starts_with(canonical_workspace_root) {
+            return Err(crate::FrilVaultError::SourcePathOutsideWorkspace);
+        }
+
+        Ok(normalized)
     }
 
     fn collect_workspace_files(
@@ -172,4 +210,18 @@ impl VaultContext {
 
         Ok(())
     }
+}
+
+fn canonicalize_with_missing_components(path: &Path) -> FrilVaultResult<PathBuf> {
+    let mut existing_ancestor = path;
+    while !existing_ancestor.exists() {
+        existing_ancestor = existing_ancestor
+            .parent()
+            .ok_or(crate::FrilVaultError::SourcePathOutsideWorkspace)?;
+    }
+
+    let missing = path
+        .strip_prefix(existing_ancestor)
+        .map_err(|_| crate::FrilVaultError::SourcePathOutsideWorkspace)?;
+    Ok(std::fs::canonicalize(existing_ancestor)?.join(missing))
 }
