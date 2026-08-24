@@ -440,6 +440,7 @@ export class InlineNoteEditor {
         return;
       }
       this.panel.updateTagSuggestions?.(tags.map((item) => item.tag));
+      this.panel.updateTagMetadata?.(tags);
     } catch (error) {
       await this.reportOptionalFailure('refreshing tag suggestions', error);
     }

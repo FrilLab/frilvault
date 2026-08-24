@@ -20,6 +20,8 @@ export const COMMAND_IDS = {
   refresh: 'frilvault.refresh',
   searchNotes: 'frilvault.searchNotes',
   searchNotesByTag: 'frilvault.searchNotesByTag',
+  setTagColor: 'frilvault.setTagColor',
+  removeTagColor: 'frilvault.removeTagColor',
   showNotesForCurrentFile: 'frilvault.showNotesForCurrentFile',
   notesPanelOpenNote: 'frilvault.notesPanel.openNote',
   notesPanelEditNote: 'frilvault.notesPanel.editNote',

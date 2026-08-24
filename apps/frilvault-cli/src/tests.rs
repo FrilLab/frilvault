@@ -1,8 +1,11 @@
 use clap::Parser;
 
 use crate::cli::{
-    Cli, Commands, add::SymbolKindArg, format::FormatArg, gitignore::GitignoreAction,
-    tag::TagAction,
+    Cli, Commands,
+    add::SymbolKindArg,
+    format::FormatArg,
+    gitignore::GitignoreAction,
+    tag::{TagAction, TagColorAction, TagColorArg},
 };
 
 #[test]
@@ -428,6 +431,39 @@ fn parses_tag_list_command() {
                 assert!(matches!(list.format, Some(FormatArg::Json)));
             }
             _ => panic!("expected tag list action"),
+        },
+        _ => panic!("expected tag command"),
+    }
+}
+
+#[test]
+fn parses_tag_color_commands() {
+    let set = Cli::parse_from([
+        "flvt", "tag", "color", "set", "bug", "red", "--format", "json",
+    ]);
+    match set.command {
+        Commands::Tag(command) => match command.action {
+            TagAction::Color(color) => match color.action {
+                TagColorAction::Set(set) => {
+                    assert_eq!(set.tag, "bug");
+                    assert!(matches!(set.color, TagColorArg::Red));
+                    assert!(matches!(set.format, Some(FormatArg::Json)));
+                }
+                _ => panic!("expected tag color set action"),
+            },
+            _ => panic!("expected tag color action"),
+        },
+        _ => panic!("expected tag command"),
+    }
+
+    let remove = Cli::parse_from(["flvt", "tag", "color", "remove", "bug"]);
+    match remove.command {
+        Commands::Tag(command) => match command.action {
+            TagAction::Color(color) => match color.action {
+                TagColorAction::Remove(remove) => assert_eq!(remove.tag, "bug"),
+                _ => panic!("expected tag color remove action"),
+            },
+            _ => panic!("expected tag color action"),
         },
         _ => panic!("expected tag command"),
     }

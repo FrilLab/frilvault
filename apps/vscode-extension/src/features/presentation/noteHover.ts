@@ -14,6 +14,8 @@ import {
 } from './editorNoteView';
 import { truncateMarkdownContent } from '../hover/richHover';
 import { formatTag, HOVER_TAG_LIMIT, presentTags } from './tagPresentation';
+import { tagColorMarker } from './tagColor';
+import type { TagColor } from '../../types';
 
 export const NOTE_HOVER_COMMANDS = [
   'frilvault.gutter.showActions',
@@ -58,6 +60,7 @@ export function buildEditorNotesHoverParts(
   workspaceRoot: string,
   sourceFile: string,
   previewLength: number,
+  colorForTag: (tag: string) => TagColor | undefined = () => undefined,
 ): EditorNotesHoverParts {
   const uniqueNotes = deduplicateNotesById(notes);
 
@@ -80,10 +83,11 @@ export function buildEditorNotesHoverParts(
       uniqueNotes[0],
       workspaceRoot,
       previewLength,
+      colorForTag,
     );
     buildHoverActions(actionMarkdown, presentations[0].noteId, sourceFile);
   } else {
-    buildMultipleNoteSections(contentMarkdown, presentations, previewLength);
+    buildMultipleNoteSections(contentMarkdown, presentations, previewLength, colorForTag);
     buildHoverActions(actionMarkdown, presentations[0].noteId, sourceFile, true);
   }
 
@@ -96,8 +100,15 @@ export function formatEditorNotesHover(
   workspaceRoot: string,
   sourceFile: string,
   previewLength: number,
+  colorForTag: (tag: string) => TagColor | undefined = () => undefined,
 ): vscode.MarkdownString {
-  const parts = buildEditorNotesHoverParts(notes, workspaceRoot, sourceFile, previewLength);
+  const parts = buildEditorNotesHoverParts(
+    notes,
+    workspaceRoot,
+    sourceFile,
+    previewLength,
+    colorForTag,
+  );
   const combined = createContentMarkdown();
 
   for (const part of parts.contents) {
@@ -126,11 +137,12 @@ function buildSingleNoteSections(
   note: NoteView,
   workspaceRoot: string,
   previewLength: number,
+  colorForTag: (tag: string) => TagColor | undefined,
 ): void {
   buildHoverTitle(markdown, presentation.title);
   buildHoverContent(markdown, presentation.content, previewLength);
   appendNoteAttachments(markdown, note, workspaceRoot);
-  buildHoverMetadata(markdown, presentation);
+  buildHoverMetadata(markdown, presentation, colorForTag);
   buildHoverWarning(markdown, presentation.warning);
 }
 
@@ -138,6 +150,7 @@ function buildMultipleNoteSections(
   markdown: vscode.MarkdownString,
   presentations: HoverNotePresentation[],
   previewLength: number,
+  colorForTag: (tag: string) => TagColor | undefined,
 ): void {
   markdown.appendMarkdown(`**FrilVault Notes (${presentations.length})**\n\n`);
 
@@ -149,7 +162,7 @@ function buildMultipleNoteSections(
     markdown.appendMarkdown(`${index + 1}. `);
     buildHoverTitle(markdown, presentation.title, true);
     buildHoverContent(markdown, presentation.content, Math.min(previewLength, 240));
-    buildHoverMetadata(markdown, presentation);
+    buildHoverMetadata(markdown, presentation, colorForTag);
     buildHoverWarning(markdown, presentation.warning);
   }
 }
@@ -180,10 +193,14 @@ function buildHoverContent(
   markdown.appendMarkdown(`${preview}\n\n`);
 }
 
-function buildHoverMetadata(markdown: vscode.MarkdownString, presentation: HoverNotePresentation): void {
+function buildHoverMetadata(
+  markdown: vscode.MarkdownString,
+  presentation: HoverNotePresentation,
+  colorForTag: (tag: string) => TagColor | undefined,
+): void {
   markdown.appendMarkdown(`${escapeMarkdownInline(formatAnchorLabel(presentation.anchor))}\n`);
 
-  buildHoverTags(markdown, presentation.tags);
+  buildHoverTags(markdown, presentation.tags, colorForTag);
 
   if (presentation.updatedAt) {
     markdown.appendMarkdown(`Updated: ${escapeMarkdownInline(formatUpdatedAt(presentation.updatedAt))}\n`);
@@ -192,16 +209,22 @@ function buildHoverMetadata(markdown: vscode.MarkdownString, presentation: Hover
   markdown.appendMarkdown('\n');
 }
 
-function buildHoverTags(markdown: vscode.MarkdownString, tags: string[]): void {
+function buildHoverTags(
+  markdown: vscode.MarkdownString,
+  tags: string[],
+  colorForTag: (tag: string) => TagColor | undefined,
+): void {
   const presented = presentTags(tags, HOVER_TAG_LIMIT);
 
   if (presented.tags.length === 0) {
     return;
   }
 
-  const links = presented.tags.map((tag) =>
-    `[${escapeMarkdownInline(formatTag(tag))}](${commandUri(COMMAND_IDS.searchNotesByTag, [tag])})`
-  );
+  const links = presented.tags.map((tag) => {
+    const marker = tagColorMarker(colorForTag(tag));
+    const label = marker ? `${marker} ${formatTag(tag)}` : formatTag(tag);
+    return `[${escapeMarkdownInline(label)}](${commandUri(COMMAND_IDS.searchNotesByTag, [tag])})`;
+  });
 
   if (presented.hiddenCount > 0) {
     links.push(`+${presented.hiddenCount} more`);

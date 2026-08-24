@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 
 import type { InlineNoteDraft } from './draft';
 import type { AutoSaveStatus } from './autoSave';
+import type { TagSummary } from '../../types';
+import { TAG_COLOR_MARKERS } from '../presentation/tagColor';
 
 export type InlineNotePanelMessage =
   | { type: 'change'; content: string; tagsText: string }
@@ -31,6 +33,7 @@ export interface InlineNotePanelLike {
     },
   ): void;
   updateTagSuggestions?(tags: string[]): void;
+  updateTagMetadata?(tags: TagSummary[]): void;
   close(): void;
   isOpen(): boolean;
 }
@@ -130,6 +133,10 @@ export class InlineNotePanel implements InlineNotePanelLike {
     void this.panel?.webview.postMessage({ type: 'tagSuggestions', tags });
   }
 
+  public updateTagMetadata(tags: TagSummary[]): void {
+    void this.panel?.webview.postMessage({ type: 'tagMetadata', tags });
+  }
+
   public isOpen(): boolean {
     return this.panel !== undefined;
   }
@@ -206,6 +213,8 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
     .tag-suggestion { padding: 6px 8px; cursor: pointer; }
     .tag-suggestion.active,
     .tag-suggestion:hover { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+    .tag-preview { display: flex; min-height: 1.4em; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .tag-chip { color: var(--vscode-foreground); font-size: 0.92em; }
   </style>
 </head>
 <body>
@@ -226,6 +235,7 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
         Tags
         <input id="tags" name="tags" role="combobox" aria-label="Comma-separated tags" aria-autocomplete="list" aria-controls="tag-suggestions" aria-expanded="false" value="${escapeHtml(draft.tagsText)}" />
       </label>
+      <div id="tag-preview" class="tag-preview" aria-label="Selected tags"></div>
       <ul id="tag-suggestions" class="tag-suggestions" role="listbox" hidden></ul>
     </div>
 
@@ -248,6 +258,7 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
     const contentInput = document.getElementById('content');
     const tagsInput = document.getElementById('tags');
     const tagSuggestionsEl = document.getElementById('tag-suggestions');
+    const tagPreviewEl = document.getElementById('tag-preview');
     const errorEl = document.getElementById('error');
     const statusEl = document.getElementById('status');
     const closeButton = document.getElementById('close-button');
@@ -261,6 +272,24 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
     let tagSuggestions = [];
     let filteredTagSuggestions = [];
     let activeTagSuggestion = -1;
+    let tagColors = new Map();
+    const colorMarkers = ${JSON.stringify(TAG_COLOR_MARKERS)};
+
+    function tagLabel(tag) {
+      const color = tagColors.get(tag.toLowerCase());
+      return (color ? colorMarkers[color] + ' ' : '') + '#' + tag;
+    }
+
+    function renderSelectedTags() {
+      const tags = tagsInput.value.split(',').map(normalizeTag).filter(Boolean);
+      tagPreviewEl.replaceChildren();
+      tags.forEach((tag) => {
+        const chip = document.createElement('span');
+        chip.className = 'tag-chip';
+        chip.textContent = tagLabel(tag);
+        tagPreviewEl.append(chip);
+      });
+    }
 
     function selectedTagKeys() {
       const parts = tagsInput.value.split(',');
@@ -305,7 +334,7 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
         option.className = 'tag-suggestion' + (index === activeTagSuggestion ? ' active' : '');
         option.role = 'option';
         option.setAttribute('aria-selected', String(index === activeTagSuggestion));
-        option.textContent = '#' + tag;
+        option.textContent = tagLabel(tag);
         option.addEventListener('mousedown', (event) => {
           event.preventDefault();
           selectTagSuggestion(index);
@@ -378,6 +407,7 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
 
     contentInput.addEventListener('input', scheduleChange);
     tagsInput.addEventListener('input', () => {
+      renderSelectedTags();
       activeTagSuggestion = -1;
       renderTagSuggestions();
       scheduleChange();
@@ -451,12 +481,22 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
             renderTagSuggestions();
           }
         }
+        if (message?.type === 'tagMetadata' && Array.isArray(message.tags)) {
+          tagColors = new Map(message.tags
+            .filter((tag) => tag && typeof tag.tag === 'string' && typeof tag.color === 'string')
+            .map((tag) => [tag.tag.toLowerCase(), tag.color]));
+          renderSelectedTags();
+          if (document.activeElement === tagsInput) {
+            renderTagSuggestions();
+          }
+        }
         return;
       }
 
       if (message.replaceInputs && message.draft) {
         contentInput.value = message.draft.content ?? contentInput.value;
         tagsInput.value = message.draft.tagsText ?? tagsInput.value;
+        renderSelectedTags();
       }
 
       errorEl.textContent = message.errorMessage ?? '';
@@ -475,6 +515,7 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
       loadExternalButton.hidden = message.status !== 'conflict';
       deleteButton.hidden = !message.canDelete;
     });
+    renderSelectedTags();
   </script>
 </body>
 </html>`;

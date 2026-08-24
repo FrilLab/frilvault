@@ -228,6 +228,23 @@ suite('Hover presentation', () => {
 
     assert.doesNotMatch(parts.contents[0]?.value ?? '', /Tags:/);
   });
+
+  test('renders a configured color alongside the readable tag label', () => {
+    const note = createLineNoteView('plain body', 'note-1');
+    note.note.tags = ['bug', 'todo'];
+
+    const parts = buildEditorNotesHoverParts(
+      [note],
+      '/tmp/workspace',
+      'src/a.ts',
+      800,
+      (tag) => tag.toLowerCase() === 'bug' ? 'red' : undefined,
+    );
+    const content = parts.contents[0]?.value ?? '';
+
+    assert.match(content, /🔴 #bug/);
+    assert.match(content, /\[#todo\]/);
+  });
 });
 
 function createLineNoteView(content: string, id: string): NoteView {

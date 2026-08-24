@@ -4,6 +4,7 @@ import type { CurrentFileNotesStore } from '../current-file/store';
 import { buildEditorNotesHoverParts } from '../presentation/noteHover';
 import { getConfiguredPreviewLength } from './richHover';
 import { resolveNotesAtPosition } from './resolveNotes';
+import type { TagColor } from '../../types';
 
 export class FrilVaultHoverProvider implements vscode.HoverProvider {
   private hoverGeneration = 0;
@@ -12,6 +13,7 @@ export class FrilVaultHoverProvider implements vscode.HoverProvider {
     private readonly store: CurrentFileNotesStore,
     private readonly getWorkspaceRoot: () => string,
     private readonly isEnabled: () => boolean = () => true,
+    private readonly colorForTag: (tag: string) => TagColor | undefined = () => undefined,
   ) {}
 
   public async provideHover(
@@ -46,6 +48,7 @@ export class FrilVaultHoverProvider implements vscode.HoverProvider {
       this.getWorkspaceRoot(),
       snapshot.sourceFile ?? document.fileName,
       getConfiguredPreviewLength(),
+      this.colorForTag,
     );
 
     if (parts.contents.length === 0) {

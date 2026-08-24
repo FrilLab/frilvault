@@ -88,6 +88,14 @@
         "title": "Search Notes by Tag"
       },
       {
+        "command": "frilvault.setTagColor",
+        "title": "Set Tag Color"
+      },
+      {
+        "command": "frilvault.removeTagColor",
+        "title": "Remove Tag Color"
+      },
+      {
         "command": "frilvault.showNotesForCurrentFile",
         "title": "Show Notes",
         "icon": "$(note)"
@@ -218,6 +226,16 @@
         {
           "command": "frilvault.notesPanel.openNote",
           "when": "view == frilvault.notes && viewItem == frilvault.note && frilvault.enabled",
+          "group": "inline@1"
+        },
+        {
+          "command": "frilvault.setTagColor",
+          "when": "view == frilvault.tags && viewItem == frilvault.tag && frilvault.enabled",
+          "group": "inline"
+        },
+        {
+          "command": "frilvault.removeTagColor",
+          "when": "view == frilvault.tags && viewItem == frilvault.tag && frilvault.enabled",
           "group": "inline@1"
         }
       ],

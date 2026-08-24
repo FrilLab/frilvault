@@ -8,6 +8,7 @@ import type {
   RepairSuggestion,
   SyncResult,
   TagOperationResult,
+  TagColor,
   TagSummary,
   WorkspaceExplorer,
   WorkspaceHealth,
@@ -405,6 +406,22 @@ export class CliClient {
     }
     const stdout = await this.execInWorkspace(workspaceRoot, args);
     return parseJson<TagSummary[]>(stdout);
+  }
+
+  public async tagColorSet(
+    workspaceRoot: string,
+    tag: string,
+    color: TagColor,
+  ): Promise<void> {
+    await this.execInWorkspace(workspaceRoot, [
+      'tag', 'color', 'set', tag, color, '--format', 'json',
+    ]);
+  }
+
+  public async tagColorRemove(workspaceRoot: string, tag: string): Promise<void> {
+    await this.execInWorkspace(workspaceRoot, [
+      'tag', 'color', 'remove', tag, '--format', 'json',
+    ]);
   }
 
   private async execInWorkspace(workspaceRoot: string, args: string[]): Promise<string> {

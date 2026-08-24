@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::workspace::TagColor;
+
 /// Result of a workspace-wide tag modification or preview operation.
 ///
 /// 워크스페이스 전역 태그 수정 또는 미리보기 연산의 결과입니다.
@@ -30,4 +32,8 @@ pub struct TagSummary {
     ///
     /// 이 태그가 연결된 노트의 수입니다.
     pub note_count: usize,
+
+    /// Optional workspace-level display color for this tag.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<TagColor>,
 }

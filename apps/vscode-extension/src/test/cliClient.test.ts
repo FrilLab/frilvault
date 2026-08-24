@@ -269,4 +269,31 @@ suite('CliClient', () => {
       },
     );
   });
+
+  test('assigns and removes tag colors through the existing CLI boundary', async () => {
+    const calls: string[][] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+        calls.push(args);
+        return { stdout: '{}', stderr: '' };
+      },
+    });
+
+    await cliClient.tagColorSet('/workspace', 'bug', 'red');
+    await cliClient.tagColorRemove('/workspace', 'bug');
+
+    assert.deepStrictEqual(calls, [
+      ['tag', 'color', 'set', 'bug', 'red', '--format', 'json'],
+      ['tag', 'color', 'remove', 'bug', '--format', 'json'],
+    ]);
+  });
 });

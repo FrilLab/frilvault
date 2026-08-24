@@ -38,6 +38,11 @@ import { FrilVaultNotesProvider } from './features/notes-panel/provider';
 import { registerNotesTreeDataProvider, disposeNotesTreeDataProvider } from './features/notes-panel/register';
 import { createSearchByTagCommand, createSearchCommand } from './features/search/command';
 import { FrilVaultTagExplorerProvider } from './features/tag-explorer/provider';
+import {
+  createRemoveTagColorCommand,
+  createSetTagColorCommand,
+} from './features/tag-explorer/commands';
+import { TagColorStore } from './features/presentation/tagColor';
 import { createApplyRepairsCommand, createShowHealthCommand } from './features/workspace/health';
 import { registerSourceRenameHandler } from './features/workspace/rename';
 import { registerNoteUriHandler } from './features/uri/handler';
@@ -97,8 +102,9 @@ export function activate(context: vscode.ExtensionContext): void {
     getWorkspaceRoot,
     isEnabled,
   );
+  const tagColorStore = new TagColorStore(() => cliClient.tagList(getWorkspaceRoot()));
   const tagExplorerProvider = new FrilVaultTagExplorerProvider(
-    () => cliClient.tagList(getWorkspaceRoot()),
+    () => tagColorStore.load(),
     (tag) => cliClient.searchNotes({ workspaceRoot: getWorkspaceRoot(), tag }),
     isEnabled,
   );
@@ -110,7 +116,12 @@ export function activate(context: vscode.ExtensionContext): void {
     isEnabled,
   );
   activeDecorator = decorator;
-  const hoverProvider = new FrilVaultHoverProvider(store, getWorkspaceRoot, isEnabled);
+  const hoverProvider = new FrilVaultHoverProvider(
+    store,
+    getWorkspaceRoot,
+    isEnabled,
+    (tag) => tagColorStore.colorFor(tag),
+  );
 
   const refreshNoteState = async (editor?: vscode.TextEditor) => {
     await store.syncActiveEditor(editor ?? vscode.window.activeTextEditor);
@@ -133,7 +144,9 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const refreshAfterMutation = async (editor?: vscode.TextEditor) => {
+    tagColorStore.refresh();
     tagExplorerProvider.refresh();
+    await tagColorStore.load();
     await refreshNoteState(editor);
     await refreshWorkspaceNoteCounts();
   };
@@ -250,6 +263,22 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       COMMAND_IDS.searchNotesByTag,
       runWhenEnabled(createSearchByTagCommand({ cliClient, getWorkspaceRoot })),
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.setTagColor,
+      runWhenEnabled(createSetTagColorCommand({
+        cliClient,
+        getWorkspaceRoot,
+        refresh: refreshAfterMutation,
+      })),
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.removeTagColor,
+      runWhenEnabled(createRemoveTagColorCommand({
+        cliClient,
+        getWorkspaceRoot,
+        refresh: refreshAfterMutation,
+      })),
     ),
     vscode.commands.registerCommand(
       COMMAND_IDS.showNotesForCurrentFile,
