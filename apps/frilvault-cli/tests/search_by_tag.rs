@@ -54,6 +54,35 @@ impl Drop for TestWorkspace {
 }
 
 #[test]
+fn add_normalizes_hash_prefixes_and_duplicate_tags() {
+    let workspace = TestWorkspace::new();
+
+    let output = workspace.run(&[
+        "add",
+        "--file",
+        "src/lib.rs",
+        "--line",
+        "1",
+        "--content",
+        "normalized tags",
+        "--tag",
+        "#Performance",
+        "--tag",
+        "performance",
+        "--tag",
+        "#permission",
+        "--format",
+        "json",
+    ]);
+    let view: Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(
+        view["note"]["tags"],
+        serde_json::json!(["Performance", "permission"])
+    );
+}
+
+#[test]
 fn search_tag_matches_line_and_symbol_notes_with_or_without_hash_prefix() {
     let workspace = TestWorkspace::new();
 

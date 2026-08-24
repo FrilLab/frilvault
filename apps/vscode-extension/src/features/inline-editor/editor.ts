@@ -160,6 +160,8 @@ export class InlineNoteEditor {
         await this.handlePanelClose();
       },
     );
+
+    void this.refreshTagSuggestions(draft.workspaceRoot);
   }
 
   private async handlePanelMessage(message: InlineNotePanelMessage): Promise<void> {
@@ -177,6 +179,9 @@ export class InlineNoteEditor {
       case 'compositionEnd':
         this.autoSave.endComposition();
         await this.handleChange(message.content, message.tagsText);
+        break;
+      case 'requestTagSuggestions':
+        await this.refreshTagSuggestions(this.draft.workspaceRoot);
         break;
       case 'close':
         await this.handlePanelClose(true);
@@ -308,6 +313,8 @@ export class InlineNoteEditor {
         await this.reportOptionalFailure('refreshing note views', error);
       }
 
+      await this.refreshTagSuggestions(draftAtSaveStart.workspaceRoot);
+
       void this.dependencies.runOptionalPostSaveTasks?.().catch(async (error) => {
         await this.reportOptionalFailure('running post-save tasks', error);
       });
@@ -424,6 +431,18 @@ export class InlineNoteEditor {
     const detail = error instanceof Error ? error.message : 'Unknown error';
 
     await showWarningMessage(`FrilVault note saved, but ${action} failed: ${detail}`);
+  }
+
+  private async refreshTagSuggestions(workspaceRoot: string): Promise<void> {
+    try {
+      const tags = await this.dependencies.cliClient.tagList(workspaceRoot);
+      if (this.draft?.workspaceRoot !== workspaceRoot) {
+        return;
+      }
+      this.panel.updateTagSuggestions?.(tags.map((item) => item.tag));
+    } catch (error) {
+      await this.reportOptionalFailure('refreshing tag suggestions', error);
+    }
   }
 }
 

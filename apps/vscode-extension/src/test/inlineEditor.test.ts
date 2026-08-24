@@ -27,6 +27,13 @@ suite('Inline note editor draft', () => {
     ]);
   });
 
+  test('parseTagsText normalizes hashes and prevents case-insensitive duplicates', () => {
+    assert.deepStrictEqual(
+      parseTagsText(' #Performance, performance, # permission, new-tag '),
+      ['Performance', 'permission', 'new-tag'],
+    );
+  });
+
   test('createEditDraft preserves undo snapshot and updated_at', () => {
     const noteView = createLineNoteView('hello', ['bug']);
 

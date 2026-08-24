@@ -55,10 +55,24 @@ export function parseTagsText(tagsText: string): string[] {
     return [];
   }
 
+  const seen = new Set<string>();
+
   return tagsText
     .split(',')
-    .map((tag) => tag.trim())
-    .filter((tag) => tag.length > 0);
+    .map(normalizeTag)
+    .filter((tag) => {
+      const key = tag.toLowerCase();
+      if (tag.length === 0 || seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+export function normalizeTag(tag: string): string {
+  const trimmed = tag.trim();
+  return (trimmed.startsWith('#') ? trimmed.slice(1) : trimmed).trim();
 }
 
 export function formatTagsText(tags: string[] | undefined): string {

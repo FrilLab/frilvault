@@ -1,5 +1,54 @@
 use super::helper::{create_test_note_service, create_test_workspace};
-use crate::{AddNoteRequest, FrilVaultError, LineAnchor, NoteAnchor};
+use crate::{
+    AddNoteRequest, FrilVaultError, LineAnchor, NoteAnchor, UpdateNoteRequest, normalize_tag,
+    normalize_tags,
+};
+
+#[test]
+fn tag_normalization_removes_hash_and_case_insensitive_duplicates() {
+    assert_eq!(normalize_tag("  #Performance  "), "Performance");
+    assert_eq!(normalize_tag("#  "), "");
+    assert_eq!(
+        normalize_tags(vec![
+            " #Performance ".into(),
+            "performance".into(),
+            "#permission".into(),
+            "  ".into(),
+        ]),
+        vec!["Performance", "permission"]
+    );
+}
+
+#[test]
+fn create_and_update_normalize_tags_at_the_core_boundary() {
+    let workspace = create_test_workspace();
+    let mut service = create_test_note_service(workspace.root());
+
+    let note = service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "note".into(),
+            tags: Some(vec![" #Bug ".into(), "bug".into(), "#Docs".into()]),
+        })
+        .unwrap();
+
+    assert_eq!(note.tags, vec!["Bug", "Docs"]);
+
+    let updated = service
+        .update_note(
+            "src/main.rs",
+            note.id,
+            UpdateNoteRequest {
+                content: "updated".into(),
+                tags: Some(vec!["#PERFORMANCE".into(), " performance ".into()]),
+                expected_updated_at: None,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(updated.tags, vec!["PERFORMANCE"]);
+}
 
 #[test]
 fn rename_tag_replaces_tag_across_multiple_files_and_notes() {
