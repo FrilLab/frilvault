@@ -11,6 +11,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+
 use crate::note::{NoteFile, NoteFileRecord};
 use crate::parser::JsonParser;
 use crate::workspace::PathResolver;
@@ -23,6 +29,8 @@ use crate::{FrilVaultResult, Note};
 pub struct NoteRepository {
     path_resolver: PathResolver,
     parser: JsonParser,
+    #[cfg(test)]
+    write_fail_after: Arc<AtomicUsize>,
 }
 
 impl NoteRepository {
@@ -30,6 +38,8 @@ impl NoteRepository {
         Self {
             path_resolver,
             parser: JsonParser,
+            #[cfg(test)]
+            write_fail_after: Arc::new(AtomicUsize::new(usize::MAX)),
         }
     }
 
@@ -54,13 +64,8 @@ impl NoteRepository {
         source_file: &Path,
         note_file: &NoteFile,
     ) -> FrilVaultResult<()> {
-        let note_path = self.path_resolver.resolve_note_path(source_file);
-
-        let json = self.parser.serialize(note_file)?;
-
-        atomic_write(&note_path, &json)?;
-
-        Ok(())
+        let json = self.serialize(note_file)?;
+        self.write_serialized(source_file, &json)
     }
 
     pub fn replace_notes(&self, source_file: &Path, notes: Vec<Note>) -> FrilVaultResult<()> {
@@ -132,9 +137,52 @@ impl NoteRepository {
     pub fn resolve_note_path(&self, source_file: impl AsRef<Path>) -> PathBuf {
         self.path_resolver.resolve_note_path(source_file)
     }
+
+    pub(crate) fn serialize(&self, note_file: &NoteFile) -> FrilVaultResult<String> {
+        self.parser.serialize(note_file)
+    }
+
+    pub(crate) fn write_serialized(&self, source_file: &Path, json: &str) -> FrilVaultResult<()> {
+        #[cfg(test)]
+        self.maybe_fail_write()?;
+
+        let note_path = self.path_resolver.resolve_note_path(source_file);
+        atomic_write(&note_path, json)?;
+
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_writes_after(&self, successful_writes: usize) {
+        self.write_fail_after
+            .store(successful_writes, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    fn maybe_fail_write(&self) -> std::io::Result<()> {
+        let remaining = self.write_fail_after.load(Ordering::SeqCst);
+        if remaining == 0 {
+            return Err(std::io::Error::other("injected note write failure"));
+        }
+
+        self.write_fail_after.fetch_sub(1, Ordering::SeqCst);
+        Ok(())
+    }
 }
 
 pub(crate) fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
+    atomic_write_bytes(path, content.as_bytes())
+}
+
+pub(crate) fn restore_file(path: &Path, content: Option<&[u8]>) -> std::io::Result<()> {
+    match content {
+        Some(content) => atomic_write_bytes(path, content),
+        None if path.exists() => fs::remove_file(path),
+        None => Ok(()),
+    }
+}
+
+fn atomic_write_bytes(path: &Path, content: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let temp_file_name = format!(

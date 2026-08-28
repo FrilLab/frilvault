@@ -3,6 +3,22 @@ use std::path::PathBuf;
 use thiserror::Error;
 use uuid::Uuid;
 
+/// Describes whether a failed workspace-wide mutation was restored completely.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TagOperationRollback {
+    Succeeded,
+    Failed(String),
+}
+
+impl std::fmt::Display for TagOperationRollback {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Succeeded => formatter.write_str("succeeded"),
+            Self::Failed(error) => write!(formatter, "failed: {error}"),
+        }
+    }
+}
+
 /// Core error type returned by FrilVault domain operations.
 ///
 /// FrilVault 코어 도메인 연산이 반환하는 공통 오류 타입입니다.
@@ -93,6 +109,14 @@ pub enum FrilVaultError {
     /// Returned when a tag query cannot be parsed or validated.
     #[error("invalid tag query: {0}")]
     InvalidTagQuery(String),
+
+    /// Returned when a workspace-wide tag mutation fails while being applied.
+    #[error("tag operation failed: {source}; rollback {rollback}")]
+    TagOperationFailed {
+        #[source]
+        source: Box<FrilVaultError>,
+        rollback: TagOperationRollback,
+    },
 }
 
 pub type FrilVaultResult<T> = Result<T, FrilVaultError>;

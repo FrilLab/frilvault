@@ -1,4 +1,13 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+#[cfg(test)]
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use crate::{
     FrilVaultResult, RepairSuggestion,
@@ -9,11 +18,17 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct WorkspaceIndexRepository {
     path_resolver: PathResolver,
+    #[cfg(test)]
+    write_fail_after: Arc<AtomicUsize>,
 }
 
 impl WorkspaceIndexRepository {
     pub fn new(path_resolver: PathResolver) -> Self {
-        Self { path_resolver }
+        Self {
+            path_resolver,
+            #[cfg(test)]
+            write_fail_after: Arc::new(AtomicUsize::new(usize::MAX)),
+        }
     }
 
     pub fn workspace_root(&self) -> &Path {
@@ -39,13 +54,8 @@ impl WorkspaceIndexRepository {
     }
 
     pub fn save(&self, index: &WorkspaceIndex) -> FrilVaultResult<()> {
-        let path = self.path_resolver.workspace_index_path();
-
         let json = serde_json::to_string(index)?;
-
-        crate::note::atomic_write(&path, &json)?;
-
-        Ok(())
+        self.write_serialized(&json)
     }
 
     pub fn create_if_missing(&self) -> FrilVaultResult<()> {
@@ -116,6 +126,37 @@ impl WorkspaceIndexRepository {
         });
 
         self.save(&index)
+    }
+
+    pub(crate) fn write_serialized(&self, json: &str) -> FrilVaultResult<()> {
+        #[cfg(test)]
+        self.maybe_fail_write()?;
+
+        let path = self.path_resolver.workspace_index_path();
+        crate::note::atomic_write(&path, json)?;
+
+        Ok(())
+    }
+
+    pub(crate) fn path(&self) -> PathBuf {
+        self.path_resolver.workspace_index_path()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_writes_after(&self, successful_writes: usize) {
+        self.write_fail_after
+            .store(successful_writes, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    fn maybe_fail_write(&self) -> std::io::Result<()> {
+        let remaining = self.write_fail_after.load(Ordering::SeqCst);
+        if remaining == 0 {
+            return Err(std::io::Error::other("injected index write failure"));
+        }
+
+        self.write_fail_after.fetch_sub(1, Ordering::SeqCst);
+        Ok(())
     }
 
     pub fn remove_source_file(&self, source_file: &str) -> FrilVaultResult<()> {
