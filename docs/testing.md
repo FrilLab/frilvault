@@ -168,6 +168,20 @@ Still verify:
 - commands do not contain destructive mistakes
 - release or installation instructions match the actual pipeline
 
+For Local/Shared vault mode documentation, also verify the focused contract:
+
+- `flvt --help` lists `init`, and `flvt init --help` lists `--shared`.
+- A fresh `flvt init` reports `Mode: local`; a fresh `flvt init --shared`
+  reports `Mode: shared`.
+- `.vault/workspace.json` uses the top-level `mode` field with the serialized
+  values `local` or `shared`.
+- Removing `mode` from legacy metadata still loads the workspace as Local.
+- Local initialization adds `.vault/` to repository-local
+  `.git/info/exclude` without changing `.gitignore`; Shared initialization does
+  not add that local exclusion.
+- README, architecture, and release documentation describe the same
+  default/opt-in behavior and do not promise mode switching or migration.
+
 ## Failed Validation
 
 When a check fails, report:

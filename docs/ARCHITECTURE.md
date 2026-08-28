@@ -42,6 +42,33 @@ The current repository does not contain a desktop application source tree yet. R
 - `.vault/index`: workspace index data
 - `.vault/workspace.json`: workspace-level metadata
 
+### Vault modes
+
+`frilvault-core` owns the `VaultMode` policy used by workspace initialization:
+
+- `Local` is the default for a new workspace. `flvt init` creates a Local vault
+  and, when the workspace is in a Git repository, adds `.vault/` to the
+  repository-local `.git/info/exclude`.
+- `Shared` is opt-in for a new workspace. `flvt init --shared` creates a Shared
+  vault and does not add a local exclude rule, leaving `.vault/` trackable by
+  Git.
+
+Neither initialization path modifies the shared `.gitignore` file. Local mode
+uses `.git/info/exclude` specifically so a private vault does not require a
+project-wide ignore-file change. A pre-existing Git rule or an already tracked
+vault can still affect the resulting Git state.
+
+The selected mode is serialized as the top-level `mode` field in
+`.vault/workspace.json`, using the lowercase values `"local"` and `"shared"`.
+`WorkspaceMetadata` defaults a missing field to Local so legacy workspace
+metadata remains readable. Re-initializing an existing workspace loads and
+preserves its metadata, including its current mode; initialization does not
+provide a mode-switch or migration operation.
+
+The CLI presents this core policy in its text output (`Mode: local` or
+`Mode: shared`) and `flvt status` reports the persisted mode alongside the
+current Git tracking state.
+
 ## Runtime Shape
 
 `VaultContext` is the current runtime container inside `frilvault-core`.
