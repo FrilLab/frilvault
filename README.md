@@ -119,6 +119,8 @@ flvt tag stats --tag architecture --group-by directory --format json
 flvt tag color set bug red
 flvt tag color remove bug
 flvt resolve-uri "frilvault://note/..."
+flvt status
+flvt status --format json
 flvt stats
 flvt doctor
 flvt repair --apply
@@ -141,6 +143,50 @@ note or index write fails, it restores every affected note, the index, and the
 pre-operation cache state. The returned error always reports whether rollback
 succeeded; a rollback failure requires inspecting the reported paths before
 retrying the operation.
+
+### Workspace status
+
+`flvt status` is read-only. It reads the workspace metadata and scans the note
+files under `.vault/notes` at command time, so `Notes` is the current count and
+reflects notes added, edited, or removed by another process. It does not use or
+rewrite the saved workspace index.
+
+The default text output is concise and human-readable:
+
+```text
+Vault: .vault
+Mode: local
+Git tracking: excluded
+Notes: 42
+```
+
+`Mode` is `local` or `shared`. `Git tracking` is one of `excluded`, `trackable`,
+`tracked`, or `not a Git repository`. A Local vault that is already tracked
+also prints this warning after the four fields:
+
+```text
+Warning: Local vault is currently tracked by Git.
+```
+
+Use `--format json` for the stable machine-readable object:
+
+```json
+{
+  "vault_path": ".vault",
+  "mode": "local",
+  "git_tracking": "excluded",
+  "note_count": 42
+}
+```
+
+JSON uses `not_git_repository` for the non-Git state. JSON contains only these
+four fields; the Local/tracked warning is represented by the `mode` and
+`git_tracking` values.
+
+When no workspace exists, status exits non-zero and reports
+`No FrilVault workspace found.` on stderr without creating `.vault`. Invalid
+`.vault/workspace.json` metadata likewise exits non-zero with a message naming
+the invalid file. Legacy metadata without a `mode` uses the Local default.
 
 ## Documentation
 

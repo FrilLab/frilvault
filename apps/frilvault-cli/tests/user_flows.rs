@@ -199,6 +199,18 @@ fn cli_workspace_commands_return_valid_results_after_repeated_init() {
     let status = workspace.run(&["status"]);
     assert!(String::from_utf8_lossy(&status.stdout).contains("Notes: 1"));
 
+    let status_json = workspace.run(&["status", "--format", "json"]);
+    let status_json: Value = serde_json::from_slice(&status_json.stdout).unwrap();
+    assert_eq!(
+        status_json,
+        serde_json::json!({
+            "vault_path": ".vault",
+            "mode": "local",
+            "git_tracking": "not_git_repository",
+            "note_count": 1
+        })
+    );
+
     for args in [
         &["doctor", "--format", "json"][..],
         &["health", "--format", "json"],
@@ -324,7 +336,9 @@ fn cli_reports_corrupted_data_without_overwriting_it() {
 
     let status = workspace.run_raw(&["status"]);
     assert!(!status.status.success());
-    assert!(String::from_utf8_lossy(&status.stderr).contains("workspace metadata"));
+    let stderr = String::from_utf8_lossy(&status.stderr);
+    assert!(stderr.contains("Failed to read FrilVault workspace metadata"));
+    assert!(stderr.contains(".vault/workspace.json is invalid"));
     assert_eq!(fs::read_to_string(metadata_path).unwrap(), "{not-json");
 
     let note_workspace = TestWorkspace::new();
@@ -348,6 +362,33 @@ fn cli_reports_corrupted_data_without_overwriting_it() {
     assert!(!list.status.success());
     assert!(String::from_utf8_lossy(&list.stderr).contains("json error"));
     assert_eq!(fs::read_to_string(note_path).unwrap(), "");
+}
+
+#[test]
+fn cli_status_outside_workspace_returns_non_zero_without_creating_vault() {
+    let workspace = TestWorkspace::new();
+
+    let output = workspace.run_raw(&["status"]);
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("No FrilVault workspace found."));
+    assert!(!workspace.root().join(".vault").exists());
+}
+
+#[test]
+fn cli_status_help_documents_text_and_json_contract() {
+    let workspace = TestWorkspace::new();
+
+    let output = workspace.run_raw(&["status", "--help"]);
+    let help = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success());
+    assert!(help.contains("--format <FORMAT>"));
+    assert!(help.contains("external note changes are reflected"));
+    assert!(help.contains("Git tracking: excluded"));
+    assert!(help.contains("\"vault_path\": \".vault\""));
+    assert!(help.contains("vault_path, mode, git_tracking, note_count"));
 }
 
 fn percent_encode(input: &str) -> String {

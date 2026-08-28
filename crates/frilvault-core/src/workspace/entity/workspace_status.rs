@@ -1,8 +1,11 @@
 use std::path::PathBuf;
 
+use serde::Serialize;
+
 use super::VaultMode;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum GitTrackingStatus {
     Excluded,
     Trackable,
@@ -21,7 +24,7 @@ impl GitTrackingStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkspaceStatus {
     pub vault_path: PathBuf,
     pub mode: VaultMode,

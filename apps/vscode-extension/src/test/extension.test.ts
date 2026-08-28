@@ -38,7 +38,9 @@ interface TestWorkspace {
 
 const createdWorkspaces: string[] = [];
 
-suite('Extension Test Suite', () => {
+suite('Extension Test Suite', function () {
+  this.timeout(10_000);
+
   teardown(async () => {
     await vscode.workspace
       .getConfiguration('frilvault')

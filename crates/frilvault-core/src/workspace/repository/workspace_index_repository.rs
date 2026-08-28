@@ -49,10 +49,6 @@ impl WorkspaceIndexRepository {
         Ok(index)
     }
 
-    pub fn exists(&self) -> bool {
-        self.path_resolver.workspace_index_path().is_file()
-    }
-
     pub fn save(&self, index: &WorkspaceIndex) -> FrilVaultResult<()> {
         let json = serde_json::to_string(index)?;
         self.write_serialized(&json)

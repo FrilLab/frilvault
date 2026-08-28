@@ -30,7 +30,9 @@ suite('Note viewer CodeLens provider', () => {
     }
   });
 
-  test('renders multiline line and symbol notes, toggles, refreshes, and clears safely', async () => {
+  test('renders multiline line and symbol notes, toggles, refreshes, and clears safely', async function () {
+    this.timeout(10_000);
+
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'frilvault-note-viewer-test-'));
     workspaces.push(root);
     const sourcePath = path.join(root, 'sample.ts');

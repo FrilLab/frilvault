@@ -1,13 +1,20 @@
 use anyhow::Result;
 use frilvault_core::{FrilVault, GitTrackingStatus, VaultMode, WorkspaceStatus};
 
-use crate::cli::status::StatusCommand;
+use crate::{
+    cli::status::StatusCommand,
+    output::{OutputFormat, print_json, resolve_format},
+};
 
-pub fn execute(_command: StatusCommand) -> Result<()> {
+pub fn execute(command: StatusCommand) -> Result<()> {
     let vault = FrilVault::open(std::env::current_dir()?)?;
     let status = vault.status()?;
 
-    print!("{}", format_status(&status));
+    if matches!(resolve_format(command.format), OutputFormat::Json) {
+        print_json(&status)?;
+    } else {
+        print!("{}", format_status(&status));
+    }
 
     Ok(())
 }
