@@ -1,123 +1,160 @@
 /**
- * Renders note viewer items as VS Code editor decorations.
+ * Renders note viewer items as CodeLens rows.
  *
- * Uses `before` decorations to display note content above the associated
- * source-code anchor. Collapsed notes show a compact one-line indicator;
- * expanded notes show multi-line content.
- *
- * VS Code editor decoration을 사용하여 note viewer item을 렌더링합니다.
+ * VS Code's supported editor APIs do not provide an extension-owned block
+ * widget in a text editor. CodeLens does provide dedicated horizontal rows
+ * between source lines, so the viewer uses one CodeLens per displayed line.
+ * This keeps the source document untouched and makes the collapse control a
+ * real VS Code command rather than relying on decoration pseudo-elements.
  */
 import * as vscode from 'vscode';
 
-import type { NoteViewerGroup, NoteViewerItem } from './noteViewerModel';
-import { formatCollapsedSummary, formatExpandedContent, groupNoteViewerItems } from './noteViewerModel';
+import { COMMAND_IDS } from '../../constants/ids';
+import {
+  formatCollapsedSummary,
+  groupNoteViewerItems,
+  normalizeTags,
+  type NoteViewerGroup,
+  type NoteViewerItem,
+} from './noteViewerModel';
 
-const MAX_EXPANDED_PREVIEW_LINES = 20;
+const MAX_CODE_LENS_LINE_LENGTH = 240;
 
 export class NoteViewerRenderer implements vscode.Disposable {
-  private collapsedDecorationType: vscode.TextEditorDecorationType;
-  private expandedDecorationType: vscode.TextEditorDecorationType;
+  /**
+   * Build CodeLens rows for a document. Every command carries the stable note
+   * id(s) and document URI needed when an editor is split or changes focus.
+   */
+  public render(document: vscode.TextDocument, items: NoteViewerItem[]): vscode.CodeLens[] {
+    const lenses: vscode.CodeLens[] = [];
 
-  public constructor() {
-    this.collapsedDecorationType = vscode.window.createTextEditorDecorationType({
-      isWholeLine: true,
-      before: {
-        color: new vscode.ThemeColor('editorCodeLens.foreground'),
-        fontStyle: 'italic',
-      },
-    });
+    for (const group of groupNoteViewerItems(items)) {
+      const line = group.anchorLine - 1;
 
-    this.expandedDecorationType = vscode.window.createTextEditorDecorationType({
-      isWholeLine: true,
-      before: {
-        color: new vscode.ThemeColor('editorCodeLens.foreground'),
-      },
-    });
-  }
-
-  public render(editor: vscode.TextEditor, items: NoteViewerItem[]): void {
-    const groups = groupNoteViewerItems(items);
-    const collapsedDecorations: vscode.DecorationOptions[] = [];
-    const expandedDecorations: vscode.DecorationOptions[] = [];
-
-    for (const group of groups) {
-      const zeroBasedLine = group.anchorLine - 1;
-
-      if (zeroBasedLine < 0 || zeroBasedLine >= editor.document.lineCount) {
+      if (line < 0 || line >= document.lineCount) {
         continue;
       }
 
-      const range = new vscode.Range(zeroBasedLine, 0, zeroBasedLine, 0);
+      const range = new vscode.Range(line, 0, line, 0);
+      const documentUri = document.uri.toString();
+      const noteIds = group.items.map((item) => item.noteId);
       const allCollapsed = group.items.every((item) => item.collapsed);
 
       if (allCollapsed) {
-        collapsedDecorations.push({
-          range,
-          renderOptions: {
-            before: {
-              contentText: formatCollapsedSummary(group),
-            },
-          },
-        });
+        lenses.push(
+          this.commandLens(
+            range,
+            formatCollapsedSummary(group),
+            COMMAND_IDS.noteViewerToggle,
+            [noteIds, documentUri],
+            'Expand FrilVault note',
+          ),
+        );
       } else {
-        const lines = buildExpandedText(group);
-        expandedDecorations.push({
-          range,
-          renderOptions: {
-            before: {
-              contentText: lines,
-            },
-          },
-        });
+        lenses.push(
+          this.commandLens(
+            range,
+            formatExpandedHeading(group),
+            COMMAND_IDS.noteViewerToggle,
+            [noteIds, documentUri],
+            'Collapse FrilVault note',
+          ),
+        );
+
+        for (const [index, item] of group.items.entries()) {
+          if (group.items.length > 1) {
+            lenses.push(this.textLens(range, `[${index + 1}] ${item.title || 'Note'}`));
+          }
+
+          if (item.collapsed) {
+            lenses.push(
+              this.commandLens(
+                range,
+                formatCollapsedSummary({
+                  anchorLine: group.anchorLine,
+                  items: [item],
+                  totalCount: 1,
+                }),
+                COMMAND_IDS.noteViewerToggle,
+                [[item.noteId], documentUri],
+                'Expand FrilVault note',
+              ),
+            );
+            continue;
+          }
+
+          for (const contentLine of splitContent(item.content)) {
+            lenses.push(this.textLens(range, contentLine));
+          }
+
+          const tags = normalizeTags(item.tags);
+          if (tags.length > 0) {
+            lenses.push(this.textLens(range, tags.slice(0, 5).map((tag) => `#${tag}`).join(' ')));
+          }
+        }
       }
+
+      // The existing hover and gutter action surfaces remain the primary action
+      // UI. This compact action entry point makes all actions reachable from
+      // the block itself without repeating a toolbar for every note.
+      lenses.push(
+        this.commandLens(
+          range,
+          '$(kebab-vertical) Actions…',
+          COMMAND_IDS.noteViewerActions,
+          [noteIds, group.items[0].sourceFile],
+          'Open note actions',
+        ),
+      );
     }
 
-    editor.setDecorations(this.collapsedDecorationType, collapsedDecorations);
-    editor.setDecorations(this.expandedDecorationType, expandedDecorations);
-  }
-
-  public clear(editor?: vscode.TextEditor): void {
-    editor?.setDecorations(this.collapsedDecorationType, []);
-    editor?.setDecorations(this.expandedDecorationType, []);
+    return lenses;
   }
 
   public dispose(): void {
-    this.collapsedDecorationType.dispose();
-    this.expandedDecorationType.dispose();
+    // CodeLens resources are owned by VS Code; there are no decoration types
+    // or per-document registrations to dispose here.
+  }
+
+  private commandLens(
+    range: vscode.Range,
+    title: string,
+    command: string,
+    args: unknown[],
+    tooltip: string,
+  ): vscode.CodeLens {
+    return new vscode.CodeLens(range, {
+      title: truncateLine(title),
+      command,
+      arguments: args,
+      tooltip,
+    });
+  }
+
+  private textLens(range: vscode.Range, text: string): vscode.CodeLens {
+    return new vscode.CodeLens(range, {
+      title: truncateLine(text) || ' ',
+      command: COMMAND_IDS.noteViewerNoop,
+      arguments: [],
+      tooltip: 'FrilVault note content',
+    });
   }
 }
 
-function buildExpandedText(group: NoteViewerGroup): string {
-  const parts: string[] = [];
+function formatExpandedHeading(group: NoteViewerGroup): string {
+  return group.totalCount === 1 ? '▼ Note' : `▼ Notes (${group.totalCount})`;
+}
 
-  if (group.items.length === 1) {
-    const item = group.items[0];
-    parts.push(`▼ Note`);
-    parts.push('');
-    parts.push(formatExpandedContent(item, MAX_EXPANDED_PREVIEW_LINES));
+function splitContent(content: string): string[] {
+  // An empty note still gets one visible row, while CRLF is normalized only
+  // for presentation and never written back to the source document.
+  return content.replace(/\r\n/g, '\n').split('\n');
+}
 
-    if (item.tags.length > 0) {
-      parts.push('');
-      parts.push(item.tags.slice(0, 5).map((tag) => `#${tag}`).join(' '));
-    }
-  } else {
-    parts.push(`▼ Notes (${group.items.length})`);
-    parts.push('');
-
-    for (const [index, item] of group.items.entries()) {
-      if (index > 0) {
-        parts.push('');
-      }
-
-      const title = item.title || 'Note';
-      parts.push(`[${index + 1}] ${title}`);
-      parts.push(`    ${formatExpandedContent(item, Math.min(MAX_EXPANDED_PREVIEW_LINES, 5))}`);
-
-      if (item.tags.length > 0) {
-        parts.push(`    ${item.tags.slice(0, 3).map((tag) => `#${tag}`).join(' ')}`);
-      }
-    }
+function truncateLine(value: string): string {
+  if (value.length <= MAX_CODE_LENS_LINE_LENGTH) {
+    return value;
   }
 
-  return parts.join('\n');
+  return `${value.slice(0, MAX_CODE_LENS_LINE_LENGTH - 1).trimEnd()}…`;
 }

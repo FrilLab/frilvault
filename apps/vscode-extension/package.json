@@ -47,6 +47,7 @@
     "onCommand:frilvault.refresh",
     "onCommand:frilvault.gutter.showActions",
     "onCommand:frilvault.noteViewer.toggle",
+    "onCommand:frilvault.noteViewer.actions",
     "onUri:frilvault"
   ],
   "main": "./dist/extension.js",
@@ -158,6 +159,10 @@
       {
         "command": "frilvault.noteViewer.toggle",
         "title": "Toggle Note"
+      },
+      {
+        "command": "frilvault.noteViewer.actions",
+        "title": "Note Viewer Actions"
       }
     ],
     "menus": {
@@ -329,7 +334,7 @@
         "frilvault.noteViewer.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Show expandable block note viewers above associated source-code anchors."
+          "description": "Show expandable CodeLens note viewers above associated source-code anchors."
         },
         "frilvault.noteViewer.defaultState": {
           "type": "string",

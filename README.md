@@ -21,7 +21,7 @@ FrilVault is a local-first workspace knowledge layer. Notes live under `.vault/`
 - note URI resolution
 - workspace sync and gitignore helper flows
 - note-file repair after file moves or renames
-- VS Code integration with notes panel, expandable block note viewer, gutter markers, hover preview, inline editing, and CodeLens
+- VS Code integration with notes panel, expandable CodeLens note viewer, gutter markers, hover preview, and inline editing
 
 ## Repository Layout
 

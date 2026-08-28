@@ -6,7 +6,7 @@
 import * as vscode from 'vscode';
 
 import type { CurrentFileNotesStore } from '../current-file/store';
-import { buildNoteViewerItems, toggleItemCollapsed, type NoteViewerItem } from './noteViewerModel';
+import { buildNoteViewerItems } from './noteViewerModel';
 import { NoteViewerRenderer } from './noteViewerRenderer';
 import { NoteViewerState } from './noteViewerState';
 
@@ -31,9 +31,12 @@ export function isNoteViewerEnabled(): boolean {
 export class NoteViewerController implements vscode.Disposable {
   private readonly renderer: NoteViewerRenderer;
   private readonly viewerState: NoteViewerState;
-  private items: NoteViewerItem[] = [];
-  private previousEditor: vscode.TextEditor | undefined;
+  private readonly onDidChangeCodeLensesEmitter = new vscode.EventEmitter<void>();
   private readonly configListener: vscode.Disposable;
+  private readonly closeDocumentListener: vscode.Disposable;
+  private providerRegistration: vscode.Disposable | undefined;
+
+  public readonly onDidChangeCodeLenses = this.onDidChangeCodeLensesEmitter.event;
 
   public constructor(
     private readonly store: CurrentFileNotesStore,
@@ -42,81 +45,117 @@ export class NoteViewerController implements vscode.Disposable {
     this.renderer = new NoteViewerRenderer();
     this.viewerState = new NoteViewerState();
     this.configListener = vscode.workspace.onDidChangeConfiguration((event) => {
-      if (
-        event.affectsConfiguration('frilvault.noteViewer')
-      ) {
-        void this.refresh();
+      if (event.affectsConfiguration('frilvault.noteViewer')) {
+        this.refresh();
       }
+    });
+    this.closeDocumentListener = vscode.workspace.onDidCloseTextDocument((document) => {
+      this.viewerState.clearDocument(document.uri.toString());
+      this.refresh();
     });
   }
 
-  public async refresh(editor = vscode.window.activeTextEditor): Promise<void> {
-    if (!this.isEnabled() || !isNoteViewerEnabled()) {
-      this.clear(editor);
+  public register(context: vscode.ExtensionContext): void {
+    if (this.providerRegistration) {
       return;
     }
 
-    if (this.previousEditor && this.previousEditor !== editor) {
-      this.renderer.clear(this.previousEditor);
-    }
+    this.providerRegistration = vscode.languages.registerCodeLensProvider(
+      { scheme: 'file' },
+      this,
+    );
+    context.subscriptions.push(this.providerRegistration);
+  }
 
-    if (!editor || editor.document.uri.scheme !== 'file') {
-      this.previousEditor = editor;
-      return;
+  public refresh(): void {
+    this.onDidChangeCodeLensesEmitter.fire();
+  }
+
+  public provideCodeLenses(
+    document: vscode.TextDocument,
+    token: vscode.CancellationToken,
+  ): vscode.CodeLens[] {
+    if (
+      token.isCancellationRequested ||
+      !this.isEnabled() ||
+      !isNoteViewerEnabled() ||
+      document.uri.scheme !== 'file'
+    ) {
+      return [];
     }
 
     const snapshot = this.store.getSnapshot();
-    const editorUri = editor.document.uri.toString();
-
-    if (snapshot.loading || snapshot.editorDocumentUri !== editorUri) {
-      this.renderer.clear(editor);
-      this.previousEditor = editor;
-      return;
+    if (snapshot.loading || snapshot.editorDocumentUri !== document.uri.toString()) {
+      return [];
     }
 
-    const defaultState = getConfiguredDefaultState();
-    const rawItems = buildNoteViewerItems(snapshot.notes, defaultState);
-
-    // Apply persisted collapse/expand state
-    this.items = rawItems.map((item) => ({
+    const items = buildNoteViewerItems(
+      this.store.notesForDocument(document),
+      getConfiguredDefaultState(),
+    ).map((item) => ({
       ...item,
-      collapsed: this.viewerState.isCollapsed(editorUri, item.noteId, item.collapsed),
+      collapsed: this.viewerState.isCollapsed(
+        document.uri.toString(),
+        item.noteId,
+        item.collapsed,
+      ),
     }));
 
-    this.renderer.render(editor, this.items);
-    this.previousEditor = editor;
+    return this.renderer.render(document, items);
   }
 
-  public toggleNote(noteId: string): void {
+  public toggleNote(noteId: string, documentUri?: string): void {
+    this.toggleNotes([noteId], documentUri);
+  }
+
+  public toggleNotes(noteIds: string[], documentUri?: string): void {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       return;
     }
 
     const editorUri = editor.document.uri.toString();
-    const item = this.items.find((i) => i.noteId === noteId);
-
-    if (item) {
-      this.viewerState.toggle(editorUri, noteId, item.collapsed);
+    if (documentUri && documentUri !== editorUri) {
+      return;
     }
 
-    this.items = toggleItemCollapsed(this.items, noteId);
-    this.renderer.render(editor, this.items);
+    const items = buildNoteViewerItems(
+      this.store.notesForDocument(editor.document),
+      getConfiguredDefaultState(),
+    );
+    const selected = items.filter((item) => noteIds.includes(item.noteId));
+
+    if (selected.length === 0) {
+      return;
+    }
+
+    const current = selected.map((item) =>
+      this.viewerState.isCollapsed(editorUri, item.noteId, item.collapsed),
+    );
+    const collapse = current.some((collapsed) => !collapsed);
+
+    for (const item of selected) {
+      this.viewerState.set(editorUri, item.noteId, collapse);
+    }
+
+    this.refresh();
   }
 
-  public clear(editor = vscode.window.activeTextEditor): void {
-    this.renderer.clear(editor);
-    this.items = [];
-    this.previousEditor = editor;
+  public clear(_editor = vscode.window.activeTextEditor): void {
+    this.refresh();
   }
 
   public clearAll(): void {
-    this.clear();
     this.viewerState.clear();
+    this.refresh();
   }
 
   public dispose(): void {
+    this.providerRegistration?.dispose();
+    this.providerRegistration = undefined;
     this.configListener.dispose();
+    this.closeDocumentListener.dispose();
+    this.onDidChangeCodeLensesEmitter.dispose();
     this.renderer.dispose();
   }
 }

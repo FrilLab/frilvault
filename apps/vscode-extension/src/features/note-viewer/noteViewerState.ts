@@ -16,12 +16,17 @@ export class NoteViewerState {
 
   /** Toggles the collapsed state for a specific note. */
   public toggle(documentUri: string, noteId: string, currentCollapsed: boolean): void {
+    this.set(documentUri, noteId, !currentCollapsed);
+  }
+
+  /** Sets the collapsed state for a specific note. */
+  public set(documentUri: string, noteId: string, collapsed: boolean): void {
     let docState = this.stateByDocument.get(documentUri);
     if (!docState) {
       docState = new Map();
       this.stateByDocument.set(documentUri, docState);
     }
-    docState.set(noteId, !currentCollapsed);
+    docState.set(noteId, collapsed);
   }
 
   /** Clears state for a specific document. */

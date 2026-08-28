@@ -22,8 +22,13 @@ export interface NoteViewerGroup {
 
 export function buildNoteViewerItems(notes: NoteView[], defaultState: 'collapsed' | 'expanded'): NoteViewerItem[] {
   const items: NoteViewerItem[] = [];
+  const seenNoteIds = new Set<string>();
 
   for (const view of notes) {
+    if (seenNoteIds.has(view.note.id)) {
+      continue;
+    }
+
     const isSymbol = view.note.anchor.type === 'Symbol';
 
     let anchorLine: number | undefined;
@@ -44,12 +49,14 @@ export function buildNoteViewerItems(notes: NoteView[], defaultState: 'collapsed
       continue;
     }
 
+    seenNoteIds.add(view.note.id);
+
     items.push({
       noteId: view.note.id,
       sourceFile: view.source_file,
       title: view.note.title || anchorLabel,
       content: view.note.content,
-      tags: view.note.tags ?? [],
+      tags: normalizeTags(view.note.tags ?? []),
       anchorLabel,
       anchorLine,
       anchorKind: isSymbol ? 'symbol' : 'line',
@@ -113,6 +120,13 @@ export function formatCollapsedSummary(group: NoteViewerGroup): string {
   if (group.totalCount === 1) {
     const note = group.items[0];
     const lines = note.content.trim().split(/\r?\n/);
+    const content = note.content.trim();
+
+    if (content.length === 0) {
+      const tags = note.tags.slice(0, 3).map((tag) => `#${tag}`).join(' ');
+      return `▶ Note · empty${tags ? ` · ${tags}` : ''}`;
+    }
+
     if (lines.length === 1) {
       const truncated = lines[0].length > 40 ? lines[0].substring(0, 40) + '…' : lines[0];
       return `▶ Note · ${truncated}`;
@@ -136,20 +150,21 @@ export function formatCollapsedSummary(group: NoteViewerGroup): string {
   return `▶ Notes (${group.totalCount})${tagsStr}`;
 }
 
-export function formatExpandedContent(item: NoteViewerItem, maxPreviewLines: number): string {
-  const lines = item.content.split(/\r?\n/);
-  if (lines.length <= maxPreviewLines) {
-    return item.content;
+export function normalizeTags(tags: string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const tag of tags) {
+    const value = tag.trim().replace(/^#+/, '');
+    const key = value.toLocaleLowerCase();
+
+    if (!value || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    normalized.push(value);
   }
-  return lines.slice(0, maxPreviewLines).join('\n') + '\n…';
-}
 
-export function toggleItemCollapsed(items: NoteViewerItem[], noteId: string): NoteViewerItem[] {
-  return items.map((item) =>
-    item.noteId === noteId ? { ...item, collapsed: !item.collapsed } : item,
-  );
-}
-
-export function removeItem(items: NoteViewerItem[], noteId: string): NoteViewerItem[] {
-  return items.filter((item) => item.noteId !== noteId);
+  return normalized;
 }
