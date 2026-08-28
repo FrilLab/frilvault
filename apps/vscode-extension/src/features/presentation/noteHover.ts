@@ -94,7 +94,7 @@ export function buildEditorNotesHoverParts(
   return { contents: [contentMarkdown, actionMarkdown] };
 }
 
-/** Legacy combined hover string for decoration summaries. */
+/** Combined hover string retained for callers that need one markdown block. */
 export function formatEditorNotesHover(
   notes: NoteView[],
   workspaceRoot: string,

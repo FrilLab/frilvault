@@ -93,7 +93,8 @@ Current feature scope:
 - gutter actions
 - note edit and delete
 - inline note editor
-- CodeLens note counts
+- expandable CodeLens note viewer above line and resolved symbol anchors
+- CodeLens note creation and edit actions
 - search
 - note URI handling
 - workspace stats
@@ -102,6 +103,13 @@ Current feature scope:
 - workspace rename and watcher hooks
 - workspace enable/disable state
 - gitignore prompt on first persisted note flow
+
+The note viewer uses `vscode.languages.registerCodeLensProvider` rather than
+`TextEditorDecorationOptions.before`. CodeLens is the supported API that gives
+extensions dedicated horizontal rows between source lines and command
+arguments. An expanded note is therefore represented by stacked rows; VS Code
+does not expose a supported extension-owned multiline block widget in a normal
+text editor. Source documents remain read-only from the viewer's perspective.
 
 Its active backend is currently CLI-backed:
 

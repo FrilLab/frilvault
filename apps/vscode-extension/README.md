@@ -6,7 +6,7 @@ notes to source code without modifying the source file.
 ## Features
 
 - Add notes to source lines and symbols
-- View notes directly inside VS Code with expandable block viewers above code anchors
+- View notes directly inside VS Code with expandable CodeLens viewers above code anchors
 - Edit and delete notes from the editor
 - Navigate between code and notes
 - Search notes across the current workspace
@@ -15,11 +15,14 @@ notes to source code without modifying the source file.
 
 ## Note Viewer
 
-FrilVault displays note content above associated source-code anchors in an expandable block format without modifying source files.
+FrilVault displays note content above associated source-code anchors in an expandable block format without modifying source files. It uses the supported VS Code CodeLens API: each visible note line is a stacked CodeLens row immediately above the anchor.
 
 - **Collapsed State**: Displays a compact one-line summary (e.g., `▶ Note · 3 lines · #todo #parser` or `▶ Notes (2)`).
-- **Expanded State**: Displays the multi-line note content, tags, and structure above the anchor line.
+- **Expanded State**: Displays the multi-line note content, tags, and structure above the anchor line. Intentional line breaks are preserved.
 - **Multiple Notes**: Grouped cleanly above the same anchor without visual duplication or overlapping widgets.
+- **Actions**: Select `Actions…` in the viewer, hover the anchor, or use the gutter marker to open the existing View, Edit, Delete, Copy Link, Copy Content, and Copy Markdown actions.
+
+CodeLens is the closest stable supported editor API for this UI. VS Code does not expose an extension-owned multiline block widget inside a normal text editor, so the expanded viewer is a set of dedicated CodeLens rows rather than a custom DOM overlay. Very long individual lines are shortened to keep the editor layout responsive; the full note remains available from hover and `Open Note`. Unresolved symbol anchors stay available in the sidebar and hover paths but are not assigned a guessed editor location.
 
 ### Viewer Differences
 
@@ -34,14 +37,14 @@ FrilVault displays note content above associated source-code anchors in an expan
 
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
-| `frilvault.noteViewer.enabled` | `boolean` | `true` | Show expandable block note viewers above associated source-code anchors |
+| `frilvault.noteViewer.enabled` | `boolean` | `true` | Show CodeLens note viewers above associated source-code anchors |
 | `frilvault.noteViewer.defaultState` | `string` | `"collapsed"` | Default collapse state for note viewers (`"collapsed"` or `"expanded"`) |
 | `frilvault.gutterMarkerStyle` | `string` | `"dot"` | Visual style for interactive gutter markers (`"dot"`, `"count"`, `"bar"`) |
 | `frilvault.explorerNoteCounts.enabled` | `boolean` | `true` | Show FrilVault note counts beside files in VS Code Explorer |
 | `frilvault.hoverPreviewLength` | `number` | `800` | Maximum character length for rich hover previews |
 | `frilvault.inlineEditor.autoSaveDebounceMs` | `number` | `900` | Delay in milliseconds before auto-saving note edits |
 
-> **Note**: The legacy after-line inline preview settings (`frilvault.inlineNotes.*` and `frilvault.inlineLineNotes.*`) have been superseded by `frilvault.noteViewer.*`.
+> **Note**: The legacy after-line inline preview settings (`frilvault.inlineNotes.*` and `frilvault.inlineLineNotes.*`) were removed. The plain-text preview helpers remain only where they are reused by supported hover/sidebar presentation paths.
 
 ## Commands
 
@@ -53,6 +56,8 @@ FrilVault displays note content above associated source-code anchors in an expan
 | `Show Stats` | `frilvault.showStats` | Show workspace note statistics |
 | `Show Health` | `frilvault.showHealth` | Show missing-file health information |
 | `Apply Repairs` | `frilvault.applyRepairs` | Apply note repair suggestions for renamed or moved files |
+
+The viewer also exposes `frilvault.noteViewer.toggle` and `frilvault.noteViewer.actions` through its CodeLens rows; these commands receive stable note IDs from the provider.
 
 ## Requirements
 
@@ -121,6 +126,8 @@ No cloud account is required.
 ## Known Limitations
 
 - FrilVault targets one workspace root at a time, so multi-root workspace support is limited
+- The note viewer uses stacked CodeLens rows because normal editor decorations cannot provide a supported clickable multiline block layout
+- Long individual viewer lines are shortened in the editor; hover and `Open Note` provide the complete content
 - This is an early preview release
 
 ## Roadmap

@@ -34,7 +34,10 @@ import {
 } from './features/inline-editor/command';
 import { createInlineNoteEditor } from './features/inline-editor/editor';
 import { NoteViewerController } from './features/note-viewer/noteViewerController';
-import { createToggleNoteViewerCommand } from './features/note-viewer/noteViewerCommands';
+import {
+  createNoteViewerActionsCommand,
+  createToggleNoteViewerCommand,
+} from './features/note-viewer/noteViewerCommands';
 import { createShowNotesForCurrentFileCommand } from './features/notes-panel/command';
 import { FrilVaultNotesProvider } from './features/notes-panel/provider';
 import { registerNotesTreeDataProvider, disposeNotesTreeDataProvider } from './features/notes-panel/register';
@@ -284,6 +287,11 @@ export function activate(context: vscode.ExtensionContext): void {
       runWhenEnabled(createToggleNoteViewerCommand(noteViewer)),
     ),
     vscode.commands.registerCommand(
+      COMMAND_IDS.noteViewerActions,
+      runWhenEnabled(createNoteViewerActionsCommand(gutterActions)),
+    ),
+    vscode.commands.registerCommand(COMMAND_IDS.noteViewerNoop, () => undefined),
+    vscode.commands.registerCommand(
       COMMAND_IDS.notesPanelEditNote,
       runWhenEnabled((item: { noteView?: NoteView }) => {
         if (!item?.noteView) {
@@ -363,6 +371,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerWorkspaceWatcher(context, cliClient, isEnabled, refreshAfterMutation);
   registerNoteUriHandler(context, { cliClient, isEnabled });
   registerExplorerNoteCountDecorations(context, noteCountStore, getWorkspaceRoot, isEnabled);
+  noteViewer.register(context);
   registerInlineNoteCodeLensProvider(
     context,
     store,

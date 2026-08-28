@@ -54,6 +54,22 @@ export class GutterNoteActions {
     await this.showActionMenu(selected, sourceFile);
   }
 
+  public async showActionsForNotes(noteIds: string[], sourceFile: string): Promise<void> {
+    const notes = noteIds
+      .map((noteId) => this.findNote(noteId, sourceFile))
+      .filter((note): note is NoteView => note !== undefined);
+
+    if (notes.length === 0) {
+      await this.showError('The selected FrilVault note is no longer available.');
+      return;
+    }
+
+    const selected = notes.length === 1 ? notes[0] : await this.pickNote(notes);
+    if (selected) {
+      await this.showActionMenu(selected, sourceFile);
+    }
+  }
+
   public async viewNote(noteId: string, sourceFile: string): Promise<void> {
     const note = this.findNote(noteId, sourceFile);
 

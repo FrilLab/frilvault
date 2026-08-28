@@ -5,12 +5,9 @@ import { suite, test } from 'mocha';
 import {
   buildNoteViewerItems,
   formatCollapsedSummary,
-  formatExpandedContent,
   groupNoteViewerItems,
-  removeItem,
-  toggleItemCollapsed,
+  normalizeTags,
   type NoteViewerGroup,
-  type NoteViewerItem,
 } from '../features/note-viewer/noteViewerModel';
 import type { NoteView } from '../types';
 
@@ -70,7 +67,7 @@ suite('Note viewer model', () => {
     const groups = groupNoteViewerItems(items);
 
     assert.strictEqual(groups.length, 1);
-    assert.strictEqual(groups[0].items.length, 2);
+    assert.strictEqual(groups[0].items.length, 1);
   });
 
   test('tags are normalized and limited in collapsed previews', () => {
@@ -83,6 +80,13 @@ suite('Note viewer model', () => {
     assert.ok(summary.includes('#b'));
     assert.ok(summary.includes('#c'));
     assert.ok(!summary.includes('#d'));
+  });
+
+  test('normalizes tag hashes and case-insensitive duplicates', () => {
+    assert.deepStrictEqual(normalizeTags([' #todo', 'todo', '##Parser', '']), [
+      'todo',
+      'Parser',
+    ]);
   });
 
   test('empty content is handled safely', () => {
@@ -112,29 +116,6 @@ suite('Note viewer model', () => {
     assert.strictEqual(expanded[0].collapsed, false);
   });
 
-  test('removed notes disappear after model refresh', () => {
-    const notes = [
-      createLineNote('first', 1),
-      createLineNote('second', 2, 'note-2'),
-    ];
-    const items = buildNoteViewerItems(notes, 'collapsed');
-    const filtered = removeItem(items, 'note-2');
-
-    assert.strictEqual(filtered.length, 1);
-    assert.strictEqual(filtered[0].noteId, 'note-1');
-  });
-
-  test('toggleItemCollapsed toggles the correct item', () => {
-    const items: NoteViewerItem[] = [
-      { noteId: 'a', sourceFile: 'f', title: 'A', content: 'c', tags: [], anchorLabel: 'Line 1', anchorLine: 1, anchorKind: 'line', collapsed: true },
-      { noteId: 'b', sourceFile: 'f', title: 'B', content: 'c', tags: [], anchorLabel: 'Line 2', anchorLine: 2, anchorKind: 'line', collapsed: true },
-    ];
-
-    const toggled = toggleItemCollapsed(items, 'a');
-    assert.strictEqual(toggled[0].collapsed, false);
-    assert.strictEqual(toggled[1].collapsed, true);
-  });
-
   test('groups are sorted by anchorLine ascending', () => {
     const notes = [
       createLineNote('c', 10),
@@ -148,27 +129,6 @@ suite('Note viewer model', () => {
     assert.strictEqual(groups[0].anchorLine, 2);
     assert.strictEqual(groups[1].anchorLine, 5);
     assert.strictEqual(groups[2].anchorLine, 10);
-  });
-
-  test('formatExpandedContent limits to maxPreviewLines', () => {
-    const item: NoteViewerItem = {
-      noteId: 'x', sourceFile: 'f', title: 'X', content: 'a\nb\nc\nd\ne\nf',
-      tags: [], anchorLabel: 'Line 1', anchorLine: 1, anchorKind: 'line', collapsed: false,
-    };
-
-    const limited = formatExpandedContent(item, 3);
-    assert.ok(limited.endsWith('…'));
-    assert.strictEqual(limited.split('\n').length, 4); // 3 lines + "…"
-  });
-
-  test('formatExpandedContent does not truncate short content', () => {
-    const item: NoteViewerItem = {
-      noteId: 'x', sourceFile: 'f', title: 'X', content: 'ab\ncd',
-      tags: [], anchorLabel: 'Line 1', anchorLine: 1, anchorKind: 'line', collapsed: false,
-    };
-
-    const full = formatExpandedContent(item, 10);
-    assert.strictEqual(full, 'ab\ncd');
   });
 
   test('formatCollapsedSummary single note with one-line content', () => {
