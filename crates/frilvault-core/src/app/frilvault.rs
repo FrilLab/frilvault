@@ -86,21 +86,13 @@ impl FrilVault {
         }
 
         let metadata = workspace_repository.load()?;
-        let index_repository = WorkspaceIndexRepository::new(resolver.clone());
-        let note_count = if index_repository.exists() {
-            index_repository
-                .load()?
-                .files
-                .iter()
-                .map(|file| file.note_count)
-                .sum()
-        } else {
-            NoteRepository::new(resolver.clone())
-                .list_all_note_files()?
-                .iter()
-                .map(|record| record.note_file.notes.len())
-                .sum()
-        };
+        // Status promises the current count, so read note files directly rather
+        // than trusting an index that may be stale after an external edit.
+        let note_count = NoteRepository::new(resolver)
+            .list_all_note_files()?
+            .iter()
+            .map(|record| record.note_file.notes.len())
+            .sum();
 
         Ok(WorkspaceStatus {
             vault_path: PathBuf::from(crate::constants::VAULT_DIR_NAME),

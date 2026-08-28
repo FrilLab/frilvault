@@ -114,7 +114,22 @@ fn parses_stats_json_format() {
 fn parses_status_command() {
     let cli = Cli::parse_from(["flvt", "status"]);
 
-    assert!(matches!(cli.command, Commands::Status(_)));
+    match cli.command {
+        Commands::Status(command) => assert!(command.format.is_none()),
+        _ => panic!("expected status command"),
+    }
+}
+
+#[test]
+fn parses_status_json_format() {
+    let cli = Cli::parse_from(["flvt", "status", "--format", "json"]);
+
+    match cli.command {
+        Commands::Status(command) => {
+            assert!(matches!(command.format, Some(FormatArg::Json)));
+        }
+        _ => panic!("expected status command"),
+    }
 }
 
 #[test]

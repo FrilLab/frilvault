@@ -153,26 +153,54 @@ fn status_reports_corrupted_workspace_metadata() {
 }
 
 #[test]
-fn status_counts_notes_from_the_workspace_index() {
+fn status_counts_current_notes_after_external_changes_without_writing() {
     let workspace = create_test_workspace();
     let vault = FrilVault::open(workspace.root()).unwrap();
     vault.initialize(VaultMode::Local).unwrap();
     let mut notes = vault.notes().unwrap();
 
-    for content in ["first", "second"] {
-        notes
-            .add_note(AddNoteRequest {
-                source_file: "src/main.rs".into(),
-                anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
-                content: content.to_string(),
-                tags: None,
-            })
-            .unwrap();
-    }
+    notes
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "first".to_string(),
+            tags: None,
+        })
+        .unwrap();
+
+    let resolver = PathResolver::new(workspace.root());
+    let index_path = resolver.workspace_index_path();
+    let index_before = fs::read(&index_path).unwrap();
+    let original_note_path = resolver.resolve_note_path("src/main.rs");
+    let external_note_path = resolver.resolve_note_path("src/external.rs");
+
+    // Simulate another process adding a note file after the index was written.
+    fs::copy(&original_note_path, &external_note_path).unwrap();
 
     let status = vault.status().unwrap();
 
     assert_eq!(status.note_count, 2);
+
+    // Simulate an external edit that changes the number of notes in that file.
+    let mut edited_note_file: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&external_note_path).unwrap()).unwrap();
+    let first_note = edited_note_file["notes"][0].clone();
+    edited_note_file["notes"]
+        .as_array_mut()
+        .unwrap()
+        .push(first_note);
+    fs::write(
+        &external_note_path,
+        serde_json::to_string(&edited_note_file).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(vault.status().unwrap().note_count, 3);
+
+    // Deleting the externally-added file must also be reflected immediately.
+    fs::remove_file(&external_note_path).unwrap();
+    assert_eq!(vault.status().unwrap().note_count, 1);
+    assert_eq!(fs::read(index_path).unwrap(), index_before);
 }
 
 fn init_git_repository(workspace_root: &std::path::Path) {
