@@ -101,9 +101,82 @@ FrilVault `v0.0.3` adds Explorer note counts and a workspace note overview in `F
 
 FrilVault does not rewrite or annotate source files.
 
+## Vault Modes
+
+FrilVault uses Local mode by default. Initialize a new vault with:
+
+```bash
+flvt init
+```
+
+The command prints:
+
+```text
+Initialized FrilVault workspace
+
+Vault: .vault
+Mode: local
+```
+
+Local mode is intended for private, checkout-local knowledge. When the
+workspace is inside a Git repository, initialization adds `.vault/` to that
+repository's `.git/info/exclude`. This is a repository-local exclusion: it
+does not change the shared `.gitignore` file. If `.vault` is already tracked,
+the exclusion cannot untrack it and initialization reports a warning.
+
+To explicitly create a vault intended to be shared through Git, use:
+
+```bash
+flvt init --shared
+```
+
+The command prints:
+
+```text
+Initialized FrilVault workspace
+
+Vault: .vault
+Mode: shared
+```
+
+Shared mode does not add `.vault/` to `.git/info/exclude` and does not modify
+`.gitignore`, so the vault remains trackable by Git. It is still up to the
+user to review and commit the files they want to share. Pre-existing Git
+ignore rules can still affect whether Git reports the vault as ignored.
+See [Workspace status](#workspace-status) for the mode and Git tracking values
+reported after initialization.
+
+The `mode` is stored in `.vault/workspace.json` as a top-level field. A newly
+initialized workspace has this shape (the timestamps vary):
+
+```json
+{
+  "version": 1,
+  "mode": "local",
+  "workspace": {
+    "name": "frilvault"
+  },
+  "settings": {
+    "search": {
+      "case_sensitive": false
+    }
+  },
+  "created_at": "2026-08-28T13:24:46.875996Z",
+  "updated_at": "2026-08-28T13:24:46.875996Z"
+}
+```
+
+Use `"shared"` instead of `"local"` for a shared vault. Existing
+`.vault/workspace.json` files without `mode` remain usable and are interpreted
+as Local. Initialization preserves existing workspace metadata, including its
+current mode and notes; `flvt init --shared` is an opt-in for creating a new
+shared vault, not a mode-switch or migration command.
+
 ## Quick Commands
 
 ```bash
+flvt init
+flvt init --shared
 flvt add --file src/main.rs --line 10 --column 5 --content "parser needs cleanup"
 flvt explorer --format json
 flvt list --file src/main.rs
