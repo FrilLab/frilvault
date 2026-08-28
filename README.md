@@ -111,6 +111,9 @@ flvt search parser
 flvt search --tag performance --tag parser
 flvt search --tag-query 'tag:bug OR tag:security'
 flvt search --tag-query 'tag:architecture NOT tag:legacy'
+flvt tag rename todo task
+flvt tag merge bug defect --into issue
+flvt tag remove legacy --yes
 flvt tag stats
 flvt tag stats --tag architecture --group-by directory --format json
 flvt tag color set bug red
@@ -131,6 +134,13 @@ a tag contains spaces, for example `--tag-query '"tag:needs review" OR tag:todo'
 Tag colors use the theme-safe `red`, `orange`, `yellow`, `green`, `blue`, and
 `purple` palette. They are optional workspace metadata stored once in
 `.vault/workspace.json`; note JSON continues to store tag names only.
+
+Tag rename, merge, and remove are workspace transactions. FrilVault serializes
+all affected note JSON and the resulting index before applying changes. If a
+note or index write fails, it restores every affected note, the index, and the
+pre-operation cache state. The returned error always reports whether rollback
+succeeded; a rollback failure requires inspecting the reported paths before
+retrying the operation.
 
 ## Documentation
 

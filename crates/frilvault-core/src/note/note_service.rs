@@ -10,7 +10,11 @@
 //!
 //! 서비스는 저장소를 직접 사용하지 않고 `VaultContext`를 통해 접근합니다.
 
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 
 use chrono::Utc;
 use uuid::Uuid;
@@ -19,10 +23,10 @@ use crate::{
     AddNoteRequest, AttachmentRepository, FrilVaultError, FrilVaultResult, NoteAnchor,
     NoteAttachment, NoteQuery, NoteView, SymbolKind, TagBreakdown, TagGroupBy, TagOperationResult,
     TagQuery, TagStatistic, TagSummary, UpdateNoteRequest,
-    note::{Note, normalize_tag, normalize_tags},
+    note::{Note, normalize_tag, normalize_tags, restore_file},
     runtime::VaultContext,
     symbol::SymbolResolver,
-    workspace::{PathResolver, read_source_file_content},
+    workspace::{IndexedFile, PathResolver, WorkspaceIndex, read_source_file_content},
 };
 
 /// Application service responsible for note operations.
@@ -634,12 +638,12 @@ impl NoteService {
     where
         F: FnMut(&mut Note) -> bool,
     {
-        let records = self.vault_context.note_repository.list_all_note_files()?;
+        let mut records = self.vault_context.note_repository.list_all_note_files()?;
         let mut affected_notes = 0;
         let mut affected_files = 0;
-        let mut files_to_update = Vec::new();
+        let mut changed_files = std::collections::HashSet::new();
 
-        for mut record in records {
+        for record in &mut records {
             let mut file_changed = false;
             for note in &mut record.note_file.notes {
                 if mutate_note(note) {
@@ -649,25 +653,162 @@ impl NoteService {
             }
             if file_changed {
                 affected_files += 1;
-                files_to_update.push((record.source_file, record.note_file));
+                changed_files.insert(record.source_file.clone());
             }
         }
 
-        if !dry_run {
-            for (source_file, note_file) in files_to_update {
-                self.vault_context
-                    .note_repository
-                    .save_by_source_file(&source_file, &note_file)?;
-                self.vault_context.invalidate_notes(&source_file);
-                self.vault_context
-                    .sync_index_for_source_file(&source_file)?;
-            }
+        if dry_run || affected_files == 0 {
+            return Ok(TagOperationResult {
+                affected_notes,
+                affected_files,
+            });
         }
+
+        // Prepare every output and every rollback snapshot before replacing a file.
+        // The filesystem cannot atomically replace several paths at once, so the
+        // commit below uses these snapshots to provide a workspace transaction.
+        let files_to_update = records
+            .iter()
+            .filter(|record| changed_files.contains(&record.source_file))
+            .map(|record| {
+                let path = self
+                    .vault_context
+                    .note_repository
+                    .resolve_note_path(&record.source_file);
+                Ok(PreparedTagFile {
+                    source_file: record.source_file.clone(),
+                    serialized: self
+                        .vault_context
+                        .note_repository
+                        .serialize(&record.note_file)?,
+                    snapshot: FileSnapshot::capture(path)?,
+                })
+            })
+            .collect::<FrilVaultResult<Vec<_>>>()?;
+
+        let index_path = self.vault_context.workspace_index_repository.path();
+        let index_snapshot = FileSnapshot::capture(index_path)?;
+        let mut index = if index_snapshot.contents.is_some() {
+            self.vault_context.workspace_index_repository.load()?
+        } else {
+            WorkspaceIndex {
+                version: 1,
+                files: records
+                    .iter()
+                    .map(|record| IndexedFile {
+                        source_file: record.source_file.to_string_lossy().into_owned(),
+                        note_count: record.note_file.notes.len(),
+                        exists: self
+                            .vault_context
+                            .workspace_index_repository
+                            .workspace_root()
+                            .join(&record.source_file)
+                            .exists(),
+                    })
+                    .collect(),
+            }
+        };
+
+        for record in &records {
+            if !changed_files.contains(&record.source_file) {
+                continue;
+            }
+            let source_file = record.source_file.to_string_lossy().into_owned();
+            index.upsert_file(IndexedFile {
+                source_file: source_file.clone(),
+                note_count: record.note_file.notes.len(),
+                exists: self
+                    .vault_context
+                    .workspace_index_repository
+                    .workspace_root()
+                    .join(&source_file)
+                    .exists(),
+            });
+        }
+
+        let prepared_index = PreparedIndex {
+            serialized: serde_json::to_string(&index)?,
+            snapshot: index_snapshot,
+        };
+
+        self.commit_tag_mutation(files_to_update, prepared_index)?;
 
         Ok(TagOperationResult {
             affected_notes,
             affected_files,
         })
+    }
+
+    fn commit_tag_mutation(
+        &mut self,
+        files: Vec<PreparedTagFile>,
+        index: PreparedIndex,
+    ) -> FrilVaultResult<()> {
+        for file in &files {
+            if let Err(error) = self
+                .vault_context
+                .note_repository
+                .write_serialized(&file.source_file, &file.serialized)
+            {
+                return Err(self.tag_operation_failure(error, &files, &index));
+            }
+        }
+
+        if let Err(error) = self
+            .vault_context
+            .workspace_index_repository
+            .write_serialized(&index.serialized)
+        {
+            return Err(self.tag_operation_failure(error, &files, &index));
+        }
+
+        for file in &files {
+            self.vault_context.invalidate_notes(&file.source_file);
+        }
+
+        Ok(())
+    }
+
+    fn tag_operation_failure(
+        &mut self,
+        source: FrilVaultError,
+        files: &[PreparedTagFile],
+        index: &PreparedIndex,
+    ) -> FrilVaultError {
+        match rollback_tag_mutation(files, index) {
+            Ok(()) => FrilVaultError::TagOperationFailed {
+                source: Box::new(source),
+                rollback: crate::TagOperationRollback::Succeeded,
+            },
+            Err(rollback_error) => {
+                self.vault_context.clear_notes_cache();
+                FrilVaultError::TagOperationFailed {
+                    source: Box::new(source),
+                    rollback: crate::TagOperationRollback::Failed(rollback_error),
+                }
+            }
+        }
+    }
+
+    /// Configures a deterministic note-write failure for filesystem transaction tests.
+    #[cfg(test)]
+    pub(crate) fn fail_note_writes_after(&self, successful_writes: usize) {
+        self.vault_context
+            .note_repository
+            .fail_writes_after(successful_writes);
+    }
+
+    /// Configures a deterministic index-write failure for filesystem transaction tests.
+    #[cfg(test)]
+    pub(crate) fn fail_index_writes_after(&self, successful_writes: usize) {
+        self.vault_context
+            .workspace_index_repository
+            .fail_writes_after(successful_writes);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn contains_cached_notes(&self, source_file: &Path) -> bool {
+        self.vault_context.contains_cached_notes(source_file)
     }
 
     pub fn list_symbol_notes(
@@ -796,6 +937,85 @@ fn validate_anchor(anchor: &NoteAnchor) -> FrilVaultResult<()> {
             FrilVaultError::InvalidAnchor("symbol line hint must be 1-based".to_string()),
         ),
         _ => Ok(()),
+    }
+}
+
+struct PreparedTagFile {
+    source_file: PathBuf,
+    serialized: String,
+    snapshot: FileSnapshot,
+}
+
+struct PreparedIndex {
+    serialized: String,
+    snapshot: FileSnapshot,
+}
+
+struct FileSnapshot {
+    path: PathBuf,
+    contents: Option<Vec<u8>>,
+    permissions: Option<fs::Permissions>,
+    modified: Option<SystemTime>,
+}
+
+impl FileSnapshot {
+    fn capture(path: PathBuf) -> FrilVaultResult<Self> {
+        let metadata = match fs::metadata(&path) {
+            Ok(metadata) => Some(metadata),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
+
+        let (contents, permissions, modified) = match metadata {
+            Some(metadata) => (
+                Some(fs::read(&path)?),
+                Some(metadata.permissions()),
+                Some(metadata.modified()?),
+            ),
+            None => (None, None, None),
+        };
+
+        Ok(Self {
+            path,
+            contents,
+            permissions,
+            modified,
+        })
+    }
+
+    fn restore(&self) -> std::io::Result<()> {
+        restore_file(&self.path, self.contents.as_deref())?;
+
+        if self.contents.is_some() {
+            if let Some(permissions) = &self.permissions {
+                fs::set_permissions(&self.path, permissions.clone())?;
+            }
+            if let Some(modified) = self.modified {
+                fs::File::open(&self.path)?.set_modified(modified)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn rollback_tag_mutation(files: &[PreparedTagFile], index: &PreparedIndex) -> Result<(), String> {
+    let mut errors = Vec::new();
+
+    for file in files {
+        if let Err(error) = file.snapshot.restore() {
+            errors.push(format!("{}: {error}", file.snapshot.path.display()));
+        }
+    }
+
+    if let Err(error) = index.snapshot.restore() {
+        errors.push(format!("{}: {error}", index.snapshot.path.display()));
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
     }
 }
 

@@ -19,7 +19,7 @@ mod workspace;
 
 pub use app::{FrilVault, InitializationResult};
 
-pub use error::{FrilVaultError, FrilVaultResult};
+pub use error::{FrilVaultError, FrilVaultResult, TagOperationRollback};
 pub use note::{
     AddNoteRequest, AttachmentRepository, LineAnchor, Note, NoteAnchor, NoteAttachment, NoteQuery,
     NoteView, SymbolAnchor, SymbolKind, TagBreakdown, TagGroupBy, TagOperationResult, TagQuery,

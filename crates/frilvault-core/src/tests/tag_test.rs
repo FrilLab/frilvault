@@ -1,7 +1,9 @@
+use std::{fs, path::Path};
+
 use super::helper::{create_test_note_service, create_test_workspace};
 use crate::{
-    AddNoteRequest, FrilVaultError, LineAnchor, NoteAnchor, UpdateNoteRequest, normalize_tag,
-    normalize_tags,
+    AddNoteRequest, FrilVaultError, FrilVaultResult, LineAnchor, NoteAnchor, TagOperationRollback,
+    UpdateNoteRequest, normalize_tag, normalize_tags, note::NoteService, workspace::PathResolver,
 };
 
 #[test]
@@ -558,5 +560,147 @@ fn tag_statistics_recomputes_after_note_changes() {
     assert_eq!(
         service.tag_statistics(Some("architecture"), None).unwrap()[0].note_count,
         1
+    );
+}
+
+fn create_transaction_fixture() -> (super::helper::TestWorkspace, NoteService) {
+    let workspace = create_test_workspace();
+    let mut service = create_test_note_service(workspace.root());
+
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/a.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "note a".into(),
+            tags: Some(vec!["bug".into(), "issue".into()]),
+        })
+        .unwrap();
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/b.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "note b".into(),
+            tags: Some(vec!["bug".into(), "defect".into()]),
+        })
+        .unwrap();
+
+    (workspace, service)
+}
+
+fn assert_tag_operation_rolls_back<F, G>(configure_failure: F, operation: G)
+where
+    F: FnOnce(&NoteService),
+    G: FnOnce(&mut NoteService) -> FrilVaultResult<crate::TagOperationResult>,
+{
+    let (workspace, mut service) = create_transaction_fixture();
+    let resolver = PathResolver::new(workspace.root());
+    let note_a_path = resolver.resolve_note_path("src/a.rs");
+    let note_b_path = resolver.resolve_note_path("src/b.rs");
+    let index_path = resolver.workspace_index_path();
+    let note_a_before = fs::read(&note_a_path).unwrap();
+    let note_b_before = fs::read(&note_b_path).unwrap();
+    let index_before = fs::read(&index_path).unwrap();
+    let note_a_modified_before = fs::metadata(&note_a_path).unwrap().modified().unwrap();
+    let note_b_modified_before = fs::metadata(&note_b_path).unwrap().modified().unwrap();
+    let index_modified_before = fs::metadata(&index_path).unwrap().modified().unwrap();
+
+    service.preload_notes("src/a.rs").unwrap();
+    assert!(service.contains_cached_notes(Path::new("src/a.rs")));
+    assert!(!service.contains_cached_notes(Path::new("src/b.rs")));
+    configure_failure(&service);
+
+    let error = operation(&mut service).unwrap_err();
+    assert!(matches!(
+        &error,
+        FrilVaultError::TagOperationFailed {
+            rollback: TagOperationRollback::Succeeded,
+            ..
+        }
+    ));
+    assert!(error.to_string().contains("rollback succeeded"));
+
+    assert_eq!(fs::read(&note_a_path).unwrap(), note_a_before);
+    assert_eq!(fs::read(&note_b_path).unwrap(), note_b_before);
+    assert_eq!(fs::read(&index_path).unwrap(), index_before);
+    assert_eq!(
+        fs::metadata(&note_a_path).unwrap().modified().unwrap(),
+        note_a_modified_before
+    );
+    assert_eq!(
+        fs::metadata(&note_b_path).unwrap().modified().unwrap(),
+        note_b_modified_before
+    );
+    assert_eq!(
+        fs::metadata(&index_path).unwrap().modified().unwrap(),
+        index_modified_before
+    );
+    assert!(service.contains_cached_notes(Path::new("src/a.rs")));
+    assert!(!service.contains_cached_notes(Path::new("src/b.rs")));
+    assert_eq!(
+        service.list_notes("src/a.rs").unwrap()[0].note.tags,
+        vec!["bug", "issue"]
+    );
+}
+
+#[test]
+fn successful_tag_operation_invalidates_all_updated_note_cache_entries() {
+    let (_workspace, mut service) = create_transaction_fixture();
+
+    service.preload_notes("src/a.rs").unwrap();
+    service.preload_notes("src/b.rs").unwrap();
+    assert!(service.contains_cached_notes(Path::new("src/a.rs")));
+    assert!(service.contains_cached_notes(Path::new("src/b.rs")));
+
+    service.rename_tag("bug", "fixed").unwrap();
+
+    assert!(!service.contains_cached_notes(Path::new("src/a.rs")));
+    assert!(!service.contains_cached_notes(Path::new("src/b.rs")));
+}
+
+#[test]
+fn rename_tag_rolls_back_everything_when_a_later_note_write_fails() {
+    assert_tag_operation_rolls_back(
+        |service| service.fail_note_writes_after(1),
+        |service| service.rename_tag("bug", "fixed"),
+    );
+}
+
+#[test]
+fn merge_tags_rolls_back_everything_when_a_later_note_write_fails() {
+    assert_tag_operation_rolls_back(
+        |service| service.fail_note_writes_after(1),
+        |service| service.merge_tags(&["bug".into(), "defect".into()], "issue"),
+    );
+}
+
+#[test]
+fn remove_tag_rolls_back_everything_when_a_later_note_write_fails() {
+    assert_tag_operation_rolls_back(
+        |service| service.fail_note_writes_after(1),
+        |service| service.remove_tag("bug"),
+    );
+}
+
+#[test]
+fn rename_tag_rolls_back_everything_when_index_sync_fails() {
+    assert_tag_operation_rolls_back(
+        |service| service.fail_index_writes_after(0),
+        |service| service.rename_tag("bug", "fixed"),
+    );
+}
+
+#[test]
+fn merge_tags_rolls_back_everything_when_index_sync_fails() {
+    assert_tag_operation_rolls_back(
+        |service| service.fail_index_writes_after(0),
+        |service| service.merge_tags(&["bug".into(), "defect".into()], "issue"),
+    );
+}
+
+#[test]
+fn remove_tag_rolls_back_everything_when_index_sync_fails() {
+    assert_tag_operation_rolls_back(
+        |service| service.fail_index_writes_after(0),
+        |service| service.remove_tag("bug"),
     );
 }
