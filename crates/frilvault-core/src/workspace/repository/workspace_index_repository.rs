@@ -35,6 +35,14 @@ impl WorkspaceIndexRepository {
         self.path_resolver.workspace_root()
     }
 
+    pub fn vault_root(&self) -> &Path {
+        self.path_resolver.vault_root_ref()
+    }
+
+    pub fn path_resolver(&self) -> &PathResolver {
+        &self.path_resolver
+    }
+
     pub fn load(&self) -> FrilVaultResult<WorkspaceIndex> {
         let path = self.path_resolver.workspace_index_path();
 

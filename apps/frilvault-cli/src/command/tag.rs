@@ -1,7 +1,8 @@
 use std::io::{self, Write};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use frilvault_core::{FrilVault, TagColor, TagGroupBy, TagStatistic, TagSummary};
+use frilvault_core::{TagColor, TagGroupBy, TagStatistic, TagSummary};
 
 use crate::{
     cli::tag::{
@@ -13,18 +14,22 @@ use crate::{
 };
 
 pub fn execute(command: TagCommand) -> Result<()> {
+    execute_with_vault(command, None)
+}
+
+pub fn execute_with_vault(command: TagCommand, vault_path: Option<&Path>) -> Result<()> {
     match command.action {
-        TagAction::Rename(rename) => execute_rename(rename),
-        TagAction::Merge(merge) => execute_merge(merge),
-        TagAction::Remove(remove) => execute_remove(remove),
-        TagAction::List(list) => execute_list(list),
-        TagAction::Stats(stats) => execute_stats(stats),
-        TagAction::Color(color) => execute_color(color),
+        TagAction::Rename(rename) => execute_rename(rename, vault_path),
+        TagAction::Merge(merge) => execute_merge(merge, vault_path),
+        TagAction::Remove(remove) => execute_remove(remove, vault_path),
+        TagAction::List(list) => execute_list(list, vault_path),
+        TagAction::Stats(stats) => execute_stats(stats, vault_path),
+        TagAction::Color(color) => execute_color(color, vault_path),
     }
 }
 
-fn execute_rename(command: TagRenameCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+fn execute_rename(command: TagRenameCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.notes()?;
     let format = resolve_format(command.format);
 
@@ -66,8 +71,8 @@ fn execute_rename(command: TagRenameCommand) -> Result<()> {
     Ok(())
 }
 
-fn execute_merge(command: TagMergeCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+fn execute_merge(command: TagMergeCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.notes()?;
     let format = resolve_format(command.format);
 
@@ -110,8 +115,8 @@ fn execute_merge(command: TagMergeCommand) -> Result<()> {
     Ok(())
 }
 
-fn execute_remove(command: TagRemoveCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+fn execute_remove(command: TagRemoveCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.notes()?;
     let format = resolve_format(command.format);
 
@@ -186,8 +191,8 @@ fn execute_remove(command: TagRemoveCommand) -> Result<()> {
     Ok(())
 }
 
-fn execute_list(command: TagListCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+fn execute_list(command: TagListCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.notes()?;
     let format = resolve_format(command.format);
     let mut tags = service.list_tags()?;
@@ -248,15 +253,15 @@ fn execute_list(command: TagListCommand) -> Result<()> {
     Ok(())
 }
 
-fn execute_color(command: TagColorCommand) -> Result<()> {
+fn execute_color(command: TagColorCommand, vault_path: Option<&Path>) -> Result<()> {
     match command.action {
-        TagColorAction::Set(command) => execute_color_set(command),
-        TagColorAction::Remove(command) => execute_color_remove(command),
+        TagColorAction::Set(command) => execute_color_set(command, vault_path),
+        TagColorAction::Remove(command) => execute_color_remove(command, vault_path),
     }
 }
 
-fn execute_color_set(command: TagColorSetCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+fn execute_color_set(command: TagColorSetCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let format = resolve_format(command.format);
     let color = match command.color {
         TagColorArg::Red => TagColor::Red,
@@ -276,8 +281,8 @@ fn execute_color_set(command: TagColorSetCommand) -> Result<()> {
     Ok(())
 }
 
-fn execute_color_remove(command: TagColorRemoveCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+fn execute_color_remove(command: TagColorRemoveCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let format = resolve_format(command.format);
     let removed = vault.remove_tag_color(&command.tag)?;
 
@@ -291,8 +296,8 @@ fn execute_color_remove(command: TagColorRemoveCommand) -> Result<()> {
     Ok(())
 }
 
-fn execute_stats(command: TagStatsCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+fn execute_stats(command: TagStatsCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.notes()?;
     let format = resolve_format(command.format);
     let group_by = command.group_by.map(|group_by| match group_by {

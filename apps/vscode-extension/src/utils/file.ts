@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { existsSync, statSync } from 'node:fs';
 
 import * as vscode from 'vscode';
 
@@ -25,6 +26,41 @@ export function getWorkspaceRoot(): string {
   }
 
   return workspaceRoot;
+}
+
+export function tryGetVaultPath(): string | undefined {
+  const configured = vscode.workspace
+    .getConfiguration('frilvault')
+    .get<string>('vaultPath', '')
+    .trim();
+
+  return configured.length > 0 ? configured : undefined;
+}
+
+export function getVaultRoot(workspaceRoot: string): string {
+  const configured = tryGetVaultPath();
+
+  if (configured) {
+    return path.resolve(workspaceRoot, configured);
+  }
+
+  const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+  let directory = resolvedWorkspaceRoot;
+
+  while (true) {
+    const candidate = path.join(directory, '.vault');
+    if (existsSync(candidate) && statSync(candidate).isDirectory()) {
+      return candidate;
+    }
+
+    const parent = path.dirname(directory);
+    if (parent === directory) {
+      break;
+    }
+    directory = parent;
+  }
+
+  return path.join(resolvedWorkspaceRoot, '.vault');
 }
 
 export function getActiveEditorOrThrow(): vscode.TextEditor {

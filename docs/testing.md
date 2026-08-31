@@ -182,6 +182,20 @@ For Local/Shared vault mode documentation, also verify the focused contract:
 - README, architecture, and release documentation describe the same
   default/opt-in behavior and do not promise mode switching or migration.
 
+For Workspace/Vault root separation, also verify the focused contract:
+
+- `flvt --help` lists `--vault <PATH>` and an explicit path is used by `init`,
+  note operations, status, index, attachments, and tag commands.
+- Existing workspace-root `.vault` data remains readable without `--vault`.
+- The nearest existing nested/ancestor `.vault` wins when no explicit path is
+  configured; an explicit missing path does not fall back to a discovered one.
+- Note `source_file` values and anchors remain relative to the workspace root
+  when the vault is external.
+- VS Code's `frilvault.vaultPath` is forwarded to the CLI as `--vault`, and
+  external-vault attachment/watch paths use the same configured location.
+- Local/Shared mode is read from the selected vault metadata and is not inferred
+  from whether the vault is inside or outside the workspace.
+
 ## Failed Validation
 
 When a check fails, report:

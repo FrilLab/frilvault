@@ -9,7 +9,8 @@
 
 Personal notes for source code, without modifying source files.
 
-FrilVault is a local-first workspace knowledge layer. Notes live under `.vault/` beside the project, while application code stays untouched.
+FrilVault is a local-first workspace knowledge layer. Notes live under the
+selected vault, while application code stays untouched.
 
 ## What It Supports
 
@@ -101,6 +102,27 @@ FrilVault `v0.0.3` adds Explorer note counts and a workspace note overview in `F
 
 FrilVault does not rewrite or annotate source files.
 
+The workspace root and vault root are independent. Source files and anchors
+remain relative to the workspace root; note JSON, indexes, attachments, and
+metadata are stored under the vault root. The existing project-root `.vault/`
+layout remains the default when no other vault is selected.
+
+To create or connect to a vault outside the project root, pass its directory
+explicitly:
+
+```bash
+flvt --vault ../frilvault-data init
+flvt --vault /path/to/shared-vault status
+```
+
+An explicit `--vault` path is authoritative: if it is missing or invalid,
+FrilVault reports the error and does not silently use another `.vault`. Without
+an explicit path, FrilVault chooses the nearest existing `.vault` from the
+current directory through its ancestors; if none exists, it creates the
+workspace-root `.vault` as before. VS Code uses the same CLI-backed rule; set
+`frilvault.vaultPath` to the same path when an explicit external vault is
+needed. Relative VS Code paths are resolved from `frilvault.workspaceRoot`.
+
 ## Vault Modes
 
 FrilVault uses Local mode by default. Initialize a new vault with:
@@ -128,6 +150,7 @@ To explicitly create a vault intended to be shared through Git, use:
 
 ```bash
 flvt init --shared
+flvt --vault ../frilvault-data init
 ```
 
 The command prints:
@@ -220,7 +243,7 @@ retrying the operation.
 ### Workspace status
 
 `flvt status` is read-only. It reads the workspace metadata and scans the note
-files under `.vault/notes` at command time, so `Notes` is the current count and
+files under the selected vault's `notes` directory at command time, so `Notes` is the current count and
 reflects notes added, edited, or removed by another process. It does not use or
 rewrite the saved workspace index.
 

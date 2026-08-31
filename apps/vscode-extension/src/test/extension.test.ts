@@ -25,7 +25,7 @@ import { FrilVaultNotesProvider } from '../features/notes-panel/provider';
 import { NotesPanelService } from '../features/notes-panel/service';
 import { NotesPanelItem } from '../features/notes-panel/view';
 import type { NoteView } from '../types';
-import { revealNote } from '../utils/file';
+import { getVaultRoot, revealNote } from '../utils/file';
 
 interface TestWorkspace {
   root: string;
@@ -48,6 +48,9 @@ suite('Extension Test Suite', function () {
     await vscode.workspace
       .getConfiguration('frilvault')
       .update('cliPath', '', vscode.ConfigurationTarget.Global);
+    await vscode.workspace
+      .getConfiguration('frilvault')
+      .update('vaultPath', '', vscode.ConfigurationTarget.Global);
   });
 
   teardown(() => {
@@ -498,6 +501,24 @@ suite('Extension Test Suite', function () {
         vscode.Uri.file(path.join(workspace.root, '.vault/notes/src/sample.ts.json')),
       ),
       false,
+    );
+  });
+
+  test('Vault path discovery prefers the nearest existing ancestor vault', async () => {
+    const workspace = createTestWorkspace();
+    const nestedRoot = path.join(workspace.root, 'packages', 'app');
+    const nestedVault = path.join(workspace.root, 'packages', '.vault');
+    fs.mkdirSync(nestedVault, { recursive: true });
+    fs.mkdirSync(nestedRoot, { recursive: true });
+
+    assert.strictEqual(getVaultRoot(nestedRoot), nestedVault);
+
+    await vscode.workspace
+      .getConfiguration('frilvault')
+      .update('vaultPath', '../external-vault', vscode.ConfigurationTarget.Global);
+    assert.strictEqual(
+      getVaultRoot(workspace.root),
+      path.join(path.dirname(workspace.root), 'external-vault'),
     );
   });
 });

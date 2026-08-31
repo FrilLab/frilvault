@@ -3,12 +3,12 @@
  *
  * Activation wires CLI-backed commands, providers, decorators, and workspace
  * listeners. All note persistence goes through `CliClient`; the extension never
- * writes `.vault` JSON directly.
+ * writes vault JSON directly.
  *
  * FrilVault VS Code extension 진입점입니다.
  *
  * activation 시 CLI 기반 command, provider, decorator, workspace listener를
- * 등록합니다. 모든 note 저장은 `CliClient`를 거치며 extension은 `.vault`
+ * 등록합니다. 모든 note 저장은 `CliClient`를 거치며 extension은 vault
  * JSON을 직접 쓰지 않습니다.
  */
 import * as vscode from 'vscode';
@@ -54,7 +54,12 @@ import { registerNoteUriHandler } from './features/uri/handler';
 import { registerWorkspaceWatcher } from './features/workspace/watcher';
 import { createShowStatsCommand } from './features/workspace/stats';
 import type { NoteView } from './types';
-import { getWorkspaceRoot, revealNote, tryGetWorkspaceRoot } from './utils/file';
+import {
+  getWorkspaceRoot,
+  revealNote,
+  tryGetVaultPath,
+  tryGetWorkspaceRoot,
+} from './utils/file';
 
 let activeDecorator: FrilVaultDecorator | undefined;
 let activeNoteCountStore: WorkspaceNoteCountStore | undefined;
@@ -87,6 +92,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const cliOutputChannel = vscode.window.createOutputChannel('FrilVault CLI');
   const cliClient = new CliClient({
     extensionPath: context.extensionPath,
+    getConfiguredVaultPath: tryGetVaultPath,
     extensionVersion:
       (context.extension.packageJSON as { frilvaultBundledCliVersion?: string; version?: string })
         .frilvaultBundledCliVersion

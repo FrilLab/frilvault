@@ -33,6 +33,9 @@ pub enum FrilVaultError {
     #[error("No FrilVault workspace found.\nRun `flvt init` to initialize one.")]
     WorkspaceNotFound,
 
+    #[error("vault path is not a directory: {0}")]
+    InvalidVaultPath(PathBuf),
+
     #[error("Failed to read FrilVault workspace metadata:\n{} is invalid.", path.display())]
     InvalidWorkspaceMetadata {
         path: PathBuf,

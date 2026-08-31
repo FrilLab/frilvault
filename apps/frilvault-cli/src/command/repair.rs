@@ -1,7 +1,8 @@
 use std::io::{self, Write};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use frilvault_core::{FileMove, FrilVault, WorkspaceService};
+use frilvault_core::{FileMove, WorkspaceService};
 
 use crate::{
     cli::repair::RepairCommand,
@@ -9,7 +10,11 @@ use crate::{
 };
 
 pub fn execute(command: RepairCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+    execute_with_vault(command, None)
+}
+
+pub fn execute_with_vault(command: RepairCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.workspace()?;
     service.warm_up()?;
     let format = resolve_format(command.format);

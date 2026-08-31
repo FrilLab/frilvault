@@ -1,12 +1,16 @@
 use anyhow::Result;
+use std::path::Path;
 
-use frilvault_core::FrilVault;
 use uuid::Uuid;
 
 use crate::cli::delete::DeleteCommand;
 
 pub fn execute(command: DeleteCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+    execute_with_vault(command, None)
+}
+
+pub fn execute_with_vault(command: DeleteCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.notes()?;
 
     service.delete_note(&command.file, Uuid::parse_str(&command.id)?)?;

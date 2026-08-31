@@ -300,6 +300,11 @@
           "default": "",
           "description": "Override the workspace root used by FrilVault. Leave empty to use the first open workspace folder."
         },
+        "frilvault.vaultPath": {
+          "type": "string",
+          "default": "",
+          "description": "Override the vault directory used by FrilVault. Relative paths are resolved from the workspace root; leave empty for automatic .vault discovery."
+        },
         "frilvault.cliPath": {
           "type": "string",
           "default": "",

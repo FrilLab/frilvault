@@ -9,8 +9,7 @@ use crate::{
     runtime::VaultContext,
     workspace::{
         GitExcludeStatus, PathResolver, TagColor, TagSettings, VaultMode, WorkspaceIndexRepository,
-        WorkspaceRepository, WorkspaceService, WorkspaceStatus, ensure_local_vault_excluded,
-        vault_git_tracking_status,
+        WorkspaceRepository, WorkspaceService, WorkspaceStatus,
     },
 };
 
@@ -31,22 +30,69 @@ pub struct InitializationResult {
 /// 체인에 필요한 저장소와 `VaultContext`를 구성합니다.
 pub struct FrilVault {
     workspace_root: PathBuf,
+    path_resolver: PathResolver,
 }
 
 impl FrilVault {
     /// Opens a workspace rooted at `workspace_root`.
     ///
-    /// This only records the root path. Vault directories are created lazily when
-    /// services first touch repositories.
+    /// The selected vault is discovered without creating it. Vault directories
+    /// are created lazily when services first touch repositories.
     ///
     /// `workspace_root`를 루트로 하는 워크스페이스를 엽니다.
     ///
-    /// 루트 경로만 기록하며, vault 디렉터리는 서비스가 저장소에 처음 접근할 때
-    /// 지연 생성됩니다.
+    /// 선택된 vault는 생성하지 않고 찾습니다. vault 디렉터리는 서비스가 저장소에
+    /// 처음 접근할 때 지연 생성됩니다.
     pub fn open(workspace_root: impl AsRef<Path>) -> FrilVaultResult<Self> {
+        let path_resolver = PathResolver::discover(workspace_root.as_ref());
+        let workspace_root = path_resolver.workspace_root().to_path_buf();
+
         Ok(Self {
-            workspace_root: workspace_root.as_ref().to_path_buf(),
+            workspace_root,
+            path_resolver,
         })
+    }
+
+    /// Opens a workspace with an explicit vault root.
+    ///
+    /// An explicit path is authoritative. It is never replaced by automatic
+    /// discovery, even when the path does not contain initialized metadata yet.
+    pub fn open_with_vault_root(
+        workspace_root: impl AsRef<Path>,
+        vault_root: impl AsRef<Path>,
+    ) -> FrilVaultResult<Self> {
+        let path_resolver =
+            PathResolver::with_vault_root(workspace_root.as_ref(), vault_root.as_ref());
+        let workspace_root = path_resolver.workspace_root().to_path_buf();
+
+        if path_resolver.vault_root_ref().exists() && !path_resolver.vault_root_ref().is_dir() {
+            return Err(FrilVaultError::InvalidVaultPath(path_resolver.vault_root()));
+        }
+
+        Ok(Self {
+            workspace_root,
+            path_resolver,
+        })
+    }
+
+    /// Alias for the public CLI/editor terminology.
+    pub fn open_with_vault_path(
+        workspace_root: impl AsRef<Path>,
+        vault_path: impl AsRef<Path>,
+    ) -> FrilVaultResult<Self> {
+        Self::open_with_vault_root(workspace_root, vault_path)
+    }
+
+    pub fn workspace_root(&self) -> &Path {
+        &self.workspace_root
+    }
+
+    pub fn vault_root(&self) -> &Path {
+        self.path_resolver.vault_root_ref()
+    }
+
+    pub fn vault_path(&self) -> PathBuf {
+        self.path_resolver.display_vault_path()
     }
 
     /// Initializes the workspace with the requested storage policy.
@@ -57,7 +103,8 @@ impl FrilVault {
     }
 
     pub fn initialize_with_status(&self, mode: VaultMode) -> FrilVaultResult<InitializationResult> {
-        let resolver = PathResolver::new(&self.workspace_root);
+        let resolver = self.path_resolver.clone();
+        let vault_root = resolver.vault_root();
         let workspace_repository = WorkspaceRepository::new(resolver.clone());
         let metadata = workspace_repository.initialize(mode)?;
 
@@ -65,7 +112,10 @@ impl FrilVault {
         index_repository.create_if_missing()?;
 
         let git_exclude = if metadata.mode == VaultMode::Local {
-            Some(ensure_local_vault_excluded(&self.workspace_root)?)
+            Some(crate::workspace::ensure_local_vault_excluded_at(
+                &self.workspace_root,
+                &vault_root,
+            )?)
         } else {
             None
         };
@@ -78,7 +128,7 @@ impl FrilVault {
 
     /// Reads a concise snapshot of the existing workspace without modifying it.
     pub fn status(&self) -> FrilVaultResult<WorkspaceStatus> {
-        let resolver = PathResolver::new(&self.workspace_root);
+        let resolver = self.path_resolver.clone();
         let workspace_repository = WorkspaceRepository::new(resolver.clone());
 
         if !workspace_repository.exists() {
@@ -88,6 +138,8 @@ impl FrilVault {
         let metadata = workspace_repository.load()?;
         // Status promises the current count, so read note files directly rather
         // than trusting an index that may be stale after an external edit.
+        let display_vault_path = resolver.display_vault_path();
+        let vault_root = resolver.vault_root();
         let note_count = NoteRepository::new(resolver)
             .list_all_note_files()?
             .iter()
@@ -95,16 +147,19 @@ impl FrilVault {
             .sum();
 
         Ok(WorkspaceStatus {
-            vault_path: PathBuf::from(crate::constants::VAULT_DIR_NAME),
+            vault_path: display_vault_path,
             mode: metadata.mode,
-            git_tracking: vault_git_tracking_status(&self.workspace_root)?,
+            git_tracking: crate::workspace::vault_git_tracking_status_at(
+                &self.workspace_root,
+                &vault_root,
+            )?,
             note_count,
         })
     }
 
     /// Returns the workspace-level tag color assignments, keyed case-insensitively.
     pub fn tag_colors(&self) -> FrilVaultResult<BTreeMap<String, TagColor>> {
-        let repository = WorkspaceRepository::new(PathResolver::new(&self.workspace_root));
+        let repository = WorkspaceRepository::new(self.path_resolver.clone());
         let metadata = repository.load()?;
 
         Ok(metadata
@@ -124,7 +179,7 @@ impl FrilVault {
             ));
         }
 
-        let repository = WorkspaceRepository::new(PathResolver::new(&self.workspace_root));
+        let repository = WorkspaceRepository::new(self.path_resolver.clone());
         let mut metadata = repository.load()?;
         metadata
             .settings
@@ -143,7 +198,7 @@ impl FrilVault {
             ));
         }
 
-        let repository = WorkspaceRepository::new(PathResolver::new(&self.workspace_root));
+        let repository = WorkspaceRepository::new(self.path_resolver.clone());
         let mut metadata = repository.load()?;
         let removed = metadata.settings.tags.remove(&tag.to_lowercase()).is_some();
         if removed {
@@ -154,7 +209,7 @@ impl FrilVault {
     }
 
     fn build_context(&self) -> FrilVaultResult<(VaultContext, WorkspaceIndexRepository)> {
-        let resolver = PathResolver::new(&self.workspace_root);
+        let resolver = self.path_resolver.clone();
 
         let workspace_repository = WorkspaceRepository::new(resolver.clone());
         workspace_repository.create_if_missing()?;

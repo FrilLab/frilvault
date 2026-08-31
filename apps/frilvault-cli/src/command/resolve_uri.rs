@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use frilvault_core::FrilVault;
+use std::path::Path;
 
 use crate::{
     cli::resolve_uri::ResolveUriCommand,
@@ -10,7 +10,11 @@ use crate::{
 ///
 /// `flvt resolve-uri`를 실행하고 해석된 note view를 출력합니다.
 pub fn execute(command: ResolveUriCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+    execute_with_vault(command, None)
+}
+
+pub fn execute_with_vault(command: ResolveUriCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.notes()?;
 
     let note_view = service
