@@ -1,7 +1,9 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::{FrilVaultResult, constants::VAULT_DIR_NAME};
+use crate::{FrilVaultError, FrilVaultResult, constants::VAULT_DIR_NAME};
+
+use super::git_exclude::git_repository_relative_path;
 
 const GITIGNORE_ENTRY: &str = ".vault/";
 
@@ -10,11 +12,10 @@ pub fn is_vault_gitignored(workspace_root: &Path) -> FrilVaultResult<bool> {
 }
 
 pub fn is_vault_gitignored_at(workspace_root: &Path, vault_root: &Path) -> FrilVaultResult<bool> {
-    let Some(relative_vault) = relative_vault_path(workspace_root, vault_root) else {
+    let Some((gitignore_path, relative_vault)) = gitignore_target(workspace_root, vault_root)?
+    else {
         return Ok(false);
     };
-
-    let gitignore_path = workspace_root.join(".gitignore");
 
     if !gitignore_path.exists() {
         return Ok(false);
@@ -35,15 +36,16 @@ pub fn append_vault_to_gitignore_at(
     workspace_root: &Path,
     vault_root: &Path,
 ) -> FrilVaultResult<()> {
-    let Some(relative_vault) = relative_vault_path(workspace_root, vault_root) else {
-        return Ok(());
+    let Some((gitignore_path, relative_vault)) = gitignore_target(workspace_root, vault_root)?
+    else {
+        return Err(FrilVaultError::VaultGitignoreUnavailable(
+            vault_root.to_path_buf(),
+        ));
     };
 
     if is_vault_gitignored_at(workspace_root, vault_root)? {
         return Ok(());
     }
-
-    let gitignore_path = workspace_root.join(".gitignore");
 
     if gitignore_path.exists() {
         let mut content = fs::read_to_string(&gitignore_path)?;
@@ -52,13 +54,13 @@ pub fn append_vault_to_gitignore_at(
             content.push('\n');
         }
 
-        content.push_str(&format!("{}/", relative_vault.to_string_lossy()));
+        content.push_str(&format!("{}/", git_path_string(&relative_vault)));
         content.push('\n');
         fs::write(gitignore_path, content)?;
     } else {
         fs::write(
             gitignore_path,
-            format!("{}/\n", relative_vault.to_string_lossy()),
+            format!("{}/\n", git_path_string(&relative_vault)),
         )?;
     }
 
@@ -72,7 +74,7 @@ fn is_vault_ignore_pattern(line: &str, relative_vault: &Path) -> bool {
         return false;
     }
 
-    let relative = relative_vault.to_string_lossy();
+    let relative = git_path_string(relative_vault);
     line == relative
         || line == format!("{relative}/")
         || (relative == VAULT_DIR_NAME
@@ -82,9 +84,26 @@ fn is_vault_ignore_pattern(line: &str, relative_vault: &Path) -> bool {
                 || line == "**/.vault/"))
 }
 
-fn relative_vault_path(workspace_root: &Path, vault_root: &Path) -> Option<std::path::PathBuf> {
-    vault_root
-        .strip_prefix(workspace_root)
-        .ok()
-        .map(Path::to_path_buf)
+fn gitignore_target(
+    workspace_root: &Path,
+    vault_root: &Path,
+) -> FrilVaultResult<Option<(PathBuf, PathBuf)>> {
+    if let Some(relative_vault) = vault_root.strip_prefix(workspace_root).ok()
+        && !relative_vault.as_os_str().is_empty()
+    {
+        return Ok(Some((
+            workspace_root.join(".gitignore"),
+            relative_vault.to_path_buf(),
+        )));
+    }
+
+    Ok(
+        git_repository_relative_path(vault_root)?.map(|(repository_root, relative_vault)| {
+            (repository_root.join(".gitignore"), relative_vault)
+        }),
+    )
+}
+
+fn git_path_string(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
