@@ -1,5 +1,6 @@
 use anyhow::Result;
-use frilvault_core::{FrilVault, NoteQuery};
+use frilvault_core::NoteQuery;
+use std::path::Path;
 
 use crate::{
     cli::list::ListCommand,
@@ -7,7 +8,11 @@ use crate::{
 };
 
 pub fn execute(command: ListCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+    execute_with_vault(command, None)
+}
+
+pub fn execute_with_vault(command: ListCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.notes()?;
 
     let notes = service.query_notes(&NoteQuery {

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use frilvault_core::{FrilVault, UpdateNoteRequest};
+use frilvault_core::UpdateNoteRequest;
+use std::path::Path;
 use uuid::Uuid;
 
 use crate::{
@@ -16,7 +17,11 @@ use crate::{
 ///
 /// JSON 출력은 editor integration이 사용하는 갱신된 `NoteView`를 반환합니다.
 pub fn execute(command: UpdateCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+    execute_with_vault(command, None)
+}
+
+pub fn execute_with_vault(command: UpdateCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.notes()?;
 
     let note_id = Uuid::parse_str(&command.id)?;

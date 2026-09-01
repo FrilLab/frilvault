@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 
 import type { CliClient } from '../../core/cliClient';
-import { tryGetWorkspaceRoot } from '../../utils/file';
+import { getVaultRoot, tryGetWorkspaceRoot } from '../../utils/file';
 
 export function isTrackedSourceRename(
   workspaceRoot: string,
@@ -13,13 +13,22 @@ export function isTrackedSourceRename(
   const oldRelative = path.relative(workspaceRoot, oldUri.fsPath);
   const newRelative = path.relative(workspaceRoot, newUri.fsPath);
 
-  if (oldRelative.startsWith('..') || newRelative.startsWith('..')) {
+  if (
+    oldRelative.startsWith('..') ||
+    newRelative.startsWith('..') ||
+    path.isAbsolute(oldRelative) ||
+    path.isAbsolute(newRelative)
+  ) {
     return false;
   }
 
+  const vaultRoot = getVaultRoot(workspaceRoot);
+  const oldVaultRelative = path.relative(vaultRoot, oldUri.fsPath);
+  const newVaultRelative = path.relative(vaultRoot, newUri.fsPath);
+
   if (
-    oldRelative.startsWith(`.vault${path.sep}`) ||
-    newRelative.startsWith(`.vault${path.sep}`)
+    (!oldVaultRelative.startsWith('..') && !path.isAbsolute(oldVaultRelative)) ||
+    (!newVaultRelative.startsWith('..') && !path.isAbsolute(newVaultRelative))
   ) {
     return false;
   }

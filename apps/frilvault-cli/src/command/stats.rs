@@ -1,5 +1,5 @@
 use anyhow::Result;
-use frilvault_core::FrilVault;
+use std::path::Path;
 
 use crate::{
     cli::stats::StatsCommand,
@@ -7,7 +7,11 @@ use crate::{
 };
 
 pub fn execute(command: StatsCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+    execute_with_vault(command, None)
+}
+
+pub fn execute_with_vault(command: StatsCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.workspace()?;
 
     let stats = service.stats()?;

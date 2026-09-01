@@ -1,5 +1,6 @@
 use anyhow::Result;
-use frilvault_core::{FrilVault, GitTrackingStatus, VaultMode, WorkspaceStatus};
+use frilvault_core::{GitTrackingStatus, VaultMode, WorkspaceStatus};
+use std::path::Path;
 
 use crate::{
     cli::status::StatusCommand,
@@ -7,7 +8,11 @@ use crate::{
 };
 
 pub fn execute(command: StatusCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+    execute_with_vault(command, None)
+}
+
+pub fn execute_with_vault(command: StatusCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let status = vault.status()?;
 
     if matches!(resolve_format(command.format), OutputFormat::Json) {

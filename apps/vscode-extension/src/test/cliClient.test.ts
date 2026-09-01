@@ -68,6 +68,35 @@ suite('CliClient', () => {
     ]);
   });
 
+  test('passes an explicit vault path through to every CLI command', async () => {
+    const calls: string[] = [];
+    const cliClient = new CliClient({
+      getConfiguredVaultPath: () => '/external/vault',
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        calls.push(args.join(' '));
+
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+
+        return { stdout: '[]', stderr: '' };
+      },
+    });
+
+    await cliClient.listNotes('/workspace', 'src/sample.ts');
+
+    assert.deepStrictEqual(calls, [
+      '--version',
+      '--vault /external/vault list --file src/sample.ts --format json',
+    ]);
+  });
+
   test('reports a clear error when no bundled CLI is available', async () => {
     const cliClient = new CliClient({
       extensionPath: '/extension',

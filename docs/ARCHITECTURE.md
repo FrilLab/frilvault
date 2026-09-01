@@ -24,7 +24,7 @@ The current repository does not contain a desktop application source tree yet. R
 
 ## Core Principles
 
-- FrilVault is local-first. Notes and metadata stay inside the workspace.
+- FrilVault is local-first. Notes and metadata stay inside the selected vault.
 - FrilVault does not modify source files.
 - Business logic should live in `frilvault-core`.
 - Editor and CLI layers should stay thin.
@@ -32,25 +32,50 @@ The current repository does not contain a desktop application source tree yet. R
 ## Storage Model
 
 ```text
-.vault/
+<vault-root>/
 ├── notes/
 ├── index/
 └── workspace.json
 ```
 
-- `.vault/notes`: persisted note files
-- `.vault/index`: workspace index data
-- `.vault/workspace.json`: workspace-level metadata
+- `<vault-root>/notes`: persisted note files
+- `<vault-root>/index`: workspace index data
+- `<vault-root>/workspace.json`: workspace-level metadata
+
+### Workspace and vault roots
+
+`PathResolver` keeps the source workspace root and the vault root as separate
+values. Source files, anchors, repairs, and note URIs are relative to the
+workspace root; note JSON, indexes, attachments, and metadata are relative to
+the vault root. An external vault therefore never changes the source-relative
+path stored in a note.
+
+Vault selection follows one contract for the CLI and editor integrations:
+
+1. An explicit path (`flvt --vault PATH` or `frilvault.vaultPath`) is
+   authoritative. Relative paths are resolved from the workspace root. A
+   missing or invalid explicit path is reported as an error and never falls
+   back to another `.vault`.
+2. Without an explicit path, the resolver checks the current directory and
+   then its ancestors for the nearest existing `.vault`. This gives a nested
+   workspace priority over a project-root vault while preserving the existing
+   project-root `.vault` behavior.
+3. If discovery finds nothing, the workspace-root `.vault` remains the target
+   for a new vault.
+
+The vault location does not select `VaultMode`. Local and Shared are persisted
+independently in the selected vault's `workspace.json`; a legacy metadata file
+without `mode` still defaults to Local.
 
 ### Vault modes
 
 `frilvault-core` owns the `VaultMode` policy used by workspace initialization:
 
 - `Local` is the default for a new workspace. `flvt init` creates a Local vault
-  and, when the workspace is in a Git repository, adds `.vault/` to the
+  and, when the selected vault is in a Git repository, adds its relative path to the
   repository-local `.git/info/exclude`.
 - `Shared` is opt-in for a new workspace. `flvt init --shared` creates a Shared
-  vault and does not add a local exclude rule, leaving `.vault/` trackable by
+  vault and does not add a local exclude rule, leaving the vault trackable by
   Git.
 
 Neither initialization path modifies the shared `.gitignore` file. Local mode
@@ -59,7 +84,7 @@ project-wide ignore-file change. A pre-existing Git rule or an already tracked
 vault can still affect the resulting Git state.
 
 The selected mode is serialized as the top-level `mode` field in
-`.vault/workspace.json`, using the lowercase values `"local"` and `"shared"`.
+`<vault-root>/workspace.json`, using the lowercase values `"local"` and `"shared"`.
 `WorkspaceMetadata` defaults a missing field to Local so legacy workspace
 metadata remains readable. Re-initializing an existing workspace loads and
 preserves its metadata, including its current mode; initialization does not

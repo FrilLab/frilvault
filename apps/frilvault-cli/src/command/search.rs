@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
-use frilvault_core::{FrilVault, NoteQuery, TagQuery};
+use frilvault_core::{NoteQuery, TagQuery};
+use std::path::Path;
 
 use crate::{
     cli::search::SearchCommand,
@@ -7,6 +8,10 @@ use crate::{
 };
 
 pub fn execute(command: SearchCommand) -> Result<()> {
+    execute_with_vault(command, None)
+}
+
+pub fn execute_with_vault(command: SearchCommand, vault_path: Option<&Path>) -> Result<()> {
     if command.keyword.is_none()
         && command.file.is_none()
         && command.tags.is_empty()
@@ -15,7 +20,7 @@ pub fn execute(command: SearchCommand) -> Result<()> {
         bail!("search requires a keyword, --file, --tag, or --tag-query");
     }
 
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.notes()?;
 
     let tag_query = if let Some(query) = command.tag_query {

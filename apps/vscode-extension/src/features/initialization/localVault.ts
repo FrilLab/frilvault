@@ -1,6 +1,9 @@
+import * as path from 'node:path';
+
 import * as vscode from 'vscode';
 
 import type { CliClient } from '../../core/cliClient';
+import { getVaultRoot } from '../../utils/file';
 
 export interface LocalVaultInitializationDependencies {
   getWorkspaceRoot: () => string;
@@ -21,7 +24,17 @@ export async function initializeLocalVault(
 
   const showWarningMessage =
     dependencies.showWarningMessage ?? vscode.window.showWarningMessage;
+  const workspaceRoot = dependencies.getWorkspaceRoot();
+  const vaultRoot = getVaultRoot(workspaceRoot);
+  const relativeVaultRoot = path.relative(workspaceRoot, vaultRoot);
+  const vaultPath =
+    relativeVaultRoot.length > 0 &&
+    !relativeVaultRoot.startsWith('..') &&
+    !path.isAbsolute(relativeVaultRoot)
+      ? relativeVaultRoot.split(path.sep).join('/')
+      : vaultRoot;
+
   await showWarningMessage(
-    '.vault is already tracked by Git. Local exclude rules do not affect tracked files. To stop tracking it, run: git rm -r --cached .vault',
+    `The selected vault (${vaultPath}) is already tracked by Git. Local exclude rules do not affect tracked files. To stop tracking it, run: git rm -r --cached ${vaultPath}`,
   );
 }

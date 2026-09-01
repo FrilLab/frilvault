@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use frilvault_core::FrilVault;
+use std::path::Path;
 
 use crate::{
     cli::sync::SyncCommand,
@@ -7,11 +7,15 @@ use crate::{
 };
 
 pub fn execute(command: SyncCommand) -> Result<()> {
+    execute_with_vault(command, None)
+}
+
+pub fn execute_with_vault(command: SyncCommand, vault_path: Option<&Path>) -> Result<()> {
     if command.notes_only && command.sources_only {
         bail!("cannot use --notes-only and --sources-only together");
     }
 
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.workspace()?;
     service.warm_up()?;
 

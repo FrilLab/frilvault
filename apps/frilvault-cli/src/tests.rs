@@ -19,6 +19,17 @@ fn parses_init_with_local_mode_by_default() {
 }
 
 #[test]
+fn parses_an_explicit_vault_path() {
+    let cli = Cli::parse_from(["flvt", "--vault", "/tmp/external-vault", "status"]);
+
+    assert_eq!(
+        cli.vault.as_deref(),
+        Some(std::path::Path::new("/tmp/external-vault"))
+    );
+    assert!(matches!(cli.command, Commands::Status(_)));
+}
+
+#[test]
 fn parses_init_with_shared_mode() {
     let cli = Cli::parse_from(["flvt", "init", "--shared"]);
 

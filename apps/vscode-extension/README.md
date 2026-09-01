@@ -43,6 +43,8 @@ CodeLens is the closest stable supported editor API for this UI. VS Code does no
 | `frilvault.explorerNoteCounts.enabled` | `boolean` | `true` | Show FrilVault note counts beside files in VS Code Explorer |
 | `frilvault.hoverPreviewLength` | `number` | `800` | Maximum character length for rich hover previews |
 | `frilvault.inlineEditor.autoSaveDebounceMs` | `number` | `900` | Delay in milliseconds before auto-saving note edits |
+| `frilvault.workspaceRoot` | `string` | `""` | Workspace root used by FrilVault; empty uses the first VS Code workspace folder |
+| `frilvault.vaultPath` | `string` | `""` | Optional vault directory; relative paths are resolved from `frilvault.workspaceRoot`, and empty uses automatic `.vault` discovery |
 
 > **Note**: The legacy after-line inline preview settings (`frilvault.inlineNotes.*` and `frilvault.inlineLineNotes.*`) were removed. The plain-text preview helpers remain only where they are reused by supported hover/sidebar presentation paths.
 
@@ -71,6 +73,12 @@ Supported packaged targets:
 - `win32-x64`
 
 `frilvault.cliPath` is now an advanced override for custom builds.
+
+When `frilvault.vaultPath` is empty, the extension and `flvt` use the same
+nearest-existing `.vault` discovery from the workspace root through its
+ancestors, falling back to the workspace-root `.vault`. An explicit vault path
+is authoritative and is passed to every CLI operation; it is never replaced by
+automatic discovery.
 
 ## Install
 
@@ -115,7 +123,8 @@ Release automation is split into two stages:
 
 ## Data Storage
 
-FrilVault stores project data locally under:
+FrilVault stores project data locally under the selected vault. With the default
+configuration, that is:
 
 ```text
 .vault/
