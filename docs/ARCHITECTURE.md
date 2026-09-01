@@ -34,13 +34,29 @@ The current repository does not contain a desktop application source tree yet. R
 ```text
 .vault/
 ├── notes/
+├── env/
+│   ├── manifest.toml
+│   ├── recipients.toml
+│   └── profiles/
+│       └── <profile>.age
 ├── index/
 └── workspace.json
 ```
 
 - `.vault/notes`: persisted note files
+- `.vault/env/manifest.toml`: environment profile schema and display metadata
+- `.vault/env/recipients.toml`: environment profile recipient IDs and public age keys
+- `.vault/env/profiles/<profile>.age`: versioned UTF-8 profile payload encrypted with age
 - `.vault/index`: workspace index data
 - `.vault/workspace.json`: workspace-level metadata
+
+`frilvault-core` owns the encrypted profile storage boundary. Profile names are
+validated as single path components, and profile writes create only ciphertext
+in a same-directory temporary file before atomically replacing the target. The
+version-1 payload is JSON with `version` and a key/value `values` map; unknown
+versions are rejected. Recipient and identity material is supplied by callers
+and is never persisted by the core store. Manifest and recipient metadata
+validation is owned by the environment-profile integration work.
 
 ### Vault modes
 
