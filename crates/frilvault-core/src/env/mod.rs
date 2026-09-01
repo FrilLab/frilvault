@@ -51,13 +51,15 @@ pub const ENV_PROFILE_PAYLOAD_VERSION: u32 = 1;
 const ENV_DIR_NAME: &str = "env";
 const PROFILES_DIR_NAME: &str = "profiles";
 const PROFILE_FILE_EXTENSION: &str = "age";
+const WINDOWS_INVALID_NAME_CHARS: &[char] = &['<', '>', ':', '"', '|', '?', '*'];
 
 /// Validates a logical profile name before it is used as a file name.
 ///
 /// Names are a single path component. Both slash styles are rejected so a
 /// vault created on one platform cannot become unsafe when checked out on
 /// another. Dots are allowed inside a name, while `.` and `..` are rejected as
-/// ambiguous path components.
+/// ambiguous path components. Names are also restricted to the intersection of
+/// Unix and Windows file names, including Windows device-name rules.
 pub fn validate_profile_name(profile_name: &str) -> FrilVaultResult<()> {
     if profile_name.is_empty()
         || profile_name == "."
@@ -66,6 +68,11 @@ pub fn validate_profile_name(profile_name: &str) -> FrilVaultResult<()> {
         || profile_name.contains('\\')
         || profile_name.contains('\0')
         || profile_name.chars().any(char::is_control)
+        || profile_name
+            .chars()
+            .any(|character| WINDOWS_INVALID_NAME_CHARS.contains(&character))
+        || profile_name.ends_with(['.', ' '])
+        || is_windows_reserved_device_name(profile_name)
     {
         return Err(FrilVaultError::InvalidEnvProfileName(
             profile_name.to_string(),
@@ -73,6 +80,19 @@ pub fn validate_profile_name(profile_name: &str) -> FrilVaultResult<()> {
     }
 
     Ok(())
+}
+
+fn is_windows_reserved_device_name(profile_name: &str) -> bool {
+    let device_name = profile_name
+        .split('.')
+        .next()
+        .unwrap_or(profile_name)
+        .to_ascii_uppercase();
+
+    matches!(device_name.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((device_name.starts_with("COM") || device_name.starts_with("LPT"))
+            && device_name.len() == 4
+            && matches!(device_name.as_bytes()[3], b'1'..=b'9'))
 }
 
 /// A validated, version-1 environment profile payload.
@@ -118,6 +138,11 @@ impl EnvProfilePayload {
 struct StoredEnvProfilePayload {
     version: u32,
     values: BTreeMap<String, String>,
+}
+
+#[derive(Deserialize)]
+struct EnvProfilePayloadVersion {
+    version: u32,
 }
 
 /// In-memory age encryption and decryption boundary for profile payloads.
@@ -171,14 +196,17 @@ impl EnvProfileCrypto {
 
         let plaintext =
             String::from_utf8(plaintext).map_err(|_| FrilVaultError::InvalidEnvProfileUtf8)?;
-        let stored: StoredEnvProfilePayload = serde_json::from_str(&plaintext)
+        let version: EnvProfilePayloadVersion = serde_json::from_str(&plaintext)
             .map_err(|_| FrilVaultError::InvalidEnvProfilePayload)?;
 
-        if stored.version != ENV_PROFILE_PAYLOAD_VERSION {
+        if version.version != ENV_PROFILE_PAYLOAD_VERSION {
             return Err(FrilVaultError::UnsupportedEnvProfilePayloadVersion(
-                stored.version,
+                version.version,
             ));
         }
+
+        let stored: StoredEnvProfilePayload = serde_json::from_str(&plaintext)
+            .map_err(|_| FrilVaultError::InvalidEnvProfilePayload)?;
 
         EnvProfilePayload::new(stored.values)
     }
@@ -493,6 +521,14 @@ mod tests {
             "../outside",
             "nested/profile",
             "nested\\profile",
+            "dev:local",
+            "dev?local",
+            "CON",
+            "con.env",
+            "COM1",
+            "LPT9",
+            "trailing.",
+            "trailing ",
         ] {
             assert!(matches!(
                 store.profile_path(name),
@@ -501,6 +537,8 @@ mod tests {
         }
 
         assert!(store.profile_path("development.local").is_ok());
+        assert!(store.profile_path("convention").is_ok());
+        assert!(store.profile_path("COM0").is_ok());
         assert!(!workspace.root().join("outside.age").exists());
     }
 
@@ -598,7 +636,7 @@ mod tests {
 
         let unsupported = encrypt_raw(
             &recipient,
-            br#"{"version":999,"values":{"SECRET":"fixture-api-key"}}"#,
+            br#"{"version":999,"entries":[{"name":"SECRET","value":"fixture-api-key"}]}"#,
         );
         let error = EnvProfileCrypto::decrypt(&unsupported, &[identity]).unwrap_err();
         assert!(matches!(

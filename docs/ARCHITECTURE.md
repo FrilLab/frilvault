@@ -51,12 +51,14 @@ The current repository does not contain a desktop application source tree yet. R
 - `.vault/workspace.json`: workspace-level metadata
 
 `frilvault-core` owns the encrypted profile storage boundary. Profile names are
-validated as single path components, and profile writes create only ciphertext
-in a same-directory temporary file before atomically replacing the target. The
-version-1 payload is JSON with `version` and a key/value `values` map; unknown
-versions are rejected. Recipient and identity material is supplied by callers
-and is never persisted by the core store. Manifest and recipient metadata
-validation is owned by the environment-profile integration work.
+validated as portable single path components, including Windows-invalid
+characters, trailing spaces/dots, and reserved device names. Profile writes
+create only ciphertext in a same-directory temporary file before atomically
+replacing the target. The version-1 payload is JSON with `version` and a
+key/value `values` map; unknown versions are rejected. Recipient and identity
+material is supplied by callers and is never persisted by the core store.
+Manifest and recipient metadata validation is owned by the environment-profile
+integration work.
 
 ### Vault modes
 
