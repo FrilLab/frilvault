@@ -123,6 +123,30 @@ pub enum FrilVaultError {
         source: Box<FrilVaultError>,
         rollback: TagOperationRollback,
     },
+
+    /// Returned when an environment profile name cannot safely map to one file.
+    #[error("invalid environment profile name: {0}")]
+    InvalidEnvProfileName(String),
+
+    /// Returned when an environment profile payload cannot be serialized or parsed.
+    #[error("invalid environment profile payload")]
+    InvalidEnvProfilePayload,
+
+    /// Returned when a persisted environment profile uses a newer payload version.
+    #[error("unsupported environment profile payload version: {0}")]
+    UnsupportedEnvProfilePayloadVersion(u32),
+
+    /// Returned when an environment profile payload is not valid UTF-8.
+    #[error("environment profile payload is not valid UTF-8")]
+    InvalidEnvProfileUtf8,
+
+    /// Returned when age cannot encrypt an environment profile.
+    #[error("environment profile encryption failed")]
+    EnvProfileEncryptionFailed,
+
+    /// Returned when age cannot decrypt or authenticate an environment profile.
+    #[error("environment profile decryption failed")]
+    EnvProfileDecryptionFailed,
 }
 
 pub type FrilVaultResult<T> = Result<T, FrilVaultError>;

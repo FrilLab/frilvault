@@ -9,6 +9,7 @@
 //! 저장소 경계, 워크스페이스 인덱스, 심볼 해석, 애플리케이션 서비스를 소유합니다.
 mod app;
 mod constants;
+mod env;
 mod error;
 mod note;
 mod parser;
@@ -19,6 +20,10 @@ mod workspace;
 
 pub use app::{FrilVault, InitializationResult};
 
+pub use env::{
+    ENV_PROFILE_PAYLOAD_VERSION, EnvProfileCrypto, EnvProfilePayload, EnvProfileStore,
+    validate_profile_name,
+};
 pub use error::{FrilVaultError, FrilVaultResult, TagOperationRollback};
 pub use note::{
     AddNoteRequest, AttachmentRepository, LineAnchor, Note, NoteAnchor, NoteAttachment, NoteQuery,

@@ -34,38 +34,31 @@ The current repository does not contain a desktop application source tree yet. R
 ```text
 <vault-root>/
 ├── notes/
+├── env/
+│   ├── manifest.toml
+│   ├── recipients.toml
+│   └── profiles/
+│       └── <profile>.age
 ├── index/
 └── workspace.json
 ```
 
-- `<vault-root>/notes`: persisted note files
-- `<vault-root>/index`: workspace index data
-- `<vault-root>/workspace.json`: workspace-level metadata
+- `.vault/notes`: persisted note files
+- `.vault/env/manifest.toml`: environment profile schema and display metadata
+- `.vault/env/recipients.toml`: environment profile recipient IDs and public age keys
+- `.vault/env/profiles/<profile>.age`: versioned UTF-8 profile payload encrypted with age
+- `.vault/index`: workspace index data
+- `.vault/workspace.json`: workspace-level metadata
 
-### Workspace and vault roots
-
-`PathResolver` keeps the source workspace root and the vault root as separate
-values. Source files, anchors, repairs, and note URIs are relative to the
-workspace root; note JSON, indexes, attachments, and metadata are relative to
-the vault root. An external vault therefore never changes the source-relative
-path stored in a note.
-
-Vault selection follows one contract for the CLI and editor integrations:
-
-1. An explicit path (`flvt --vault PATH` or `frilvault.vaultPath`) is
-   authoritative. Relative paths are resolved from the workspace root. A
-   missing or invalid explicit path is reported as an error and never falls
-   back to another `.vault`.
-2. Without an explicit path, the resolver checks the current directory and
-   then its ancestors for the nearest existing `.vault`. This gives a nested
-   workspace priority over a project-root vault while preserving the existing
-   project-root `.vault` behavior.
-3. If discovery finds nothing, the workspace-root `.vault` remains the target
-   for a new vault.
-
-The vault location does not select `VaultMode`. Local and Shared are persisted
-independently in the selected vault's `workspace.json`; a legacy metadata file
-without `mode` still defaults to Local.
+`frilvault-core` owns the encrypted profile storage boundary. Profile names are
+validated as portable single path components, including Windows-invalid
+characters, trailing spaces/dots, and reserved device names. Profile writes
+create only ciphertext in a same-directory temporary file before atomically
+replacing the target. The version-1 payload is JSON with `version` and a
+key/value `values` map; unknown versions are rejected. Recipient and identity
+material is supplied by callers and is never persisted by the core store.
+Manifest and recipient metadata validation is owned by the environment-profile
+integration work.
 
 ### Vault modes
 

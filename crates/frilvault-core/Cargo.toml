@@ -10,6 +10,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+age.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
 uuid = { workspace = true, features = ["v4", "serde"] }
