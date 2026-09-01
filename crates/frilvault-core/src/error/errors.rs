@@ -33,6 +33,12 @@ pub enum FrilVaultError {
     #[error("No FrilVault workspace found.\nRun `flvt init` to initialize one.")]
     WorkspaceNotFound,
 
+    #[error("vault path is not a directory: {0}")]
+    InvalidVaultPath(PathBuf),
+
+    #[error("cannot manage Git ignore rules for vault outside a Git repository: {0}")]
+    VaultGitignoreUnavailable(PathBuf),
+
     #[error("Failed to read FrilVault workspace metadata:\n{} is invalid.", path.display())]
     InvalidWorkspaceMetadata {
         path: PathBuf,

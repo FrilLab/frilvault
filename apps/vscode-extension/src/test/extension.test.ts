@@ -20,12 +20,13 @@ import { isTrackedSourceRename } from '../features/workspace/rename';
 import {
   isTrackedSourcePath,
   isTrackedVaultPath,
+  registerWorkspaceWatcher,
 } from '../features/workspace/watcher';
 import { FrilVaultNotesProvider } from '../features/notes-panel/provider';
 import { NotesPanelService } from '../features/notes-panel/service';
 import { NotesPanelItem } from '../features/notes-panel/view';
 import type { NoteView } from '../types';
-import { revealNote } from '../utils/file';
+import { getVaultRoot, revealNote } from '../utils/file';
 
 interface TestWorkspace {
   root: string;
@@ -48,6 +49,9 @@ suite('Extension Test Suite', function () {
     await vscode.workspace
       .getConfiguration('frilvault')
       .update('cliPath', '', vscode.ConfigurationTarget.Global);
+    await vscode.workspace
+      .getConfiguration('frilvault')
+      .update('vaultPath', '', vscode.ConfigurationTarget.Global);
   });
 
   teardown(() => {
@@ -498,6 +502,97 @@ suite('Extension Test Suite', function () {
         vscode.Uri.file(path.join(workspace.root, '.vault/notes/src/sample.ts.json')),
       ),
       false,
+    );
+  });
+
+  test('Workspace watcher rebinds when the configured vault changes', async () => {
+    const workspace = createTestWorkspace();
+    await configureExtension(workspace);
+    const externalVault = path.join(path.dirname(workspace.root), 'external-vault');
+    fs.mkdirSync(externalVault, { recursive: true });
+
+    const watcherRoots: Array<{ root: string; disposed: boolean }> = [];
+    let configurationHandler:
+      | ((event: vscode.ConfigurationChangeEvent) => unknown)
+      | undefined;
+    const watcherFactory = ((pattern: vscode.RelativePattern) => {
+      const record = { root: pattern.base, disposed: false };
+      watcherRoots.push(record);
+
+      return {
+        onDidCreate: () => new vscode.Disposable(() => undefined),
+        onDidChange: () => new vscode.Disposable(() => undefined),
+        onDidDelete: () => new vscode.Disposable(() => undefined),
+        dispose: () => {
+          record.disposed = true;
+        },
+      } as unknown as vscode.FileSystemWatcher;
+    }) as typeof vscode.workspace.createFileSystemWatcher;
+    const configurationListener = ((listener: (event: vscode.ConfigurationChangeEvent) => unknown) => {
+      configurationHandler = listener;
+      return new vscode.Disposable(() => undefined);
+    }) as typeof vscode.workspace.onDidChangeConfiguration;
+    const context = { subscriptions: [] } as unknown as vscode.ExtensionContext;
+
+    registerWorkspaceWatcher(
+      context,
+      {} as CliClient,
+      () => false,
+      async () => undefined,
+      {
+        createFileSystemWatcher: watcherFactory,
+        onDidChangeConfiguration: configurationListener,
+      },
+    );
+
+    assert.deepStrictEqual(
+      watcherRoots.map(({ root }) => root),
+      [path.join(workspace.root, '.vault'), path.join(workspace.root, '.vault'), workspace.root],
+    );
+
+    await vscode.workspace
+      .getConfiguration('frilvault')
+      .update('vaultPath', externalVault, vscode.ConfigurationTarget.Global);
+    configurationHandler?.({
+      affectsConfiguration: (section) => section === 'frilvault.vaultPath',
+    } as vscode.ConfigurationChangeEvent);
+
+    assert.deepStrictEqual(
+      watcherRoots.map(({ root }) => root),
+      [
+        path.join(workspace.root, '.vault'),
+        path.join(workspace.root, '.vault'),
+        workspace.root,
+        externalVault,
+        externalVault,
+        workspace.root,
+      ],
+    );
+    assert.deepStrictEqual(
+      watcherRoots.slice(0, 3).map(({ disposed }) => disposed),
+      [true, true, true],
+    );
+
+    for (const subscription of context.subscriptions) {
+      subscription.dispose();
+    }
+  });
+
+  test('Vault path discovery prefers the nearest existing ancestor vault', async () => {
+    const workspace = createTestWorkspace();
+    const nestedRoot = path.join(workspace.root, 'packages', 'app');
+    const nestedVault = path.join(workspace.root, 'packages', '.vault');
+    fs.mkdirSync(nestedVault, { recursive: true });
+    fs.mkdirSync(nestedRoot, { recursive: true });
+
+    assert.strictEqual(getVaultRoot(nestedRoot), nestedVault);
+
+    await vscode.workspace
+      .getConfiguration('frilvault')
+      .update('vaultPath', '../external-vault', vscode.ConfigurationTarget.Global);
+    assert.strictEqual(
+      getVaultRoot(workspace.root),
+      path.join(path.dirname(workspace.root), 'external-vault'),
     );
   });
 });

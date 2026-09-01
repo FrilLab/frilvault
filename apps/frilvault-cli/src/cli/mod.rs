@@ -2,6 +2,8 @@
 //!
 //! CLI 인자 정의와 command routing입니다.
 
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 
 pub mod add;
@@ -44,6 +46,10 @@ use update::UpdateCommand;
 #[derive(Parser)]
 #[command(name = "flvt", version, about = "Personal note vault for source code")]
 pub struct Cli {
+    /// Use this vault directory instead of automatic `.vault` discovery.
+    #[arg(long, global = true, value_name = "PATH")]
+    pub vault: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: Commands,
 }

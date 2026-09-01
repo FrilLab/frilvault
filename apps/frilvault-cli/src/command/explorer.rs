@@ -1,5 +1,6 @@
 use anyhow::Result;
-use frilvault_core::{ExplorerGroup, ExplorerNode, FrilVault, WorkspaceExplorer};
+use frilvault_core::{ExplorerGroup, ExplorerNode, WorkspaceExplorer};
+use std::path::Path;
 
 use crate::{
     cli::explorer::ExplorerCommand,
@@ -7,7 +8,11 @@ use crate::{
 };
 
 pub fn execute(command: ExplorerCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+    execute_with_vault(command, None)
+}
+
+pub fn execute_with_vault(command: ExplorerCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.workspace()?;
 
     let explorer = service.explorer()?;

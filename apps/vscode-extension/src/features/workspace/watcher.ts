@@ -3,33 +3,39 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 
 import type { CliClient } from '../../core/cliClient';
-import { tryGetWorkspaceRoot } from '../../utils/file';
+import { getVaultRoot, tryGetWorkspaceRoot } from '../../utils/file';
 
 const SYNC_DEBOUNCE_MS = 300;
 
-export function isTrackedVaultPath(workspaceRoot: string, uri: vscode.Uri): boolean {
-  const relative = path.relative(workspaceRoot, uri.fsPath);
+export interface WorkspaceWatcherDependencies {
+  createFileSystemWatcher?: typeof vscode.workspace.createFileSystemWatcher;
+  onDidChangeConfiguration?: typeof vscode.workspace.onDidChangeConfiguration;
+}
 
-  if (relative.startsWith('..')) {
+export function isTrackedVaultPath(workspaceRoot: string, uri: vscode.Uri): boolean {
+  const relative = path.relative(getVaultRoot(workspaceRoot), uri.fsPath);
+
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
     return false;
   }
 
   return (
-    relative === `.vault${path.sep}notes` ||
-    relative.startsWith(`.vault${path.sep}notes${path.sep}`) ||
-    relative === `.vault${path.sep}images` ||
-    relative.startsWith(`.vault${path.sep}images${path.sep}`)
+    relative === `notes` ||
+    relative.startsWith(`notes${path.sep}`) ||
+    relative === `images` ||
+    relative.startsWith(`images${path.sep}`)
   );
 }
 
 export function isTrackedSourcePath(workspaceRoot: string, uri: vscode.Uri): boolean {
   const relative = path.relative(workspaceRoot, uri.fsPath);
 
-  if (relative.startsWith('..')) {
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
     return false;
   }
 
-  if (relative.startsWith(`.vault${path.sep}`)) {
+  const relativeVaultPath = path.relative(getVaultRoot(workspaceRoot), uri.fsPath);
+  if (!relativeVaultPath.startsWith('..') && !path.isAbsolute(relativeVaultPath)) {
     return false;
   }
 
@@ -41,14 +47,16 @@ export function registerWorkspaceWatcher(
   cliClient: CliClient,
   isEnabled: () => boolean,
   invalidateViews: () => Promise<void>,
+  dependencies: WorkspaceWatcherDependencies = {},
 ): void {
-  const workspaceRoot = tryGetWorkspaceRoot();
-
-  if (!workspaceRoot) {
-    return;
-  }
-
   let debounceTimer: NodeJS.Timeout | undefined;
+  let watchers: vscode.FileSystemWatcher[] = [];
+  const createFileSystemWatcher =
+    dependencies.createFileSystemWatcher ??
+    vscode.workspace.createFileSystemWatcher.bind(vscode.workspace);
+  const onDidChangeConfiguration =
+    dependencies.onDidChangeConfiguration ??
+    vscode.workspace.onDidChangeConfiguration.bind(vscode.workspace);
 
   const scheduleSync = () => {
     if (!isEnabled()) {
@@ -78,46 +86,78 @@ export function registerWorkspaceWatcher(
     }, SYNC_DEBOUNCE_MS);
   };
 
-  const notesWatcher = vscode.workspace.createFileSystemWatcher(
-    new vscode.RelativePattern(workspaceRoot, '.vault/notes/**'),
-  );
+  const disposeWatchers = () => {
+    for (const watcher of watchers) {
+      watcher.dispose();
+    }
+    watchers = [];
+  };
 
-  notesWatcher.onDidCreate(scheduleSync);
-  notesWatcher.onDidChange(scheduleSync);
-  notesWatcher.onDidDelete(scheduleSync);
+  const rebindWatchers = () => {
+    disposeWatchers();
 
-  const imagesWatcher = vscode.workspace.createFileSystemWatcher(
-    new vscode.RelativePattern(workspaceRoot, '.vault/images/**'),
-  );
+    const workspaceRoot = tryGetWorkspaceRoot();
+    if (!workspaceRoot) {
+      return;
+    }
 
-  imagesWatcher.onDidCreate(scheduleSync);
-  imagesWatcher.onDidChange(scheduleSync);
-  imagesWatcher.onDidDelete(scheduleSync);
+    const vaultRoot = getVaultRoot(workspaceRoot);
+    const notesWatcher = createFileSystemWatcher(
+      new vscode.RelativePattern(vaultRoot, 'notes/**'),
+    );
 
-  const sourceWatcher = vscode.workspace.createFileSystemWatcher(
-    new vscode.RelativePattern(workspaceRoot, '**/*'),
-    false,
-    true,
-    false,
-  );
+    notesWatcher.onDidCreate(scheduleSync);
+    notesWatcher.onDidChange(scheduleSync);
+    notesWatcher.onDidDelete(scheduleSync);
 
-  sourceWatcher.onDidCreate((uri) => {
-    if (isTrackedSourcePath(workspaceRoot, uri)) {
-      scheduleSync();
+    const imagesWatcher = createFileSystemWatcher(
+      new vscode.RelativePattern(vaultRoot, 'images/**'),
+    );
+
+    imagesWatcher.onDidCreate(scheduleSync);
+    imagesWatcher.onDidChange(scheduleSync);
+    imagesWatcher.onDidDelete(scheduleSync);
+
+    const sourceWatcher = createFileSystemWatcher(
+      new vscode.RelativePattern(workspaceRoot, '**/*'),
+      false,
+      true,
+      false,
+    );
+
+    sourceWatcher.onDidCreate((uri) => {
+      if (isTrackedSourcePath(workspaceRoot, uri)) {
+        scheduleSync();
+      }
+    });
+
+    sourceWatcher.onDidDelete((uri) => {
+      if (isTrackedSourcePath(workspaceRoot, uri)) {
+        scheduleSync();
+      }
+    });
+
+    watchers = [notesWatcher, imagesWatcher, sourceWatcher];
+  };
+
+  rebindWatchers();
+
+  const configurationListener = onDidChangeConfiguration((event) => {
+    if (
+      event.affectsConfiguration('frilvault.vaultPath') ||
+      event.affectsConfiguration('frilvault.workspaceRoot')
+    ) {
+      rebindWatchers();
     }
   });
 
-  sourceWatcher.onDidDelete((uri) => {
-    if (isTrackedSourcePath(workspaceRoot, uri)) {
-      scheduleSync();
-    }
-  });
-
-  context.subscriptions.push(notesWatcher, imagesWatcher, sourceWatcher, {
-    dispose: () => {
+  context.subscriptions.push(
+    configurationListener,
+    new vscode.Disposable(() => {
+      disposeWatchers();
       if (debounceTimer) {
         clearTimeout(debounceTimer);
       }
-    },
-  });
+    }),
+  );
 }

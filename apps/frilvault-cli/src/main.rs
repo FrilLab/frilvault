@@ -20,67 +20,55 @@ fn main() -> Result<()> {
 }
 
 fn run(cli: Cli) -> Result<()> {
-    match cli.command {
-        Commands::Init(cmd) => {
-            command::init::execute(cmd)?;
-        }
+    let Cli { vault, command } = cli;
+    let vault_path = vault.as_deref();
 
-        Commands::Add(cmd) => {
-            command::add::execute(cmd)?;
-        }
+    macro_rules! dispatch {
+        ($module:ident, $command:expr) => {
+            match vault_path {
+                Some(vault_path) => {
+                    command::$module::execute_with_vault($command, Some(vault_path))
+                }
+                None => command::$module::execute($command),
+            }
+        };
+    }
 
-        Commands::Attach(cmd) => {
-            command::attach::execute(cmd)?;
-        }
+    match command {
+        Commands::Init(cmd) => dispatch!(init, cmd)?,
 
-        Commands::List(cmd) => {
-            command::list::execute(cmd)?;
-        }
+        Commands::Add(cmd) => dispatch!(add, cmd)?,
 
-        Commands::Update(cmd) => {
-            command::update::execute(cmd)?;
-        }
+        Commands::Attach(cmd) => dispatch!(attach, cmd)?,
 
-        Commands::Delete(cmd) => {
-            command::delete::execute(cmd)?;
-        }
+        Commands::List(cmd) => dispatch!(list, cmd)?,
 
-        Commands::Search(cmd) => {
-            command::search::execute(cmd)?;
-        }
-        Commands::Doctor(cmd) => {
-            command::doctor::execute(cmd)?;
-        }
+        Commands::Update(cmd) => dispatch!(update, cmd)?,
 
-        Commands::Health(cmd) => {
-            command::doctor::execute(cmd)?;
-        }
+        Commands::Delete(cmd) => dispatch!(delete, cmd)?,
 
-        Commands::Stats(cmd) => command::stats::execute(cmd)?,
+        Commands::Search(cmd) => dispatch!(search, cmd)?,
+        Commands::Doctor(cmd) => dispatch!(doctor, cmd)?,
 
-        Commands::Status(cmd) => command::status::execute(cmd)?,
+        Commands::Health(cmd) => dispatch!(doctor, cmd)?,
 
-        Commands::Index(cmd) => command::index::execute(cmd)?,
+        Commands::Stats(cmd) => dispatch!(stats, cmd)?,
 
-        Commands::Explorer(cmd) => command::explorer::execute(cmd)?,
+        Commands::Status(cmd) => dispatch!(status, cmd)?,
 
-        Commands::Sync(cmd) => command::sync::execute(cmd)?,
+        Commands::Index(cmd) => dispatch!(index, cmd)?,
 
-        Commands::Repair(cmd) => {
-            command::repair::execute(cmd)?;
-        }
+        Commands::Explorer(cmd) => dispatch!(explorer, cmd)?,
 
-        Commands::ResolveUri(cmd) => {
-            command::resolve_uri::execute(cmd)?;
-        }
+        Commands::Sync(cmd) => dispatch!(sync, cmd)?,
 
-        Commands::Gitignore(cmd) => {
-            command::gitignore::execute(cmd)?;
-        }
+        Commands::Repair(cmd) => dispatch!(repair, cmd)?,
 
-        Commands::Tag(cmd) => {
-            command::tag::execute(cmd)?;
-        }
+        Commands::ResolveUri(cmd) => dispatch!(resolve_uri, cmd)?,
+
+        Commands::Gitignore(cmd) => dispatch!(gitignore, cmd)?,
+
+        Commands::Tag(cmd) => dispatch!(tag, cmd)?,
     }
 
     Ok(())

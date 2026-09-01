@@ -1,5 +1,5 @@
 use anyhow::Result;
-use frilvault_core::FrilVault;
+use std::path::Path;
 
 use crate::{
     cli::gitignore::{GitignoreAction, GitignoreCheckCommand, GitignoreCommand},
@@ -12,14 +12,18 @@ struct GitignoreStatus {
 }
 
 pub fn execute(command: GitignoreCommand) -> Result<()> {
+    execute_with_vault(command, None)
+}
+
+pub fn execute_with_vault(command: GitignoreCommand, vault_path: Option<&Path>) -> Result<()> {
     match command.action {
-        GitignoreAction::Check(check) => execute_check(check),
-        GitignoreAction::Add => execute_add(),
+        GitignoreAction::Check(check) => execute_check(check, vault_path),
+        GitignoreAction::Add => execute_add(vault_path),
     }
 }
 
-fn execute_check(command: GitignoreCheckCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+fn execute_check(command: GitignoreCheckCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let service = vault.workspace()?;
     let ignored = service.is_vault_gitignored()?;
 
@@ -28,20 +32,21 @@ fn execute_check(command: GitignoreCheckCommand) -> Result<()> {
         return Ok(());
     }
 
+    let vault_path = vault.vault_path();
     if ignored {
-        println!(".vault/ is ignored by Git.");
+        println!("{}/ is ignored by Git.", vault_path.display());
     } else {
-        println!(".vault/ is not ignored by Git.");
+        println!("{}/ is not ignored by Git.", vault_path.display());
     }
 
     Ok(())
 }
 
-fn execute_add() -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+fn execute_add(vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let service = vault.workspace()?;
     service.append_vault_to_gitignore()?;
-    println!("Added .vault/ to .gitignore.");
+    println!("Added {}/ to .gitignore.", vault.vault_path().display());
 
     Ok(())
 }

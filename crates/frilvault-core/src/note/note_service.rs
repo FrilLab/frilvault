@@ -26,7 +26,7 @@ use crate::{
     note::{Note, normalize_tag, normalize_tags, restore_file},
     runtime::VaultContext,
     symbol::SymbolResolver,
-    workspace::{IndexedFile, PathResolver, WorkspaceIndex, read_source_file_content},
+    workspace::{IndexedFile, WorkspaceIndex, read_source_file_content},
 };
 
 /// Application service responsible for note operations.
@@ -332,11 +332,12 @@ impl NoteService {
     }
 
     fn attachment_repository(&self) -> AttachmentRepository {
-        AttachmentRepository::new(PathResolver::new(
+        AttachmentRepository::new(
             self.vault_context
                 .workspace_index_repository
-                .workspace_root(),
-        ))
+                .path_resolver()
+                .clone(),
+        )
     }
 
     fn all_note_views(&mut self) -> FrilVaultResult<Vec<NoteView>> {

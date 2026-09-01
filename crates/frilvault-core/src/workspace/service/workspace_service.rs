@@ -97,12 +97,16 @@ impl WorkspaceService {
     }
 
     pub fn is_vault_gitignored(&self) -> FrilVaultResult<bool> {
-        crate::workspace::gitignore::is_vault_gitignored(self.index_repository.workspace_root())
+        crate::workspace::gitignore::is_vault_gitignored_at(
+            self.index_repository.workspace_root(),
+            self.index_repository.vault_root(),
+        )
     }
 
     pub fn append_vault_to_gitignore(&self) -> FrilVaultResult<()> {
-        crate::workspace::gitignore::append_vault_to_gitignore(
+        crate::workspace::gitignore::append_vault_to_gitignore_at(
             self.index_repository.workspace_root(),
+            self.index_repository.vault_root(),
         )
     }
 

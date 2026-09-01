@@ -13,6 +13,9 @@ mod note_entity_test;
 mod note_resolver_test;
 
 #[cfg(test)]
+mod path_resolver_test;
+
+#[cfg(test)]
 mod note_service_test;
 
 #[cfg(test)]

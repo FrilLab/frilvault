@@ -24,7 +24,7 @@ The current repository does not contain a desktop application source tree yet. R
 
 ## Core Principles
 
-- FrilVault is local-first. Notes and metadata stay inside the workspace.
+- FrilVault is local-first. Notes and metadata stay inside the selected vault.
 - FrilVault does not modify source files.
 - Business logic should live in `frilvault-core`.
 - Editor and CLI layers should stay thin.
@@ -32,7 +32,7 @@ The current repository does not contain a desktop application source tree yet. R
 ## Storage Model
 
 ```text
-.vault/
+<vault-root>/
 ├── notes/
 ├── env/
 │   ├── manifest.toml
@@ -63,10 +63,10 @@ validation is owned by the environment-profile integration work.
 `frilvault-core` owns the `VaultMode` policy used by workspace initialization:
 
 - `Local` is the default for a new workspace. `flvt init` creates a Local vault
-  and, when the workspace is in a Git repository, adds `.vault/` to the
+  and, when the selected vault is in a Git repository, adds its relative path to the
   repository-local `.git/info/exclude`.
 - `Shared` is opt-in for a new workspace. `flvt init --shared` creates a Shared
-  vault and does not add a local exclude rule, leaving `.vault/` trackable by
+  vault and does not add a local exclude rule, leaving the vault trackable by
   Git.
 
 Neither initialization path modifies the shared `.gitignore` file. Local mode
@@ -75,7 +75,7 @@ project-wide ignore-file change. A pre-existing Git rule or an already tracked
 vault can still affect the resulting Git state.
 
 The selected mode is serialized as the top-level `mode` field in
-`.vault/workspace.json`, using the lowercase values `"local"` and `"shared"`.
+`<vault-root>/workspace.json`, using the lowercase values `"local"` and `"shared"`.
 `WorkspaceMetadata` defaults a missing field to Local so legacy workspace
 metadata remains readable. Re-initializing an existing workspace loads and
 preserves its metadata, including its current mode; initialization does not

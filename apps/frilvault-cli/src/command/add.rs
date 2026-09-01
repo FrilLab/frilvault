@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
-use frilvault_core::{AddNoteRequest, FrilVault, LineAnchor, NoteAnchor, SymbolAnchor, SymbolKind};
+use frilvault_core::{AddNoteRequest, LineAnchor, NoteAnchor, SymbolAnchor, SymbolKind};
+use std::path::Path;
 
 use crate::{
     cli::add::{AddCommand, SymbolKindArg},
@@ -10,7 +11,11 @@ use crate::{
 ///
 /// `frilvault-core` `AddNoteRequest`를 구성해 `flvt add`를 실행합니다.
 pub fn execute(command: AddCommand) -> Result<()> {
-    let vault = FrilVault::open(std::env::current_dir()?)?;
+    execute_with_vault(command, None)
+}
+
+pub fn execute_with_vault(command: AddCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
     let mut service = vault.notes()?;
     let source_file = command.file.clone();
 

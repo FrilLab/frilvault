@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { buildEditorNotesHoverParts } from '../features/presentation/noteHover';
 import { getConfiguredPreviewLength } from '../features/hover/richHover';
 import type { NoteAttachment, NoteView } from '../types';
+import { getVaultRoot } from './file';
 
 export function appendNoteAttachments(
   markdown: vscode.MarkdownString,
@@ -27,8 +28,7 @@ export function attachmentPath(
   attachment: NoteAttachment,
 ): string {
   return path.join(
-    workspaceRoot,
-    '.vault',
+    getVaultRoot(workspaceRoot),
     'images',
     noteId,
     `${attachment.id}.${attachment.extension}`,

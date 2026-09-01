@@ -1,6 +1,6 @@
 use std::{fs, path::Path, process::Command};
 
-use crate::{FrilVault, GitExcludeStatus, VaultMode};
+use crate::{FrilVault, GitExcludeStatus, GitTrackingStatus, VaultMode};
 
 use super::helper::create_test_workspace;
 
@@ -98,6 +98,51 @@ fn local_init_detects_tracked_vault_without_changing_index() {
         !read_exclude(workspace.root())
             .lines()
             .any(|line| line == ".vault/")
+    );
+}
+
+#[test]
+fn local_init_checks_tracked_vault_from_the_git_root() {
+    let workspace = create_test_workspace();
+    let nested_workspace = workspace.root().join("packages/app");
+    fs::create_dir_all(&nested_workspace).unwrap();
+    init_git_repository(workspace.root());
+    fs::create_dir_all(workspace.root().join(".vault")).unwrap();
+    fs::write(workspace.root().join(".vault/tracked.txt"), "tracked").unwrap();
+    git(workspace.root(), &["add", ".vault/tracked.txt"]);
+
+    let result = FrilVault::open(&nested_workspace)
+        .unwrap()
+        .initialize_with_status(VaultMode::Local)
+        .unwrap();
+
+    assert_eq!(result.git_exclude, Some(GitExcludeStatus::VaultTracked));
+    assert!(
+        !read_exclude(workspace.root())
+            .lines()
+            .any(|line| line == ".vault/")
+    );
+}
+
+#[test]
+fn local_init_uses_the_selected_external_vault_repository() {
+    let workspace = create_test_workspace();
+    let vault_repository = create_test_workspace();
+    let vault_root = vault_repository.root().join("vault");
+    init_git_repository(vault_repository.root());
+
+    let vault = FrilVault::open_with_vault_path(workspace.root(), &vault_root).unwrap();
+    let result = vault.initialize_with_status(VaultMode::Local).unwrap();
+
+    assert_eq!(result.git_exclude, Some(GitExcludeStatus::Added));
+    assert!(
+        read_exclude(vault_repository.root())
+            .lines()
+            .any(|line| line == "vault/")
+    );
+    assert_eq!(
+        vault.status().unwrap().git_tracking,
+        GitTrackingStatus::Excluded
     );
 }
 

@@ -44,6 +44,7 @@ export interface OutputChannelLike {
 
 export interface CliClientDependencies {
   getConfiguredCliPath?: () => string;
+  getConfiguredVaultPath?: () => string | undefined;
   extensionPath?: string;
   extensionVersion?: string;
   outputChannel?: OutputChannelLike;
@@ -125,6 +126,7 @@ export class CliClient {
 
     this.dependencies = {
       getConfiguredCliPath: normalized.getConfiguredCliPath,
+      getConfiguredVaultPath: normalized.getConfiguredVaultPath,
       extensionPath: normalized.extensionPath,
       extensionVersion: normalized.extensionVersion,
       outputChannel: normalized.outputChannel,
@@ -433,12 +435,16 @@ export class CliClient {
     }
 
     const resolvedCli = { ...resolution, cliPath: resolution.cliPath };
+    const configuredVaultPath = this.dependencies.getConfiguredVaultPath?.();
+    const commandArgs = configuredVaultPath
+      ? ['--vault', configuredVaultPath, ...args]
+      : args;
 
     await this.ensureCliCompatibility(workspaceRoot, resolvedCli);
-    this.logResolution(resolvedCli, args);
+    this.logResolution(resolvedCli, commandArgs);
 
     try {
-      const result = await this.dependencies.execFile(resolvedCli.cliPath, args, {
+      const result = await this.dependencies.execFile(resolvedCli.cliPath, commandArgs, {
         cwd: workspaceRoot,
       });
 

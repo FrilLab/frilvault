@@ -33,9 +33,16 @@ pub use note::{
 pub use symbol::{ResolvedSymbol, SymbolResolver, symbol_marker};
 pub use uri::{NOTE_URI_SCHEME, NOTE_URI_VERSION, NoteUriResolver, ParsedNoteUri};
 pub use workspace::{
-    ExplorerGroup, ExplorerNode, FileMove, GitExcludeStatus, GitTrackingStatus, RepairSuggestion,
-    SyncResult, TagColor, TagSettings, VaultMode, WorkspaceExplorer, WorkspaceHealth,
-    WorkspaceService, WorkspaceStats, WorkspaceStatus,
+    ExplorerGroup, ExplorerNode, FileMove, GitExcludeStatus, GitTrackingStatus, PathResolver,
+    RepairSuggestion, SyncResult, TagColor, TagSettings, VaultMode, WorkspaceExplorer,
+    WorkspaceHealth, WorkspaceService, WorkspaceStats, WorkspaceStatus,
+    ensure_local_vault_excluded, ensure_local_vault_excluded_at, vault_git_tracking_status,
+    vault_git_tracking_status_at,
+};
+
+pub use workspace::gitignore::{
+    append_vault_to_gitignore, append_vault_to_gitignore_at, is_vault_gitignored,
+    is_vault_gitignored_at,
 };
 
 #[cfg(test)]
