@@ -240,6 +240,42 @@ pre-operation cache state. The returned error always reports whether rollback
 succeeded; a rollback failure requires inspecting the reported paths before
 retrying the operation.
 
+### Environment identity and recipients
+
+Environment encryption uses age identities. The private identity is created or
+reused through the platform credential store (macOS Keychain, Windows
+Credential Manager, or a Linux Secret Service). `identity show` reports only
+the public recipient and where the identity is stored:
+
+```bash
+flvt env identity create
+flvt env identity show
+flvt env recipients list
+flvt env recipients add alice age1...
+flvt env recipients remove alice
+```
+
+Only recipient IDs and public `age1...` keys are written to
+`.vault/env/recipients.toml`. The registry is sorted by ID and updated through
+an atomic replacement. Removing a recipient changes the registry but does not
+revoke plaintext that person may already have viewed; profile rotation is a
+separate follow-up operation.
+
+For headless CI, provide an identity through stdin and explicitly select a
+permission-restricted file outside the workspace as the fallback location. The
+identity is never echoed or printed:
+
+```bash
+printf '%s\n' "$FRILVAULT_AGE_IDENTITY" \
+  | flvt env identity create --stdin --identity-file "$RUNNER_TEMP/frilvault.identity"
+```
+
+The `--identity-file` option is rejected when it points inside the workspace
+or selected vault. It is used only when the platform credential store is
+unavailable; on Unix the file is created with owner-only permissions. On Windows,
+the fallback is rejected when owner-only ACLs cannot be verified, so use the
+platform credential store there. Do not commit the file or put it below `.vault/`.
+
 ### Workspace status
 
 `flvt status` is read-only. It reads the workspace metadata and scans the note

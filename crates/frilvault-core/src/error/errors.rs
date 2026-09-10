@@ -147,6 +147,51 @@ pub enum FrilVaultError {
     /// Returned when age cannot decrypt or authenticate an environment profile.
     #[error("environment profile decryption failed")]
     EnvProfileDecryptionFailed,
+
+    /// Returned when an environment identity cannot be parsed as age material.
+    #[error("invalid environment identity material")]
+    InvalidEnvIdentity,
+
+    /// Returned when importing an environment identity would replace one that
+    /// is already configured.
+    #[error("an environment identity is already configured; refusing to replace it")]
+    EnvIdentityAlreadyConfigured,
+
+    /// Returned when the configured identity storage cannot be accessed.
+    #[error("environment identity storage unavailable: {0}")]
+    EnvIdentityStorage(String),
+
+    /// Returned when a recipient identifier is not stable and portable.
+    #[error("invalid environment recipient id: {0}")]
+    InvalidEnvRecipientId(String),
+
+    /// Returned when a public age recipient cannot be parsed.
+    #[error("invalid environment recipient key")]
+    InvalidEnvRecipient,
+
+    /// Returned when the recipient registry cannot be parsed or serialized.
+    #[error("invalid environment recipient registry")]
+    InvalidEnvRecipientRegistry,
+
+    /// Returned when a recipient identifier is already registered.
+    #[error("environment recipient id already exists: {0}")]
+    DuplicateEnvRecipientId(String),
+
+    /// Returned when a public age recipient is already registered under another id.
+    #[error("environment recipient key already exists")]
+    DuplicateEnvRecipient,
+
+    /// Returned when a requested recipient does not exist.
+    #[error("environment recipient not found: {0}")]
+    EnvRecipientNotFound(String),
+
+    /// Returned when a recipient registry contains an unsupported version.
+    #[error("unsupported environment recipient registry version: {0}")]
+    UnsupportedEnvRecipientRegistryVersion(u32),
+
+    /// Returned when a Shared environment profile has no encryption recipients.
+    #[error("Shared environment profiles require at least one registered recipient")]
+    EmptySharedEnvRecipients,
 }
 
 pub type FrilVaultResult<T> = Result<T, FrilVaultError>;

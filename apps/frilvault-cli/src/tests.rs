@@ -19,6 +19,51 @@ fn parses_init_with_local_mode_by_default() {
 }
 
 #[test]
+fn parses_environment_identity_create_from_stdin() {
+    let cli = Cli::parse_from(["flvt", "env", "identity", "create", "--stdin"]);
+
+    match cli.command {
+        Commands::Env(command) => match command.action {
+            crate::cli::env::EnvAction::Identity(identity) => match identity.action {
+                crate::cli::env::IdentityAction::Create(create) => assert!(create.stdin),
+                _ => panic!("expected identity create command"),
+            },
+            _ => panic!("expected identity command"),
+        },
+        _ => panic!("expected env command"),
+    }
+}
+
+#[test]
+fn parses_environment_recipient_commands() {
+    let cli = Cli::parse_from([
+        "flvt",
+        "env",
+        "recipients",
+        "add",
+        "alice",
+        "age1example",
+        "--format",
+        "json",
+    ]);
+
+    match cli.command {
+        Commands::Env(command) => match command.action {
+            crate::cli::env::EnvAction::Recipients(recipients) => match recipients.action {
+                crate::cli::env::RecipientsAction::Add(add) => {
+                    assert_eq!(add.recipient_id, "alice");
+                    assert_eq!(add.age_recipient, "age1example");
+                    assert!(matches!(add.format, Some(FormatArg::Json)));
+                }
+                _ => panic!("expected recipient add command"),
+            },
+            _ => panic!("expected recipients command"),
+        },
+        _ => panic!("expected env command"),
+    }
+}
+
+#[test]
 fn parses_an_explicit_vault_path() {
     let cli = Cli::parse_from(["flvt", "--vault", "/tmp/external-vault", "status"]);
 
