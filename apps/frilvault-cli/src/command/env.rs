@@ -97,12 +97,10 @@ fn execute_run(command: EnvRunCommand, vault_path: Option<&Path>) -> Result<()> 
     let profile_store = EnvProfileStore::new_at_vault_root(vault.vault_root());
     let profile = profile_store.load_profile(&command.profile, &[identity.age_identity()])?;
     let profile_values = manifest.resolve_profile(profile)?;
-    let child_environment = child_environment(profile_values);
 
     let mut child = Command::new(&command.command[0]);
     child.args(&command.command[1..]);
-    child.env_clear();
-    child.envs(child_environment);
+    configure_child_environment(&mut child, std::env::vars_os(), profile_values);
 
     let status = child.status().map_err(|error| {
         anyhow::anyhow!(
@@ -118,14 +116,14 @@ fn execute_run(command: EnvRunCommand, vault_path: Option<&Path>) -> Result<()> 
     }
 }
 
-fn child_environment(profile_values: BTreeMap<String, String>) -> BTreeMap<OsString, OsString> {
-    let mut environment = std::env::vars_os().collect::<BTreeMap<_, _>>();
-
-    for (key, value) in profile_values {
-        environment.insert(OsString::from(key), OsString::from(value));
-    }
-
-    environment
+fn configure_child_environment(
+    child: &mut Command,
+    inherited: impl IntoIterator<Item = (OsString, OsString)>,
+    profile_values: BTreeMap<String, String>,
+) {
+    child.env_clear();
+    child.envs(inherited);
+    child.envs(profile_values);
 }
 
 #[derive(Debug, Serialize)]
@@ -691,5 +689,25 @@ mod tests {
         let error = resolve_identity_file(Some(identity_path), &vault).unwrap_err();
 
         assert!(error.to_string().contains("outside the workspace"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn child_environment_overlay_respects_case_insensitive_names() {
+        let mut child = Command::new(std::env::var_os("ComSpec").unwrap());
+        configure_child_environment(
+            &mut child,
+            std::iter::once((
+                OsString::from("FrilVault_Case_Test"),
+                OsString::from("parent"),
+            )),
+            BTreeMap::from([(String::from("FRILVAULT_CASE_TEST"), String::from("profile"))]),
+        );
+        child.args(["/C", "echo", "%FRILVAULT_CASE_TEST%"]);
+
+        let output = child.output().unwrap();
+
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "profile");
     }
 }
