@@ -15,8 +15,15 @@ use anyhow::Result;
 use clap::Parser;
 use cli::{Cli, Commands};
 
-fn main() -> Result<()> {
-    run(Cli::parse())
+fn main() {
+    if let Err(error) = run(Cli::parse()) {
+        if let Some(child_exit) = error.downcast_ref::<command::env::ChildProcessExit>() {
+            std::process::exit(child_exit.exit_code());
+        }
+
+        eprintln!("{error:#}");
+        std::process::exit(1);
+    }
 }
 
 fn run(cli: Cli) -> Result<()> {

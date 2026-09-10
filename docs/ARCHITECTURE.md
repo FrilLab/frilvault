@@ -57,8 +57,10 @@ create only ciphertext in a same-directory temporary file before atomically
 replacing the target. The version-1 payload is JSON with `version` and a
 key/value `values` map; unknown versions are rejected. Private identity
 material is supplied by callers and is never persisted by the core profile
-store. Manifest validation remains owned by the environment-profile
-integration work.
+store. The core also validates the versioned manifest, portable environment
+variable names, non-secret defaults, required profile values, and undeclared
+profile keys before a caller can build a child environment. The CLI owns
+identity-store selection and the direct child-process boundary.
 
 The core also owns the age identity and recipient domain boundary. Identity
 storage is injected through `EnvIdentityStore`; the CLI prefers the platform

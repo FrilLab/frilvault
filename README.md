@@ -276,6 +276,34 @@ unavailable; on Unix the file is created with owner-only permissions. On Windows
 the fallback is rejected when owner-only ACLs cannot be verified, so use the
 platform credential store there. Do not commit the file or put it below `.vault/`.
 
+### Runtime environment injection
+
+After an environment manifest and encrypted profile have been configured, run a
+child process with the selected profile in memory:
+
+```bash
+flvt env run --profile development -- npm run dev
+flvt env run --profile test -- cargo test
+```
+
+The `--profile` option and the `--` separator are required. The child
+executable is launched directly; FrilVault does not evaluate a shell string.
+The current process environment is inherited, profile values take precedence
+on key collisions, and the parent process environment is not modified. Use
+`--identity-file` when the platform credential store is unavailable:
+
+```bash
+flvt env run --profile development \
+  --identity-file "$RUNNER_TEMP/frilvault.identity" -- npm run dev
+```
+
+Profile values are decrypted only in memory and are never written to a
+plaintext `.env` file, printed, or added to child command arguments. Validation
+of the manifest, selected profile, identity, and required variables completes
+before the child is spawned. Child stdout, stderr, and a non-zero exit status
+are preserved. Secret values remain in memory for the lifetime required by the
+process API and are released after the child exits.
+
 ### Workspace status
 
 `flvt status` is read-only. It reads the workspace metadata and scans the note

@@ -10,11 +10,10 @@
 //!     └── <profile>.age
 //! ```
 //!
-//! This module owns the profile payload and ciphertext boundary. `manifest.toml`
-//! and `recipients.toml` are metadata managed by the environment-profile
-//! integration work; this module deliberately does not persist recipient or
-//! identity material. Callers provide public recipients for encryption and
-//! identities for decryption.
+//! This module owns the manifest/profile validation and ciphertext boundaries.
+//! `recipients.toml` and private identity storage remain separate concerns.
+//! Callers provide public recipients for encryption and identities for
+//! decryption.
 //!
 //! The decrypted payload is UTF-8 JSON with this versioned shape:
 //!
@@ -50,12 +49,138 @@ use crate::{FrilVaultError, FrilVaultResult, constants::VAULT_DIR_NAME, workspac
 /// Current version of the JSON payload encrypted into a profile file.
 pub const ENV_PROFILE_PAYLOAD_VERSION: u32 = 1;
 pub const ENV_RECIPIENT_REGISTRY_VERSION: u32 = 1;
+pub const ENV_MANIFEST_VERSION: u32 = 1;
 
 const ENV_DIR_NAME: &str = "env";
 const PROFILES_DIR_NAME: &str = "profiles";
 const PROFILE_FILE_EXTENSION: &str = "age";
+const MANIFEST_FILE_NAME: &str = "manifest.toml";
 const RECIPIENTS_FILE_NAME: &str = "recipients.toml";
 const WINDOWS_INVALID_NAME_CHARS: &[char] = &['<', '>', ':', '"', '|', '?', '*'];
+
+/// A manifest declaration for one child-process environment variable.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EnvVariableSpec {
+    pub required: bool,
+    pub secret: bool,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub default: Option<String>,
+}
+
+/// The validated environment manifest stored in `env/manifest.toml`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EnvManifest {
+    variables: BTreeMap<String, EnvVariableSpec>,
+}
+
+impl EnvManifest {
+    /// Creates a manifest after validating variable names and default policy.
+    pub fn new(variables: BTreeMap<String, EnvVariableSpec>) -> FrilVaultResult<Self> {
+        for (name, spec) in &variables {
+            validate_env_variable_name(name)?;
+
+            if spec.required && spec.default.is_some()
+                || spec.secret && spec.default.is_some()
+                || spec
+                    .description
+                    .as_deref()
+                    .is_some_and(|description| description.contains('\0'))
+                || spec
+                    .default
+                    .as_deref()
+                    .is_some_and(|value| value.contains('\0'))
+            {
+                return Err(FrilVaultError::InvalidEnvManifestDefinition);
+            }
+        }
+
+        Ok(Self { variables })
+    }
+
+    /// Returns manifest variables in deterministic name order.
+    pub fn variables(&self) -> &BTreeMap<String, EnvVariableSpec> {
+        &self.variables
+    }
+
+    /// Validates a decrypted profile and resolves non-secret manifest defaults.
+    ///
+    /// Required values must be present in the selected profile itself. The
+    /// caller may then overlay the returned values on the inherited process
+    /// environment before adding the child process profile values. Consuming
+    /// the payload avoids retaining a second copy of its secret values.
+    pub fn resolve_profile(
+        &self,
+        profile: EnvProfilePayload,
+    ) -> FrilVaultResult<BTreeMap<String, String>> {
+        let profile_values = profile.into_values();
+
+        for name in profile_values.keys() {
+            if !self.variables.contains_key(name) {
+                return Err(FrilVaultError::UnknownEnvProfileVariable(name.clone()));
+            }
+        }
+
+        for (name, spec) in &self.variables {
+            if spec.required && !profile_values.contains_key(name) {
+                return Err(FrilVaultError::MissingRequiredEnvVariable(name.clone()));
+            }
+        }
+
+        let mut values = self
+            .variables
+            .iter()
+            .filter_map(|(name, spec)| spec.default.clone().map(|value| (name.clone(), value)))
+            .collect::<BTreeMap<_, _>>();
+        values.extend(profile_values);
+        Ok(values)
+    }
+}
+
+/// Reads and validates the selected vault's environment manifest.
+#[derive(Clone, Debug)]
+pub struct EnvManifestStore {
+    path: PathBuf,
+}
+
+impl EnvManifestStore {
+    pub fn new(vault_root: impl Into<PathBuf>) -> Self {
+        Self {
+            path: vault_root
+                .into()
+                .join(ENV_DIR_NAME)
+                .join(MANIFEST_FILE_NAME),
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn load(&self) -> FrilVaultResult<EnvManifest> {
+        let contents = fs::read_to_string(&self.path)?;
+        let stored: StoredEnvManifest = toml::from_str(&contents)
+            .map_err(|_| FrilVaultError::InvalidEnvManifest(self.path.clone()))?;
+
+        if stored.version != ENV_MANIFEST_VERSION {
+            return Err(FrilVaultError::UnsupportedEnvManifestVersion(
+                stored.version,
+            ));
+        }
+
+        EnvManifest::new(stored.variables)
+            .map_err(|_| FrilVaultError::InvalidEnvManifest(self.path.clone()))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredEnvManifest {
+    version: u32,
+    variables: BTreeMap<String, EnvVariableSpec>,
+}
 
 /// A generated or loaded age identity.
 ///
@@ -529,11 +654,13 @@ pub struct EnvProfileStore {
 impl EnvProfileStore {
     /// Creates a store for a workspace root.
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
+        Self::new_at_vault_root(workspace_root.into().join(VAULT_DIR_NAME))
+    }
+
+    /// Creates a store for an already-selected vault root.
+    pub fn new_at_vault_root(vault_root: impl Into<PathBuf>) -> Self {
         Self {
-            env_root: workspace_root
-                .into()
-                .join(VAULT_DIR_NAME)
-                .join(ENV_DIR_NAME),
+            env_root: vault_root.into().join(ENV_DIR_NAME),
             #[cfg(test)]
             fail_replacement: Arc::new(AtomicBool::new(false)),
         }
@@ -630,11 +757,23 @@ impl EnvProfileStore {
 }
 
 fn validate_values(values: &BTreeMap<String, String>) -> FrilVaultResult<()> {
-    if values
-        .iter()
-        .any(|(key, value)| key.contains('\0') || value.contains('\0'))
-    {
-        return Err(FrilVaultError::InvalidEnvProfilePayload);
+    for (key, value) in values {
+        validate_env_variable_name(key)?;
+        if value.contains('\0') {
+            return Err(FrilVaultError::InvalidEnvProfilePayload);
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_env_variable_name(name: &str) -> FrilVaultResult<()> {
+    let mut bytes = name.bytes();
+    let valid = matches!(bytes.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
+
+    if !valid {
+        return Err(FrilVaultError::InvalidEnvVariableName(name.to_string()));
     }
 
     Ok(())
@@ -1035,6 +1174,94 @@ mod tests {
         assert!(validate_profile_name("").is_err());
         assert!(validate_profile_name("bad\0name").is_err());
         assert!(validate_profile_name("bad\nname").is_err());
+    }
+
+    #[test]
+    fn manifest_resolves_defaults_and_profile_values_without_revealing_them_in_errors() {
+        let manifest = EnvManifest::new(BTreeMap::from([
+            (
+                "REQUIRED_VALUE".to_string(),
+                EnvVariableSpec {
+                    required: true,
+                    secret: true,
+                    description: None,
+                    default: None,
+                },
+            ),
+            (
+                "LOG_LEVEL".to_string(),
+                EnvVariableSpec {
+                    required: false,
+                    secret: false,
+                    description: None,
+                    default: Some("info".to_string()),
+                },
+            ),
+        ]))
+        .unwrap();
+        let payload = EnvProfilePayload::new(BTreeMap::from([(
+            "REQUIRED_VALUE".to_string(),
+            "fixture-secret".to_string(),
+        )]))
+        .unwrap();
+
+        let resolved = manifest.resolve_profile(payload).unwrap();
+
+        assert_eq!(
+            resolved.get("REQUIRED_VALUE"),
+            Some(&"fixture-secret".to_string())
+        );
+        assert_eq!(resolved.get("LOG_LEVEL"), Some(&"info".to_string()));
+    }
+
+    #[test]
+    fn manifest_rejects_missing_required_and_undeclared_profile_values() {
+        let manifest = EnvManifest::new(BTreeMap::from([(
+            "REQUIRED_VALUE".to_string(),
+            EnvVariableSpec {
+                required: true,
+                secret: true,
+                description: None,
+                default: None,
+            },
+        )]))
+        .unwrap();
+
+        let missing = EnvProfilePayload::new(BTreeMap::new()).unwrap();
+        assert!(matches!(
+            manifest.resolve_profile(missing),
+            Err(FrilVaultError::MissingRequiredEnvVariable(name)) if name == "REQUIRED_VALUE"
+        ));
+
+        let undeclared = EnvProfilePayload::new(BTreeMap::from([(
+            "UNDECLARED".to_string(),
+            "fixture-value".to_string(),
+        )]))
+        .unwrap();
+        let error = manifest.resolve_profile(undeclared).unwrap_err();
+        assert!(matches!(
+            &error,
+            FrilVaultError::UnknownEnvProfileVariable(name) if name == "UNDECLARED"
+        ));
+        assert!(!error.to_string().contains("fixture-value"));
+    }
+
+    #[test]
+    fn manifest_store_rejects_invalid_toml_without_echoing_contents() {
+        let workspace = create_test_workspace();
+        let vault_root = workspace.root().join(VAULT_DIR_NAME);
+        let manifest_path = vault_root.join(ENV_DIR_NAME).join(MANIFEST_FILE_NAME);
+        fs::create_dir_all(manifest_path.parent().unwrap()).unwrap();
+        fs::write(
+            &manifest_path,
+            "version = 1\n[variables.BAD]\nrequired = true\nsecret = true\nvalue = \"fixture-secret\"\n",
+        )
+        .unwrap();
+
+        let error = EnvManifestStore::new(&vault_root).load().unwrap_err();
+
+        assert!(matches!(error, FrilVaultError::InvalidEnvManifest(_)));
+        assert!(!error.to_string().contains("fixture-secret"));
     }
 
     #[derive(Default)]

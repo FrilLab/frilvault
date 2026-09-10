@@ -64,6 +64,62 @@ fn parses_environment_recipient_commands() {
 }
 
 #[test]
+fn parses_environment_run_with_a_required_command_separator() {
+    let cli = Cli::parse_from([
+        "flvt",
+        "env",
+        "run",
+        "--profile",
+        "development",
+        "--identity-file",
+        "/tmp/frilvault.identity",
+        "--",
+        "npm",
+        "run",
+        "dev",
+    ]);
+
+    match cli.command {
+        Commands::Env(command) => match command.action {
+            crate::cli::env::EnvAction::Run(run) => {
+                assert_eq!(run.profile, "development");
+                assert_eq!(
+                    run.identity_file.as_deref(),
+                    Some(std::path::Path::new("/tmp/frilvault.identity",))
+                );
+                assert_eq!(
+                    run.command,
+                    vec![
+                        std::ffi::OsString::from("npm"),
+                        std::ffi::OsString::from("run"),
+                        std::ffi::OsString::from("dev"),
+                    ]
+                );
+            }
+            _ => panic!("expected environment run command"),
+        },
+        _ => panic!("expected env command"),
+    }
+}
+
+#[test]
+fn rejects_environment_run_without_the_command_separator() {
+    let error = Cli::try_parse_from([
+        "flvt",
+        "env",
+        "run",
+        "--profile",
+        "development",
+        "echo",
+        "value",
+    ])
+    .err()
+    .expect("expected the command separator to be required");
+
+    assert!(error.to_string().contains("COMMAND"));
+}
+
+#[test]
 fn parses_an_explicit_vault_path() {
     let cli = Cli::parse_from(["flvt", "--vault", "/tmp/external-vault", "status"]);
 
