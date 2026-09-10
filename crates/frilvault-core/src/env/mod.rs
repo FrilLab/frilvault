@@ -151,6 +151,23 @@ where
         self.store.save_identity(&identity)?;
         Ok((identity, true))
     }
+
+    /// Imports an identity without replacing an existing decryption key.
+    ///
+    /// An identical public recipient is treated as a no-op and returns the
+    /// stored identity. A different identity is rejected so an import cannot
+    /// make already-encrypted profiles undecryptable.
+    pub fn import_or_reuse(&self, candidate: EnvIdentity) -> FrilVaultResult<(EnvIdentity, bool)> {
+        if let Some(existing) = self.store.load_identity()? {
+            if existing.public_recipient() == candidate.public_recipient() {
+                return Ok((existing, false));
+            }
+            return Err(FrilVaultError::EnvIdentityAlreadyConfigured);
+        }
+
+        self.store.save_identity(&candidate)?;
+        Ok((candidate, true))
+    }
 }
 
 /// A public age recipient registered under a stable collaborator id.
@@ -1052,6 +1069,41 @@ mod tests {
         );
         assert!(format!("{created:?}").contains("<redacted>"));
         assert!(!format!("{created:?}").contains("AGE-SECRET-KEY-"));
+    }
+
+    #[test]
+    fn identity_manager_does_not_replace_a_different_imported_identity() {
+        let existing = EnvIdentity::generate();
+        let candidate = EnvIdentity::generate();
+        let store = FakeIdentityStore {
+            identity: RefCell::new(Some(existing.clone())),
+        };
+        let manager = EnvIdentityManager::new(store);
+
+        let error = manager.import_or_reuse(candidate).unwrap_err();
+
+        assert!(matches!(
+            error,
+            FrilVaultError::EnvIdentityAlreadyConfigured
+        ));
+        assert_eq!(
+            manager.load().unwrap().unwrap().public_recipient(),
+            existing.public_recipient()
+        );
+    }
+
+    #[test]
+    fn identity_manager_reuses_an_identical_imported_identity() {
+        let existing = EnvIdentity::generate();
+        let candidate = EnvIdentity::from_encoded(&existing.with_encoded(str::to_owned)).unwrap();
+        let manager = EnvIdentityManager::new(FakeIdentityStore {
+            identity: RefCell::new(Some(existing.clone())),
+        });
+
+        let (reused, created) = manager.import_or_reuse(candidate).unwrap();
+
+        assert!(!created);
+        assert_eq!(reused.public_recipient(), existing.public_recipient());
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use std::{
     cell::Cell,
+    ffi::OsString,
     fs::{self, OpenOptions},
     io::{self, Read, Write},
     path::{Component, Path, PathBuf},
@@ -69,9 +70,7 @@ fn execute_identity_create(
     let store = PreferredIdentityStore::new(identity_file);
 
     let (identity, created) = if command.stdin {
-        let identity = read_identity_from_stdin()?;
-        store.save_identity(&identity)?;
-        (identity, true)
+        EnvIdentityManager::new(&store).import_or_reuse(read_identity_from_stdin()?)?
     } else {
         EnvIdentityManager::new(&store).create_or_reuse()?
     };
@@ -331,6 +330,12 @@ impl FileIdentityStore {
         Self { path }
     }
 
+    #[cfg(windows)]
+    fn check_permissions(&self) -> FrilVaultResult<()> {
+        Err(file_fallback_unavailable())
+    }
+
+    #[cfg(not(windows))]
     fn check_permissions(&self) -> FrilVaultResult<()> {
         let metadata = fs::metadata(&self.path)?;
         if !metadata.is_file() {
@@ -368,6 +373,8 @@ impl EnvIdentityStore for FileIdentityStore {
     fn save_identity(&self, identity: &EnvIdentity) -> FrilVaultResult<()> {
         if self.path.exists() {
             self.check_permissions()?;
+        } else {
+            ensure_file_fallback_available()?;
         }
         let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent)?;
@@ -402,20 +409,40 @@ impl EnvIdentityStore for FileIdentityStore {
 }
 
 fn identity_storage_unavailable() -> FrilVaultError {
+    #[cfg(windows)]
+    let message = "platform credential store is unavailable; Windows file fallback is disabled because owner-only ACL cannot be verified";
+    #[cfg(not(windows))]
+    let message = "platform credential store is unavailable; provide --identity-file for an explicit fallback";
+
+    FrilVaultError::EnvIdentityStorage(message.to_string())
+}
+
+#[cfg(windows)]
+fn file_fallback_unavailable() -> FrilVaultError {
     FrilVaultError::EnvIdentityStorage(
-        "platform credential store is unavailable; provide --identity-file for an explicit fallback"
-            .to_string(),
+        "Windows identity file fallback is disabled because owner-only ACL cannot be verified; use the platform credential store".to_string(),
     )
 }
 
-fn configure_private_file(options: &mut OpenOptions) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-
-        options.mode(0o600);
-    }
+#[cfg(windows)]
+fn ensure_file_fallback_available() -> FrilVaultResult<()> {
+    Err(file_fallback_unavailable())
 }
+
+#[cfg(not(windows))]
+fn ensure_file_fallback_available() -> FrilVaultResult<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn configure_private_file(options: &mut OpenOptions) {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    options.mode(0o600);
+}
+
+#[cfg(not(unix))]
+fn configure_private_file(_options: &mut OpenOptions) {}
 
 fn resolve_identity_file(
     path: Option<PathBuf>,
@@ -427,22 +454,36 @@ fn resolve_identity_file(
     let workspace_root = normalize_path(vault.workspace_root(), &std::env::current_dir()?);
     let vault_root = normalize_path(vault.vault_root(), &std::env::current_dir()?);
     let identity_path = normalize_path(&path, &std::env::current_dir()?);
-    let workspace_root = fs::canonicalize(&workspace_root).unwrap_or(workspace_root);
-    let vault_root = fs::canonicalize(&vault_root).unwrap_or(vault_root);
-    let identity_path_for_check = if identity_path.exists() {
-        fs::canonicalize(&identity_path).unwrap_or_else(|_| identity_path.clone())
-    } else {
-        let parent = identity_path.parent().unwrap_or_else(|| Path::new("."));
-        fs::canonicalize(parent)
-            .map(|parent| parent.join(identity_path.file_name().unwrap_or_default()))
-            .unwrap_or_else(|_| identity_path.clone())
-    };
+    let workspace_root = canonicalize_with_nearest_existing_ancestor(&workspace_root);
+    let vault_root = canonicalize_with_nearest_existing_ancestor(&vault_root);
+    let identity_path_for_check = canonicalize_with_nearest_existing_ancestor(&identity_path);
     if is_within(&identity_path_for_check, &workspace_root)
         || is_within(&identity_path_for_check, &vault_root)
     {
         bail!("--identity-file must be outside the workspace and selected vault");
     }
     Ok(Some(identity_path))
+}
+
+fn canonicalize_with_nearest_existing_ancestor(path: &Path) -> PathBuf {
+    let mut current = path.to_path_buf();
+    let mut unresolved = Vec::<OsString>::new();
+
+    while !current.exists() {
+        let Some(name) = current.file_name() else {
+            return path.to_path_buf();
+        };
+        unresolved.push(name.to_os_string());
+        if !current.pop() {
+            return path.to_path_buf();
+        }
+    }
+
+    let mut canonical = fs::canonicalize(&current).unwrap_or(current);
+    for component in unresolved.iter().rev() {
+        canonical.push(component);
+    }
+    canonical
 }
 
 fn normalize_path(path: &Path, base: &Path) -> PathBuf {
@@ -475,5 +516,94 @@ impl EnvIdentityStore for &PreferredIdentityStore {
 
     fn save_identity(&self, identity: &EnvIdentity) -> FrilVaultResult<()> {
         (*self).save_identity(identity)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
+
+    use frilvault_core::{EnvIdentity, FrilVault};
+
+    use super::*;
+
+    struct TestDirectory {
+        root: PathBuf,
+    }
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let root = std::env::temp_dir()
+                .join(format!("frilvault-cli-env-test-{}", uuid::Uuid::new_v4()));
+            fs::create_dir_all(&root).unwrap();
+            Self { root }
+        }
+
+        fn path(&self) -> &Path {
+            &self.root
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn file_identity_store_round_trips_with_owner_only_permissions() {
+        let directory = TestDirectory::new();
+        let path = directory.path().join("identity");
+        let identity = EnvIdentity::generate();
+        let store = FileIdentityStore::new(path.clone());
+
+        store.save_identity(&identity).unwrap();
+
+        let loaded = store.load_identity().unwrap().unwrap();
+        assert_eq!(loaded.public_recipient(), identity.public_recipient());
+        assert!(format!("{loaded:?}").contains("<redacted>"));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn file_identity_store_rejects_unverifiable_permissions() {
+        let directory = TestDirectory::new();
+        let store = FileIdentityStore::new(directory.path().join("identity"));
+
+        let error = store.save_identity(&EnvIdentity::generate()).unwrap_err();
+
+        assert!(error.to_string().contains("owner-only ACL"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn identity_file_path_resolves_symlinked_nearest_existing_ancestor() {
+        use std::os::unix::fs::symlink;
+
+        let directory = TestDirectory::new();
+        let workspace_root = directory.path().join("workspace");
+        fs::create_dir_all(&workspace_root).unwrap();
+        let symlink_path = directory.path().join("workspace-link");
+        symlink(&workspace_root, &symlink_path).unwrap();
+        let identity_path = symlink_path.join("new").join("identity");
+        let vault = FrilVault::open(&workspace_root).unwrap();
+
+        let error = resolve_identity_file(Some(identity_path), &vault).unwrap_err();
+
+        assert!(error.to_string().contains("outside the workspace"));
     }
 }

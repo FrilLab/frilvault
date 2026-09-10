@@ -152,6 +152,11 @@ pub enum FrilVaultError {
     #[error("invalid environment identity material")]
     InvalidEnvIdentity,
 
+    /// Returned when importing an environment identity would replace one that
+    /// is already configured.
+    #[error("an environment identity is already configured; refusing to replace it")]
+    EnvIdentityAlreadyConfigured,
+
     /// Returned when the configured identity storage cannot be accessed.
     #[error("environment identity storage unavailable: {0}")]
     EnvIdentityStorage(String),

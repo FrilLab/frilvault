@@ -62,11 +62,13 @@ integration work.
 
 The core also owns the age identity and recipient domain boundary. Identity
 storage is injected through `EnvIdentityStore`; the CLI prefers the platform
-credential store and supplies an explicit, owner-only file adapter only when
-that store is unavailable. Private identities never cross into the selected
-vault. `recipients.toml` contains only a version and deterministic, ID-sorted
-public recipient records. Shared-mode profile writes reject an empty recipient
-set before any ciphertext replacement.
+credential store and supplies an explicit file adapter only when that store is
+unavailable and its permissions can be enforced. Unix fallback files are
+owner-only; Windows fallback is rejected when an owner-only ACL cannot be
+verified. Private identities never cross into the selected vault.
+`recipients.toml` contains only a version and deterministic, ID-sorted public
+recipient records. Shared-mode profile writes reject an empty recipient set
+before any ciphertext replacement.
 
 ### Vault modes
 

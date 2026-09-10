@@ -272,8 +272,9 @@ printf '%s\n' "$FRILVAULT_AGE_IDENTITY" \
 
 The `--identity-file` option is rejected when it points inside the workspace
 or selected vault. It is used only when the platform credential store is
-unavailable; the file is created with owner-only permissions. Do not commit the
-file or put it below `.vault/`.
+unavailable; on Unix the file is created with owner-only permissions. On Windows,
+the fallback is rejected when owner-only ACLs cannot be verified, so use the
+platform credential store there. Do not commit the file or put it below `.vault/`.
 
 ### Workspace status
 
