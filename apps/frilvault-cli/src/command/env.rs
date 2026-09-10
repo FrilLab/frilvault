@@ -1,22 +1,25 @@
 use std::{
     cell::Cell,
+    collections::BTreeMap,
     ffi::OsString,
     fs::{self, OpenOptions},
     io::{self, Read, Write},
     path::{Component, Path, PathBuf},
+    process::{Command, ExitStatus},
 };
 
 use anyhow::{Result, bail};
 use frilvault_core::{
-    EnvIdentity, EnvIdentityManager, EnvIdentityStore, EnvRecipient, EnvRecipientStore,
-    FrilVaultError, FrilVaultResult,
+    EnvIdentity, EnvIdentityManager, EnvIdentityStore, EnvManifestStore, EnvProfileStore,
+    EnvRecipient, EnvRecipientStore, FrilVaultError, FrilVaultResult,
 };
 use serde::Serialize;
 
 use crate::{
     cli::env::{
-        EnvAction, EnvCommand, IdentityAction, IdentityCreateCommand, IdentityShowCommand,
-        RecipientsAction, RecipientsAddCommand, RecipientsListCommand, RecipientsRemoveCommand,
+        EnvAction, EnvCommand, EnvRunCommand, IdentityAction, IdentityCreateCommand,
+        IdentityShowCommand, RecipientsAction, RecipientsAddCommand, RecipientsListCommand,
+        RecipientsRemoveCommand,
     },
     output::{OutputFormat, print_json, resolve_format},
 };
@@ -39,7 +42,90 @@ pub fn execute_with_vault(command: EnvCommand, vault_path: Option<&Path>) -> Res
             RecipientsAction::Add(add) => execute_recipients_add(add, vault_path),
             RecipientsAction::Remove(remove) => execute_recipients_remove(remove, vault_path),
         },
+        EnvAction::Run(run) => execute_run(run, vault_path),
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct ChildProcessExit(ExitStatus);
+
+impl ChildProcessExit {
+    pub(crate) fn exit_code(&self) -> i32 {
+        self.0.code().unwrap_or_else(|| {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::ExitStatusExt;
+
+                self.0.signal().map_or(1, |signal| 128 + signal)
+            }
+
+            #[cfg(not(unix))]
+            {
+                1
+            }
+        })
+    }
+}
+
+impl std::fmt::Display for ChildProcessExit {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "child process exited with status {}",
+            self.exit_code()
+        )
+    }
+}
+
+impl std::error::Error for ChildProcessExit {}
+
+fn execute_run(command: EnvRunCommand, vault_path: Option<&Path>) -> Result<()> {
+    if command.command.is_empty() {
+        anyhow::bail!("a child command is required after `--`");
+    }
+
+    let vault = super::open_vault(vault_path)?;
+    let identity_file = resolve_identity_file(command.identity_file, &vault)?;
+    let identity_store = PreferredIdentityStore::new(identity_file);
+    let identity = EnvIdentityManager::new(&identity_store)
+        .load()?
+        .ok_or_else(|| {
+            anyhow::anyhow!("no environment identity is configured; run `flvt env identity create`")
+        })?;
+
+    let manifest = EnvManifestStore::new(vault.vault_root()).load()?;
+    let profile_store = EnvProfileStore::new_at_vault_root(vault.vault_root());
+    let profile = profile_store.load_profile(&command.profile, &[identity.age_identity()])?;
+    let profile_values = manifest.resolve_profile(profile)?;
+    let child_environment = child_environment(profile_values);
+
+    let mut child = Command::new(&command.command[0]);
+    child.args(&command.command[1..]);
+    child.env_clear();
+    child.envs(child_environment);
+
+    let status = child.status().map_err(|error| {
+        anyhow::anyhow!(
+            "failed to spawn child process '{}': {error}",
+            command.command[0].to_string_lossy()
+        )
+    })?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow::Error::new(ChildProcessExit(status)))
+    }
+}
+
+fn child_environment(profile_values: BTreeMap<String, String>) -> BTreeMap<OsString, OsString> {
+    let mut environment = std::env::vars_os().collect::<BTreeMap<_, _>>();
+
+    for (key, value) in profile_values {
+        environment.insert(OsString::from(key), OsString::from(value));
+    }
+
+    environment
 }
 
 #[derive(Debug, Serialize)]

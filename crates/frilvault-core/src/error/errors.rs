@@ -128,6 +128,31 @@ pub enum FrilVaultError {
     #[error("invalid environment profile name: {0}")]
     InvalidEnvProfileName(String),
 
+    /// Returned when an environment variable name is not portable and safe to
+    /// pass to a child process.
+    #[error("invalid environment variable name: {0}")]
+    InvalidEnvVariableName(String),
+
+    /// Returned when an environment manifest cannot be parsed or validated.
+    #[error("invalid environment manifest: {0}")]
+    InvalidEnvManifest(PathBuf),
+
+    /// Returned when an in-memory environment manifest definition is invalid.
+    #[error("invalid environment manifest definition")]
+    InvalidEnvManifestDefinition,
+
+    /// Returned when a manifest uses a version this build cannot interpret.
+    #[error("unsupported environment manifest version: {0}")]
+    UnsupportedEnvManifestVersion(u32),
+
+    /// Returned when a selected profile omits a required manifest variable.
+    #[error("required environment variable is missing from profile: {0}")]
+    MissingRequiredEnvVariable(String),
+
+    /// Returned when a profile contains a key not declared by the manifest.
+    #[error("environment profile contains undeclared variable: {0}")]
+    UnknownEnvProfileVariable(String),
+
     /// Returned when an environment profile payload cannot be serialized or parsed.
     #[error("invalid environment profile payload")]
     InvalidEnvProfilePayload,

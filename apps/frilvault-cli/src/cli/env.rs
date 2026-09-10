@@ -1,5 +1,5 @@
 use clap::{Args, Subcommand};
-use std::path::PathBuf;
+use std::{ffi::OsString, path::PathBuf};
 
 use super::format::FormatArg;
 
@@ -13,6 +13,22 @@ pub struct EnvCommand {
 pub enum EnvAction {
     Identity(IdentityCommand),
     Recipients(RecipientsCommand),
+    Run(EnvRunCommand),
+}
+
+#[derive(Debug, Args)]
+pub struct EnvRunCommand {
+    /// Environment profile to decrypt and inject into the child process.
+    #[arg(long, required = true, value_name = "NAME")]
+    pub profile: String,
+
+    /// Explicit permission-restricted identity fallback file.
+    #[arg(long, value_name = "PATH")]
+    pub identity_file: Option<PathBuf>,
+
+    /// Child executable and arguments. The `--` separator is required.
+    #[arg(last = true, required = true, value_name = "COMMAND")]
+    pub command: Vec<OsString>,
 }
 
 #[derive(Debug, Args)]
