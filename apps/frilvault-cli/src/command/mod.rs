@@ -7,6 +7,7 @@ pub mod add;
 pub mod attach;
 pub mod delete;
 pub mod doctor;
+pub mod env;
 pub mod explorer;
 pub mod gitignore;
 pub mod index;

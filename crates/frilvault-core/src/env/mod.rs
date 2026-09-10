@@ -29,9 +29,11 @@
 
 use std::{
     collections::BTreeMap,
+    fmt,
     fs::{self, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 #[cfg(test)]
@@ -40,18 +42,291 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use age::{Decryptor, Encryptor, Identity, Recipient};
+use age::{Decryptor, Encryptor, Identity, Recipient, secrecy::ExposeSecret, x25519};
 use serde::{Deserialize, Serialize};
 
-use crate::{FrilVaultError, FrilVaultResult, constants::VAULT_DIR_NAME};
+use crate::{FrilVaultError, FrilVaultResult, constants::VAULT_DIR_NAME, workspace::VaultMode};
 
 /// Current version of the JSON payload encrypted into a profile file.
 pub const ENV_PROFILE_PAYLOAD_VERSION: u32 = 1;
+pub const ENV_RECIPIENT_REGISTRY_VERSION: u32 = 1;
 
 const ENV_DIR_NAME: &str = "env";
 const PROFILES_DIR_NAME: &str = "profiles";
 const PROFILE_FILE_EXTENSION: &str = "age";
+const RECIPIENTS_FILE_NAME: &str = "recipients.toml";
 const WINDOWS_INVALID_NAME_CHARS: &[char] = &['<', '>', ':', '"', '|', '?', '*'];
+
+/// A generated or loaded age identity.
+///
+/// The private identity is intentionally not included in `Debug` output. It can
+/// be passed to an injectable [`EnvIdentityStore`] without exposing its encoded
+/// form to callers that only need the public recipient.
+#[derive(Clone)]
+pub struct EnvIdentity {
+    inner: x25519::Identity,
+}
+
+impl fmt::Debug for EnvIdentity {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("EnvIdentity")
+            .field("private_material", &"<redacted>")
+            .field("recipient", &self.public_recipient())
+            .finish()
+    }
+}
+
+impl EnvIdentity {
+    /// Generates a new age X25519 identity using the age implementation.
+    pub fn generate() -> Self {
+        Self {
+            inner: x25519::Identity::generate(),
+        }
+    }
+
+    /// Loads an identity from its canonical age encoding.
+    pub fn from_encoded(encoded: &str) -> FrilVaultResult<Self> {
+        let encoded = encoded.trim();
+        if encoded.is_empty() {
+            return Err(FrilVaultError::InvalidEnvIdentity);
+        }
+
+        let inner =
+            x25519::Identity::from_str(encoded).map_err(|_| FrilVaultError::InvalidEnvIdentity)?;
+
+        Ok(Self { inner })
+    }
+
+    /// Runs a callback with the private identity encoding.
+    ///
+    /// The encoding is only materialized for the duration of the callback so
+    /// storage adapters can persist it without making it part of a public data
+    /// structure or a debug representation.
+    pub fn with_encoded<R>(&self, callback: impl FnOnce(&str) -> R) -> R {
+        let encoded = self.inner.to_string();
+        callback(encoded.expose_secret())
+    }
+
+    /// Returns the public age recipient corresponding to this identity.
+    pub fn public_recipient(&self) -> x25519::Recipient {
+        self.inner.to_public()
+    }
+
+    /// Returns the identity for the age decryption boundary.
+    pub fn age_identity(&self) -> &x25519::Identity {
+        &self.inner
+    }
+}
+
+/// Injectable private identity storage boundary.
+pub trait EnvIdentityStore {
+    fn load_identity(&self) -> FrilVaultResult<Option<EnvIdentity>>;
+    fn save_identity(&self, identity: &EnvIdentity) -> FrilVaultResult<()>;
+}
+
+/// Creates or loads one identity through an injected storage adapter.
+pub struct EnvIdentityManager<S> {
+    store: S,
+}
+
+impl<S> EnvIdentityManager<S>
+where
+    S: EnvIdentityStore,
+{
+    pub fn new(store: S) -> Self {
+        Self { store }
+    }
+
+    pub fn load(&self) -> FrilVaultResult<Option<EnvIdentity>> {
+        self.store.load_identity()
+    }
+
+    pub fn create_or_reuse(&self) -> FrilVaultResult<(EnvIdentity, bool)> {
+        if let Some(identity) = self.store.load_identity()? {
+            return Ok((identity, false));
+        }
+
+        let identity = EnvIdentity::generate();
+        self.store.save_identity(&identity)?;
+        Ok((identity, true))
+    }
+}
+
+/// A public age recipient registered under a stable collaborator id.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EnvRecipient {
+    pub id: String,
+    pub recipient: String,
+}
+
+impl EnvRecipient {
+    pub fn new(id: &str, recipient: &str) -> FrilVaultResult<Self> {
+        validate_recipient_id(id)?;
+        let parsed = x25519::Recipient::from_str(recipient.trim())
+            .map_err(|_| FrilVaultError::InvalidEnvRecipient)?;
+
+        Ok(Self {
+            id: id.to_string(),
+            recipient: parsed.to_string(),
+        })
+    }
+
+    pub fn age_recipient(&self) -> FrilVaultResult<x25519::Recipient> {
+        x25519::Recipient::from_str(&self.recipient)
+            .map_err(|_| FrilVaultError::InvalidEnvRecipient)
+    }
+}
+
+/// Deterministic public recipient registry stored below the selected vault.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EnvRecipientRegistry {
+    entries: BTreeMap<String, EnvRecipient>,
+}
+
+impl EnvRecipientRegistry {
+    pub fn entries(&self) -> impl Iterator<Item = &EnvRecipient> {
+        self.entries.values()
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn add(&mut self, id: &str, recipient: &str) -> FrilVaultResult<()> {
+        let entry = EnvRecipient::new(id, recipient)?;
+        if self.entries.contains_key(&entry.id) {
+            return Err(FrilVaultError::DuplicateEnvRecipientId(entry.id));
+        }
+        if self
+            .entries
+            .values()
+            .any(|existing| existing.recipient == entry.recipient)
+        {
+            return Err(FrilVaultError::DuplicateEnvRecipient);
+        }
+
+        self.entries.insert(entry.id.clone(), entry);
+        Ok(())
+    }
+
+    pub fn remove(&mut self, id: &str) -> FrilVaultResult<EnvRecipient> {
+        self.entries
+            .remove(id)
+            .ok_or_else(|| FrilVaultError::EnvRecipientNotFound(id.to_string()))
+    }
+
+    pub fn get(&self, id: &str) -> Option<&EnvRecipient> {
+        self.entries.get(id)
+    }
+
+    pub fn age_recipients(&self) -> FrilVaultResult<Vec<x25519::Recipient>> {
+        self.entries
+            .values()
+            .map(EnvRecipient::age_recipient)
+            .collect()
+    }
+
+    fn from_entries(entries: Vec<EnvRecipient>) -> FrilVaultResult<Self> {
+        let mut registry = Self::default();
+        for entry in entries {
+            registry.add(&entry.id, &entry.recipient)?;
+        }
+        Ok(registry)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredEnvRecipientRegistry {
+    version: u32,
+    #[serde(default)]
+    recipients: Vec<EnvRecipient>,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnvRecipientStore {
+    path: PathBuf,
+}
+
+impl EnvRecipientStore {
+    pub fn new(vault_root: impl Into<PathBuf>) -> Self {
+        Self {
+            path: vault_root
+                .into()
+                .join(ENV_DIR_NAME)
+                .join(RECIPIENTS_FILE_NAME),
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn load(&self) -> FrilVaultResult<EnvRecipientRegistry> {
+        let contents = match fs::read_to_string(&self.path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(EnvRecipientRegistry::default());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let stored: StoredEnvRecipientRegistry =
+            toml::from_str(&contents).map_err(|_| FrilVaultError::InvalidEnvRecipientRegistry)?;
+        if stored.version != ENV_RECIPIENT_REGISTRY_VERSION {
+            return Err(FrilVaultError::UnsupportedEnvRecipientRegistryVersion(
+                stored.version,
+            ));
+        }
+
+        EnvRecipientRegistry::from_entries(stored.recipients)
+    }
+
+    pub fn save(&self, registry: &EnvRecipientRegistry) -> FrilVaultResult<()> {
+        let stored = StoredEnvRecipientRegistry {
+            version: ENV_RECIPIENT_REGISTRY_VERSION,
+            recipients: registry.entries().cloned().collect(),
+        };
+        let contents = toml::to_string_pretty(&stored)
+            .map_err(|_| FrilVaultError::InvalidEnvRecipientRegistry)?;
+        atomic_write_public_text(&self.path, contents.as_bytes())
+    }
+
+    pub fn add(&self, id: &str, recipient: &str) -> FrilVaultResult<EnvRecipient> {
+        let mut registry = self.load()?;
+        registry.add(id, recipient)?;
+        let entry = registry
+            .get(id)
+            .cloned()
+            .ok_or_else(|| FrilVaultError::EnvRecipientNotFound(id.to_string()))?;
+        self.save(&registry)?;
+        Ok(entry)
+    }
+
+    pub fn remove(&self, id: &str) -> FrilVaultResult<EnvRecipient> {
+        let mut registry = self.load()?;
+        let removed = registry.remove(id)?;
+        self.save(&registry)?;
+        Ok(removed)
+    }
+}
+
+fn validate_recipient_id(id: &str) -> FrilVaultResult<()> {
+    let valid = !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte));
+    if !valid {
+        return Err(FrilVaultError::InvalidEnvRecipientId(id.to_string()));
+    }
+    Ok(())
+}
 
 /// Validates a logical profile name before it is used as a file name.
 ///
@@ -176,6 +451,16 @@ impl EnvProfileCrypto {
         Ok(ciphertext)
     }
 
+    /// Encrypts a profile while enforcing Shared-mode recipient policy.
+    pub fn encrypt_for_mode(
+        payload: &EnvProfilePayload,
+        mode: VaultMode,
+        recipients: &[&dyn Recipient],
+    ) -> FrilVaultResult<Vec<u8>> {
+        validate_profile_recipients(mode, recipients)?;
+        Self::encrypt(payload, recipients)
+    }
+
     /// Decrypts and validates a profile ciphertext with any matching identity.
     ///
     /// Decrypted plaintext is returned in memory and is never written to disk.
@@ -274,8 +559,20 @@ impl EnvProfileStore {
         payload: &EnvProfilePayload,
         recipients: &[&dyn Recipient],
     ) -> FrilVaultResult<()> {
+        self.save_payload_for_mode(profile_name, payload, VaultMode::Local, recipients)
+    }
+
+    /// Encrypts and atomically stores a profile while enforcing Shared-mode
+    /// recipient policy separately from the workspace Git-tracking mode.
+    pub fn save_payload_for_mode(
+        &self,
+        profile_name: &str,
+        payload: &EnvProfilePayload,
+        mode: VaultMode,
+        recipients: &[&dyn Recipient],
+    ) -> FrilVaultResult<()> {
         let profile_path = self.profile_path(profile_name)?;
-        let ciphertext = EnvProfileCrypto::encrypt(payload, recipients)?;
+        let ciphertext = EnvProfileCrypto::encrypt_for_mode(payload, mode, recipients)?;
 
         atomic_write_ciphertext(
             &profile_path,
@@ -283,6 +580,18 @@ impl EnvProfileStore {
             #[cfg(test)]
             &self.fail_replacement,
         )
+    }
+
+    /// Encrypts and atomically stores a profile with an explicit vault mode.
+    pub fn save_profile_for_mode(
+        &self,
+        profile_name: &str,
+        values: &BTreeMap<String, String>,
+        mode: VaultMode,
+        recipients: &[&dyn Recipient],
+    ) -> FrilVaultResult<()> {
+        let payload = EnvProfilePayload::new(values.clone())?;
+        self.save_payload_for_mode(profile_name, &payload, mode, recipients)
     }
 
     /// Reads, decrypts, and validates a profile ciphertext.
@@ -321,6 +630,44 @@ fn serialize_payload(payload: &EnvProfilePayload) -> FrilVaultResult<Vec<u8>> {
     };
 
     serde_json::to_vec(&stored).map_err(|_| FrilVaultError::InvalidEnvProfilePayload)
+}
+
+fn validate_profile_recipients(
+    mode: VaultMode,
+    recipients: &[&dyn Recipient],
+) -> FrilVaultResult<()> {
+    if mode == VaultMode::Shared && recipients.is_empty() {
+        return Err(FrilVaultError::EmptySharedEnvRecipients);
+    }
+    Ok(())
+}
+
+fn atomic_write_public_text(path: &Path, contents: &[u8]) -> FrilVaultResult<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(RECIPIENTS_FILE_NAME);
+    let temp_path = parent.join(format!(".{file_name}.tmp.{}", uuid::Uuid::new_v4()));
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+
+        let mut file = options.open(&temp_path)?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp_path, path)
+    })();
+
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temp_path);
+        return Err(FrilVaultError::Io(error));
+    }
+
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -378,6 +725,7 @@ fn atomic_write_ciphertext(
 #[cfg(test)]
 mod tests {
     use std::{
+        cell::RefCell,
         collections::BTreeMap,
         fs,
         io::Write,
@@ -670,5 +1018,129 @@ mod tests {
         assert!(validate_profile_name("").is_err());
         assert!(validate_profile_name("bad\0name").is_err());
         assert!(validate_profile_name("bad\nname").is_err());
+    }
+
+    #[derive(Default)]
+    struct FakeIdentityStore {
+        identity: RefCell<Option<EnvIdentity>>,
+    }
+
+    impl EnvIdentityStore for FakeIdentityStore {
+        fn load_identity(&self) -> FrilVaultResult<Option<EnvIdentity>> {
+            Ok(self.identity.borrow().clone())
+        }
+
+        fn save_identity(&self, identity: &EnvIdentity) -> FrilVaultResult<()> {
+            *self.identity.borrow_mut() = Some(identity.clone());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn identity_manager_generates_once_and_reuses_through_injected_store() {
+        let store = FakeIdentityStore::default();
+        let manager = EnvIdentityManager::new(store);
+
+        let (created, was_created) = manager.create_or_reuse().unwrap();
+        let (reused, was_created_again) = manager.create_or_reuse().unwrap();
+
+        assert!(was_created);
+        assert!(!was_created_again);
+        assert_eq!(
+            created.public_recipient().to_string(),
+            reused.public_recipient().to_string()
+        );
+        assert!(format!("{created:?}").contains("<redacted>"));
+        assert!(!format!("{created:?}").contains("AGE-SECRET-KEY-"));
+    }
+
+    #[test]
+    fn identity_encoding_round_trips_without_private_material_in_public_recipient() {
+        let identity = EnvIdentity::generate();
+        let encoded = identity.with_encoded(str::to_owned);
+        let loaded = EnvIdentity::from_encoded(&encoded).unwrap();
+
+        assert_eq!(
+            identity.public_recipient().to_string(),
+            loaded.public_recipient().to_string()
+        );
+        assert!(encoded.starts_with("AGE-SECRET-KEY-"));
+    }
+
+    #[test]
+    fn recipient_registry_validates_duplicates_and_orders_entries_by_id() {
+        let first = EnvIdentity::generate().public_recipient().to_string();
+        let second = EnvIdentity::generate().public_recipient().to_string();
+        let mut registry = EnvRecipientRegistry::default();
+
+        registry.add("zeta", &first).unwrap();
+        registry.add("alpha", &second).unwrap();
+
+        assert_eq!(
+            registry
+                .entries()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            ["alpha", "zeta"]
+        );
+        assert!(matches!(
+            registry.add("zeta", &second),
+            Err(FrilVaultError::DuplicateEnvRecipientId(_))
+        ));
+        assert!(matches!(
+            registry.add("other", &first),
+            Err(FrilVaultError::DuplicateEnvRecipient)
+        ));
+        assert!(matches!(
+            registry.add("bad id", &second),
+            Err(FrilVaultError::InvalidEnvRecipientId(_))
+        ));
+        assert!(matches!(
+            registry.add("invalid-key", "not-an-age-recipient"),
+            Err(FrilVaultError::InvalidEnvRecipient)
+        ));
+    }
+
+    #[test]
+    fn recipient_store_writes_public_deterministic_toml_and_preserves_on_validation_failure() {
+        let workspace = create_test_workspace();
+        let store = EnvRecipientStore::new(workspace.root().join(VAULT_DIR_NAME));
+        let first = EnvIdentity::generate().public_recipient().to_string();
+        let second = EnvIdentity::generate().public_recipient().to_string();
+
+        store.add("zeta", &first).unwrap();
+        store.add("alpha", &second).unwrap();
+        let path = store.path().to_path_buf();
+        let original = fs::read_to_string(&path).unwrap();
+        let error = store.add("duplicate", &first).unwrap_err();
+
+        assert!(matches!(error, FrilVaultError::DuplicateEnvRecipient));
+        assert_eq!(fs::read_to_string(path).unwrap(), original);
+        assert!(original.contains("version = 1"));
+        assert!(original.contains("age1"));
+        assert!(!original.contains("AGE-SECRET-KEY-"));
+        assert_eq!(
+            store
+                .load()
+                .unwrap()
+                .entries()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            ["alpha", "zeta"]
+        );
+    }
+
+    #[test]
+    fn shared_profile_rejects_empty_recipients_before_writing() {
+        let workspace = create_test_workspace();
+        let store = EnvProfileStore::new(workspace.root());
+        let payload = EnvProfilePayload::new(test_values()).unwrap();
+
+        let error = store
+            .save_payload_for_mode("shared", &payload, VaultMode::Shared, &[])
+            .unwrap_err();
+
+        assert!(matches!(error, FrilVaultError::EmptySharedEnvRecipients));
+        assert!(!store.profile_path("shared").unwrap().exists());
     }
 }

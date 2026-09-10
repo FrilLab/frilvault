@@ -55,10 +55,18 @@ validated as portable single path components, including Windows-invalid
 characters, trailing spaces/dots, and reserved device names. Profile writes
 create only ciphertext in a same-directory temporary file before atomically
 replacing the target. The version-1 payload is JSON with `version` and a
-key/value `values` map; unknown versions are rejected. Recipient and identity
-material is supplied by callers and is never persisted by the core store.
-Manifest and recipient metadata validation is owned by the environment-profile
+key/value `values` map; unknown versions are rejected. Private identity
+material is supplied by callers and is never persisted by the core profile
+store. Manifest validation remains owned by the environment-profile
 integration work.
+
+The core also owns the age identity and recipient domain boundary. Identity
+storage is injected through `EnvIdentityStore`; the CLI prefers the platform
+credential store and supplies an explicit, owner-only file adapter only when
+that store is unavailable. Private identities never cross into the selected
+vault. `recipients.toml` contains only a version and deterministic, ID-sorted
+public recipient records. Shared-mode profile writes reject an empty recipient
+set before any ciphertext replacement.
 
 ### Vault modes
 

@@ -35,6 +35,8 @@ fn run(cli: Cli) -> Result<()> {
     }
 
     match command {
+        Commands::Env(cmd) => dispatch!(env, cmd)?,
+
         Commands::Init(cmd) => dispatch!(init, cmd)?,
 
         Commands::Add(cmd) => dispatch!(add, cmd)?,
