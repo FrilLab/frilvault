@@ -124,6 +124,11 @@ mod unix {
             b"corrupt ciphertext",
         )
         .unwrap();
+        fs::write(
+            workspace.root().join(".vault/env/profiles/CON.age"),
+            b"invalid profile name",
+        )
+        .unwrap();
 
         let output = workspace.run(&[
             "env",
@@ -156,6 +161,14 @@ mod unix {
         assert_eq!(
             report["usable_profiles"],
             serde_json::json!(["development"])
+        );
+        assert_eq!(report["checks"]["profiles"]["status"], "ready");
+        assert!(
+            report["profiles"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|profile| profile["profile"] == "CON" && profile["status"] == "invalid")
         );
         assert!(!stdout.contains(SECRET));
         assert!(!String::from_utf8_lossy(&output.stderr).contains(SECRET));
@@ -312,5 +325,28 @@ mod unix {
         let output = workspace.run(&["doctor", "--format", "json"]);
         let report: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(report, serde_json::json!({"missing_source_files": []}));
+    }
+
+    #[test]
+    fn workspace_doctor_does_not_report_an_empty_env_profile_set_as_ready() {
+        let workspace = TestWorkspace::new();
+        workspace.run(&["init"]);
+        fs::create_dir_all(workspace.root().join(".vault/env")).unwrap();
+        fs::write(
+            workspace.root().join(".vault/env/manifest.toml"),
+            manifest(false),
+        )
+        .unwrap();
+
+        let output = workspace.run(&["doctor", "--format", "json"]);
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["env"]["status"], "not_ready");
+        assert_eq!(report["env"]["checks"]["profiles"]["status"], "missing");
+        assert!(
+            report["env"]["usable_profiles"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 }

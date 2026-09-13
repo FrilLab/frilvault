@@ -72,12 +72,13 @@ verified. Private identities never cross into the selected vault.
 recipient records. Shared-mode profile writes reject an empty recipient set
 before any ciphertext replacement.
 
-The CLI's `flvt env doctor --profile NAME` combines these core validation
-boundaries into a value-free readiness report. It can structurally inspect all
-profile ciphertext files, and only decrypts profiles in memory when an
-identity is available. `flvt doctor` adds this Env summary only for configured
-`.vault/env` directories, so legacy workspaces without Env data retain their
-existing note/workspace health behavior.
+The core's `EnvReadiness::inspect` combines these validation boundaries into a
+value-free readiness report. It can structurally inspect all profile
+ciphertext files, and only decrypts profiles in memory when an identity is
+available. The CLI supplies the identity-store result and formats the report;
+`flvt doctor` adds this Env summary only for configured `.vault/env`
+directories, so legacy workspaces without Env data retain their existing
+note/workspace health behavior.
 
 ### Vault modes
 
