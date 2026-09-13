@@ -35,6 +35,36 @@ fn parses_environment_identity_create_from_stdin() {
 }
 
 #[test]
+fn parses_environment_doctor_with_profile_and_identity_file() {
+    let cli = Cli::parse_from([
+        "flvt",
+        "env",
+        "doctor",
+        "--profile",
+        "development",
+        "--identity-file",
+        "/tmp/frilvault.identity",
+        "--format",
+        "json",
+    ]);
+
+    match cli.command {
+        Commands::Env(command) => match command.action {
+            crate::cli::env::EnvAction::Doctor(doctor) => {
+                assert_eq!(doctor.profile, "development");
+                assert_eq!(
+                    doctor.identity_file.as_deref(),
+                    Some(std::path::Path::new("/tmp/frilvault.identity"))
+                );
+                assert!(matches!(doctor.format, Some(FormatArg::Json)));
+            }
+            _ => panic!("expected environment doctor command"),
+        },
+        _ => panic!("expected env command"),
+    }
+}
+
+#[test]
 fn parses_environment_recipient_commands() {
     let cli = Cli::parse_from([
         "flvt",

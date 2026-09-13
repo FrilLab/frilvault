@@ -33,6 +33,7 @@ pub fn execute(command: EnvCommand) -> Result<()> {
 
 pub fn execute_with_vault(command: EnvCommand, vault_path: Option<&Path>) -> Result<()> {
     match command.action {
+        EnvAction::Doctor(doctor) => crate::command::doctor::execute_env(doctor, vault_path),
         EnvAction::Identity(identity) => match identity.action {
             IdentityAction::Create(create) => execute_identity_create(create, vault_path),
             IdentityAction::Show(show) => execute_identity_show(show, vault_path),
@@ -44,6 +45,16 @@ pub fn execute_with_vault(command: EnvCommand, vault_path: Option<&Path>) -> Res
         },
         EnvAction::Run(run) => execute_run(run, vault_path),
     }
+}
+
+pub(crate) fn load_identity_for_doctor(
+    vault: &frilvault_core::FrilVault,
+    identity_file: Option<PathBuf>,
+) -> Result<Option<EnvIdentity>> {
+    let identity_file = resolve_identity_file(identity_file, vault)?;
+    let store = PreferredIdentityStore::new(identity_file);
+
+    Ok(EnvIdentityManager::new(&store).load()?)
 }
 
 #[derive(Debug)]

@@ -566,6 +566,17 @@ struct EnvProfilePayloadVersion {
 pub struct EnvProfileCrypto;
 
 impl EnvProfileCrypto {
+    /// Validates the age envelope without attempting decryption.
+    ///
+    /// This is intentionally separate from [`Self::decrypt`] so workspace
+    /// diagnostics can inspect every profile's ciphertext structure without
+    /// needing to obtain or expose an identity.
+    pub fn validate_ciphertext(ciphertext: &[u8]) -> FrilVaultResult<()> {
+        Decryptor::new(ciphertext)
+            .map(|_| ())
+            .map_err(|_| FrilVaultError::EnvProfileDecryptionFailed)
+    }
+
     /// Encrypts a profile payload for every supplied recipient.
     ///
     /// Each recipient can independently decrypt the resulting ciphertext. No
@@ -674,6 +685,51 @@ impl EnvProfileStore {
     /// Returns the profile directory without creating it.
     pub fn profiles_root(&self) -> PathBuf {
         self.env_root.join(PROFILES_DIR_NAME)
+    }
+
+    /// Lists profile names from the profiles directory in deterministic order.
+    ///
+    /// Only regular files with the canonical `.age` extension are profiles.
+    /// Invalid profile names are rejected rather than silently hidden from a
+    /// workspace diagnostic.
+    pub fn list_profile_names(&self) -> FrilVaultResult<Vec<String>> {
+        let entries = match fs::read_dir(self.profiles_root()) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+
+        let mut names = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            let path = entry.path();
+
+            if !file_type.is_file()
+                || path.extension().and_then(|extension| extension.to_str())
+                    != Some(PROFILE_FILE_EXTENSION)
+            {
+                continue;
+            }
+
+            let name = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .ok_or_else(|| FrilVaultError::InvalidEnvProfileName("<non-utf8>".to_string()))?;
+            validate_profile_name(name)?;
+            names.push(name.to_string());
+        }
+
+        names.sort();
+        Ok(names)
+    }
+
+    /// Reads and structurally validates a profile's age ciphertext.
+    pub fn validate_profile_ciphertext(&self, profile_name: &str) -> FrilVaultResult<()> {
+        let profile_path = self.profile_path(profile_name)?;
+        let ciphertext = fs::read(profile_path)?;
+
+        EnvProfileCrypto::validate_ciphertext(&ciphertext)
     }
 
     /// Resolves a validated logical profile name to its `.age` path.
@@ -1011,6 +1067,34 @@ mod tests {
                 .unwrap()
                 .all(|entry| entry.unwrap().file_name() == "development.age")
         );
+    }
+
+    #[test]
+    fn profile_listing_is_deterministic_and_ciphertext_validation_is_value_free() {
+        let workspace = create_test_workspace();
+        let store = EnvProfileStore::new(workspace.root());
+        let identity = x25519::Identity::generate();
+        let recipient = identity.to_public();
+
+        store
+            .save_profile("zeta", &test_values(), &[&recipient])
+            .unwrap();
+        store
+            .save_profile("alpha", &test_values(), &[&recipient])
+            .unwrap();
+        fs::write(store.profiles_root().join("ignored.txt"), b"not a profile").unwrap();
+
+        assert_eq!(store.list_profile_names().unwrap(), ["alpha", "zeta"]);
+        assert!(store.validate_profile_ciphertext("alpha").is_ok());
+
+        fs::write(
+            store.profile_path("alpha").unwrap(),
+            b"not an age ciphertext",
+        )
+        .unwrap();
+        let error = store.validate_profile_ciphertext("alpha").unwrap_err();
+        assert!(matches!(error, FrilVaultError::EnvProfileDecryptionFailed));
+        assert!(!error.to_string().contains("fixture-api-key"));
     }
 
     #[test]

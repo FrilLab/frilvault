@@ -304,6 +304,34 @@ before the child is spawned. Child stdout, stderr, and a non-zero exit status
 are preserved. Secret values remain in memory for the lifetime required by the
 process API and are released after the child exits.
 
+### Environment readiness diagnostics
+
+Check one profile without exposing its values:
+
+```bash
+flvt env doctor --profile development
+flvt env doctor --profile development --identity-file "$RUNNER_TEMP/frilvault.identity"
+```
+
+The report checks the manifest, profile name and ciphertext, recipient registry,
+identity availability, decryption, required variables, and the absence of a
+plaintext export. It lists profile names and readiness statuses only. Add
+`--format json` for deterministic machine-readable output containing paths,
+profile names, statuses, and remediation text; private keys, values, and
+ciphertext are never included.
+
+`flvt doctor` keeps the existing workspace/note health output and adds the same
+redacted Env summary when `.vault/env` exists. A workspace without Env
+configuration remains healthy under the existing note-health rules. Use
+`flvt env identity create`, `flvt env recipients list`, and
+`flvt env run --profile NAME -- COMMAND` as the primary remediation and runtime
+commands.
+
+Removing a recipient only updates the public registry. It cannot retroactively
+erase plaintext already viewed, copied into process memory, or retained in
+backups; rotate affected profiles separately before treating the removal as a
+complete access change.
+
 ### Workspace status
 
 `flvt status` is read-only. It reads the workspace metadata and scans the note

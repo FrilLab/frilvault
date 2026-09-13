@@ -11,9 +11,24 @@ pub struct EnvCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum EnvAction {
+    Doctor(EnvDoctorCommand),
     Identity(IdentityCommand),
     Recipients(RecipientsCommand),
     Run(EnvRunCommand),
+}
+
+#[derive(Debug, Args)]
+pub struct EnvDoctorCommand {
+    /// Environment profile to check for readiness.
+    #[arg(long, required = true, value_name = "NAME")]
+    pub profile: String,
+
+    /// Explicit permission-restricted identity fallback file.
+    #[arg(long, value_name = "PATH")]
+    pub identity_file: Option<PathBuf>,
+
+    #[arg(long, value_enum)]
+    pub format: Option<FormatArg>,
 }
 
 #[derive(Debug, Args)]
