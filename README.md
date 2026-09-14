@@ -240,6 +240,98 @@ pre-operation cache state. The returned error always reports whether rollback
 succeeded; a rollback failure requires inspecting the reported paths before
 retrying the operation.
 
+### Environment identity and recipients
+
+Environment encryption uses age identities. The private identity is created or
+reused through the platform credential store (macOS Keychain, Windows
+Credential Manager, or a Linux Secret Service). `identity show` reports only
+the public recipient and where the identity is stored:
+
+```bash
+flvt env identity create
+flvt env identity show
+flvt env recipients list
+flvt env recipients add alice age1...
+flvt env recipients remove alice
+```
+
+Only recipient IDs and public `age1...` keys are written to
+`.vault/env/recipients.toml`. The registry is sorted by ID and updated through
+an atomic replacement. Removing a recipient changes the registry but does not
+revoke plaintext that person may already have viewed; profile rotation is a
+separate follow-up operation.
+
+For headless CI, provide an identity through stdin and explicitly select a
+permission-restricted file outside the workspace as the fallback location. The
+identity is never echoed or printed:
+
+```bash
+printf '%s\n' "$FRILVAULT_AGE_IDENTITY" \
+  | flvt env identity create --stdin --identity-file "$RUNNER_TEMP/frilvault.identity"
+```
+
+The `--identity-file` option is rejected when it points inside the workspace
+or selected vault. It is used only when the platform credential store is
+unavailable; on Unix the file is created with owner-only permissions. On Windows,
+the fallback is rejected when owner-only ACLs cannot be verified, so use the
+platform credential store there. Do not commit the file or put it below `.vault/`.
+
+### Runtime environment injection
+
+After an environment manifest and encrypted profile have been configured, run a
+child process with the selected profile in memory:
+
+```bash
+flvt env run --profile development -- npm run dev
+flvt env run --profile test -- cargo test
+```
+
+The `--profile` option and the `--` separator are required. The child
+executable is launched directly; FrilVault does not evaluate a shell string.
+The current process environment is inherited, profile values take precedence
+on key collisions, and the parent process environment is not modified. Use
+`--identity-file` when the platform credential store is unavailable:
+
+```bash
+flvt env run --profile development \
+  --identity-file "$RUNNER_TEMP/frilvault.identity" -- npm run dev
+```
+
+Profile values are decrypted only in memory and are never written to a
+plaintext `.env` file, printed, or added to child command arguments. Validation
+of the manifest, selected profile, identity, and required variables completes
+before the child is spawned. Child stdout, stderr, and a non-zero exit status
+are preserved. Secret values remain in memory for the lifetime required by the
+process API and are released after the child exits.
+
+### Environment readiness diagnostics
+
+Check one profile without exposing its values:
+
+```bash
+flvt env doctor --profile development
+flvt env doctor --profile development --identity-file "$RUNNER_TEMP/frilvault.identity"
+```
+
+The report checks the manifest, profile name and ciphertext, recipient registry,
+identity availability, decryption, required variables, and the absence of a
+plaintext export. It lists profile names and readiness statuses only. Add
+`--format json` for deterministic machine-readable output containing paths,
+profile names, statuses, and remediation text; private keys, values, and
+ciphertext are never included.
+
+`flvt doctor` keeps the existing workspace/note health output and adds the same
+redacted Env summary when `.vault/env` exists. A workspace without Env
+configuration remains healthy under the existing note-health rules. Use
+`flvt env identity create`, `flvt env recipients list`, and
+`flvt env run --profile NAME -- COMMAND` as the primary remediation and runtime
+commands.
+
+Removing a recipient only updates the public registry. It cannot retroactively
+erase plaintext already viewed, copied into process memory, or retained in
+backups; rotate affected profiles separately before treating the removal as a
+complete access change.
+
 ### Workspace status
 
 `flvt status` is read-only. It reads the workspace metadata and scans the note

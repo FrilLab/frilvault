@@ -9,6 +9,7 @@ use clap::{Parser, Subcommand};
 pub mod add;
 pub mod attach;
 pub mod delete;
+pub mod env;
 pub mod explorer;
 pub mod format;
 pub mod gitignore;
@@ -28,6 +29,7 @@ pub mod update;
 use add::AddCommand;
 use attach::AttachCommand;
 use delete::DeleteCommand;
+use env::EnvCommand;
 use explorer::ExplorerCommand;
 use gitignore::GitignoreCommand;
 use health::HealthCommand;
@@ -56,6 +58,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    Env(EnvCommand),
     Init(InitCommand),
     Add(AddCommand),
     Attach(AttachCommand),

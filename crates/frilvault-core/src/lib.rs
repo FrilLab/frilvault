@@ -21,8 +21,11 @@ mod workspace;
 pub use app::{FrilVault, InitializationResult};
 
 pub use env::{
-    ENV_PROFILE_PAYLOAD_VERSION, EnvProfileCrypto, EnvProfilePayload, EnvProfileStore,
-    validate_profile_name,
+    ENV_MANIFEST_VERSION, ENV_PROFILE_PAYLOAD_VERSION, ENV_RECIPIENT_REGISTRY_VERSION, EnvIdentity,
+    EnvIdentityManager, EnvIdentityStore, EnvManifest, EnvManifestStore, EnvProfileCrypto,
+    EnvProfileListing, EnvProfilePayload, EnvProfileReadiness, EnvProfileStore, EnvReadiness,
+    EnvReadinessCheck, EnvReadinessReport, EnvReadinessStatus, EnvRecipient, EnvRecipientRegistry,
+    EnvRecipientStore, EnvVariableSpec, validate_profile_name,
 };
 pub use error::{FrilVaultError, FrilVaultResult, TagOperationRollback};
 pub use note::{

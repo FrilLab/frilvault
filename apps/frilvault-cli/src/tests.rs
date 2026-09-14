@@ -19,6 +19,137 @@ fn parses_init_with_local_mode_by_default() {
 }
 
 #[test]
+fn parses_environment_identity_create_from_stdin() {
+    let cli = Cli::parse_from(["flvt", "env", "identity", "create", "--stdin"]);
+
+    match cli.command {
+        Commands::Env(command) => match command.action {
+            crate::cli::env::EnvAction::Identity(identity) => match identity.action {
+                crate::cli::env::IdentityAction::Create(create) => assert!(create.stdin),
+                _ => panic!("expected identity create command"),
+            },
+            _ => panic!("expected identity command"),
+        },
+        _ => panic!("expected env command"),
+    }
+}
+
+#[test]
+fn parses_environment_doctor_with_profile_and_identity_file() {
+    let cli = Cli::parse_from([
+        "flvt",
+        "env",
+        "doctor",
+        "--profile",
+        "development",
+        "--identity-file",
+        "/tmp/frilvault.identity",
+        "--format",
+        "json",
+    ]);
+
+    match cli.command {
+        Commands::Env(command) => match command.action {
+            crate::cli::env::EnvAction::Doctor(doctor) => {
+                assert_eq!(doctor.profile, "development");
+                assert_eq!(
+                    doctor.identity_file.as_deref(),
+                    Some(std::path::Path::new("/tmp/frilvault.identity"))
+                );
+                assert!(matches!(doctor.format, Some(FormatArg::Json)));
+            }
+            _ => panic!("expected environment doctor command"),
+        },
+        _ => panic!("expected env command"),
+    }
+}
+
+#[test]
+fn parses_environment_recipient_commands() {
+    let cli = Cli::parse_from([
+        "flvt",
+        "env",
+        "recipients",
+        "add",
+        "alice",
+        "age1example",
+        "--format",
+        "json",
+    ]);
+
+    match cli.command {
+        Commands::Env(command) => match command.action {
+            crate::cli::env::EnvAction::Recipients(recipients) => match recipients.action {
+                crate::cli::env::RecipientsAction::Add(add) => {
+                    assert_eq!(add.recipient_id, "alice");
+                    assert_eq!(add.age_recipient, "age1example");
+                    assert!(matches!(add.format, Some(FormatArg::Json)));
+                }
+                _ => panic!("expected recipient add command"),
+            },
+            _ => panic!("expected recipients command"),
+        },
+        _ => panic!("expected env command"),
+    }
+}
+
+#[test]
+fn parses_environment_run_with_a_required_command_separator() {
+    let cli = Cli::parse_from([
+        "flvt",
+        "env",
+        "run",
+        "--profile",
+        "development",
+        "--identity-file",
+        "/tmp/frilvault.identity",
+        "--",
+        "npm",
+        "run",
+        "dev",
+    ]);
+
+    match cli.command {
+        Commands::Env(command) => match command.action {
+            crate::cli::env::EnvAction::Run(run) => {
+                assert_eq!(run.profile, "development");
+                assert_eq!(
+                    run.identity_file.as_deref(),
+                    Some(std::path::Path::new("/tmp/frilvault.identity",))
+                );
+                assert_eq!(
+                    run.command,
+                    vec![
+                        std::ffi::OsString::from("npm"),
+                        std::ffi::OsString::from("run"),
+                        std::ffi::OsString::from("dev"),
+                    ]
+                );
+            }
+            _ => panic!("expected environment run command"),
+        },
+        _ => panic!("expected env command"),
+    }
+}
+
+#[test]
+fn rejects_environment_run_without_the_command_separator() {
+    let error = Cli::try_parse_from([
+        "flvt",
+        "env",
+        "run",
+        "--profile",
+        "development",
+        "echo",
+        "value",
+    ])
+    .err()
+    .expect("expected the command separator to be required");
+
+    assert!(error.to_string().contains("COMMAND"));
+}
+
+#[test]
 fn parses_an_explicit_vault_path() {
     let cli = Cli::parse_from(["flvt", "--vault", "/tmp/external-vault", "status"]);
 

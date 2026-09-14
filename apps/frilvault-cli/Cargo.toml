@@ -24,3 +24,4 @@ serde_json = "1"
 uuid = { workspace = true, features = ["v4", "serde"] }
 
 frilvault-core = { path = "../../crates/frilvault-core" }
+keyring = "4.2.0"

@@ -55,10 +55,30 @@ validated as portable single path components, including Windows-invalid
 characters, trailing spaces/dots, and reserved device names. Profile writes
 create only ciphertext in a same-directory temporary file before atomically
 replacing the target. The version-1 payload is JSON with `version` and a
-key/value `values` map; unknown versions are rejected. Recipient and identity
-material is supplied by callers and is never persisted by the core store.
-Manifest and recipient metadata validation is owned by the environment-profile
-integration work.
+key/value `values` map; unknown versions are rejected. Private identity
+material is supplied by callers and is never persisted by the core profile
+store. The core also validates the versioned manifest, portable environment
+variable names, non-secret defaults, required profile values, and undeclared
+profile keys before a caller can build a child environment. The CLI owns
+identity-store selection and the direct child-process boundary.
+
+The core also owns the age identity and recipient domain boundary. Identity
+storage is injected through `EnvIdentityStore`; the CLI prefers the platform
+credential store and supplies an explicit file adapter only when that store is
+unavailable and its permissions can be enforced. Unix fallback files are
+owner-only; Windows fallback is rejected when an owner-only ACL cannot be
+verified. Private identities never cross into the selected vault.
+`recipients.toml` contains only a version and deterministic, ID-sorted public
+recipient records. Shared-mode profile writes reject an empty recipient set
+before any ciphertext replacement.
+
+The core's `EnvReadiness::inspect` combines these validation boundaries into a
+value-free readiness report. It can structurally inspect all profile
+ciphertext files, and only decrypts profiles in memory when an identity is
+available. The CLI supplies the identity-store result and formats the report;
+`flvt doctor` adds this Env summary only for configured `.vault/env`
+directories, so legacy workspaces without Env data retain their existing
+note/workspace health behavior.
 
 ### Vault modes
 
