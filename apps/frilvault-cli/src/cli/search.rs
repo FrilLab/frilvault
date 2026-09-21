@@ -9,6 +9,10 @@ pub struct SearchCommand {
     #[arg(long)]
     pub file: Option<String>,
 
+    /// Restrict results to symbol anchors whose names contain this value.
+    #[arg(long)]
+    pub symbol: Option<String>,
+
     /// Require every repeated tag (AND semantics).
     #[arg(long = "tag", conflicts_with = "tag_query")]
     pub tags: Vec<String>,

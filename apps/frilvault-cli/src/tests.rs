@@ -261,6 +261,18 @@ fn parses_search_with_file_and_json_format() {
 }
 
 #[test]
+fn parses_search_with_symbol_filter() {
+    let cli = Cli::parse_from(["flvt", "search", "--symbol", "parse_config"]);
+
+    match cli.command {
+        Commands::Search(command) => {
+            assert_eq!(command.symbol.as_deref(), Some("parse_config"));
+        }
+        _ => panic!("expected search command"),
+    }
+}
+
+#[test]
 fn parses_health_command_alias() {
     let cli = Cli::parse_from(["flvt", "health"]);
 

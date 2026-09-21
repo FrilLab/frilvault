@@ -24,6 +24,11 @@ selected vault, while application code stays untouched.
 - note-file repair after file moves or renames
 - VS Code integration with notes panel, expandable CodeLens note viewer, gutter markers, hover preview, and inline editing
 
+The VS Code `Search Notes` command uses the native Quick Pick without changing
+editor layout. It supports free text and composable `tag:`, `file:`, and
+`symbol:` filters, for example `tag:todo parser` or
+`file:src/parser.rs symbol:parse_config`.
+
 ## Repository Layout
 
 ```text

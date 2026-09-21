@@ -267,6 +267,47 @@ suite('CliClient', () => {
     ]);
   });
 
+  test('passes symbol filters through the CLI boundary', async () => {
+    const calls: string[][] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+
+        calls.push(args);
+        return { stdout: '[]', stderr: '' };
+      },
+    });
+
+    await cliClient.searchNotes({
+      workspaceRoot: '/workspace',
+      keyword: 'parser',
+      sourceFile: 'src/parser.rs',
+      symbol: 'parse_config',
+      tags: ['todo'],
+    });
+
+    assert.deepStrictEqual(calls, [[
+      'search',
+      'parser',
+      '--file',
+      'src/parser.rs',
+      '--symbol',
+      'parse_config',
+      '--tag',
+      'todo',
+      '--format',
+      'json',
+    ]]);
+  });
+
   test('fails fast when the CLI version does not match the extension expectation', async () => {
     const cliClient = new CliClient({
       extensionPath: '/extension',

@@ -41,7 +41,10 @@ import {
 import { createShowNotesForCurrentFileCommand } from './features/notes-panel/command';
 import { FrilVaultNotesProvider } from './features/notes-panel/provider';
 import { registerNotesTreeDataProvider, disposeNotesTreeDataProvider } from './features/notes-panel/register';
-import { createSearchByTagCommand, createSearchCommand } from './features/search/command';
+import {
+  createSearchByTagCommand,
+  createWorkspaceSearchCommand,
+} from './features/search/command';
 import { FrilVaultTagExplorerProvider } from './features/tag-explorer/provider';
 import {
   createRemoveTagColorCommand,
@@ -90,6 +93,7 @@ export async function runBackgroundRefresh(
  */
 export function activate(context: vscode.ExtensionContext): void {
   const cliOutputChannel = vscode.window.createOutputChannel('FrilVault CLI');
+  const searchRefreshEmitter = new vscode.EventEmitter<void>();
   const cliClient = new CliClient({
     extensionPath: context.extensionPath,
     getConfiguredVaultPath: tryGetVaultPath,
@@ -174,6 +178,7 @@ export function activate(context: vscode.ExtensionContext): void {
     await tagColorStore.load();
     await refreshNoteState(editor);
     await refreshWorkspaceNoteCounts();
+    searchRefreshEmitter.fire();
   };
 
   const inlineNoteEditor = createInlineNoteEditor({
@@ -250,6 +255,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     cliOutputChannel,
+    searchRefreshEmitter,
     store,
     noteCountStore,
     decorator,
@@ -309,7 +315,11 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand(
       COMMAND_IDS.searchNotes,
-      runWhenEnabled(createSearchCommand(cliClient, getWorkspaceRoot)),
+      runWhenEnabled(createWorkspaceSearchCommand({
+        cliClient,
+        getWorkspaceRoot,
+        onDidChangeNotes: (listener) => searchRefreshEmitter.event(listener),
+      })),
     ),
     vscode.commands.registerCommand(
       COMMAND_IDS.searchNotesByTag,

@@ -19,6 +19,7 @@ pub fn execute_with_vault(command: ListCommand, vault_path: Option<&Path>) -> Re
         source_file: Some(command.file.into()),
         keyword: None,
         tag: None,
+        symbol: None,
     })?;
     let format = resolve_format(command.format);
 

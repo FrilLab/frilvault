@@ -14,10 +14,11 @@ pub fn execute(command: SearchCommand) -> Result<()> {
 pub fn execute_with_vault(command: SearchCommand, vault_path: Option<&Path>) -> Result<()> {
     if command.keyword.is_none()
         && command.file.is_none()
+        && command.symbol.is_none()
         && command.tags.is_empty()
         && command.tag_query.is_none()
     {
-        bail!("search requires a keyword, --file, --tag, or --tag-query");
+        bail!("search requires a keyword, --file, --symbol, --tag, or --tag-query");
     }
 
     let vault = super::open_vault(vault_path)?;
@@ -35,6 +36,7 @@ pub fn execute_with_vault(command: SearchCommand, vault_path: Option<&Path>) -> 
         source_file: command.file.map(Into::into),
         keyword: command.keyword,
         tag: None,
+        symbol: command.symbol,
     };
 
     let results = service.query_notes_with_tag_query(&query, tag_query.as_ref())?;

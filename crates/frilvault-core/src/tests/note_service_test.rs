@@ -980,6 +980,7 @@ fn query_notes_combines_file_keyword_and_tag_filters() {
             source_file: Some("src/main.rs".into()),
             keyword: Some("parser".to_string()),
             tag: None,
+            symbol: None,
         })
         .unwrap();
     assert_eq!(keyword_and_file.len(), 1);
@@ -990,6 +991,7 @@ fn query_notes_combines_file_keyword_and_tag_filters() {
             source_file: Some("src/main.rs".into()),
             keyword: None,
             tag: Some("bug".to_string()),
+            symbol: None,
         })
         .unwrap();
     assert_eq!(tag_and_file.len(), 1);
@@ -1000,6 +1002,7 @@ fn query_notes_combines_file_keyword_and_tag_filters() {
             source_file: Some("src/main.rs".into()),
             keyword: Some("parser".to_string()),
             tag: Some("bug".to_string()),
+            symbol: None,
         })
         .unwrap();
     assert_eq!(all_filters.len(), 1);
@@ -1010,7 +1013,86 @@ fn query_notes_combines_file_keyword_and_tag_filters() {
             source_file: None,
             keyword: Some("parser".to_string()),
             tag: Some("bug".to_string()),
+            symbol: None,
         })
         .unwrap();
     assert_eq!(tag_and_keyword.len(), 2);
+}
+
+#[test]
+fn query_notes_symbol_filter_only_matches_symbol_anchors() {
+    let workspace = create_test_workspace();
+    let mut service = create_test_note_service(workspace.root());
+
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "parse_config documentation".to_string(),
+            tags: None,
+        })
+        .unwrap();
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Symbol(SymbolAnchor {
+                name: "parse_config".to_string(),
+                kind: SymbolKind::Function,
+                signature: None,
+                line_hint: Some(2),
+            }),
+            content: "Parser configuration details".to_string(),
+            tags: None,
+        })
+        .unwrap();
+
+    let results = service
+        .query_notes(&NoteQuery {
+            source_file: None,
+            keyword: None,
+            tag: None,
+            symbol: Some("PARSE_CONFIG".to_string()),
+        })
+        .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert!(matches!(
+        results[0].note.anchor,
+        NoteAnchor::Symbol(SymbolAnchor { ref name, .. }) if name == "parse_config"
+    ));
+}
+
+#[test]
+fn query_notes_file_filter_accepts_a_workspace_directory() {
+    let workspace = create_test_workspace();
+    fs::create_dir_all(workspace.root().join("src/core")).unwrap();
+    let mut service = create_test_note_service(workspace.root());
+
+    for source_file in ["src/core/parser.rs", "src/core/cache.rs", "src/main.rs"] {
+        service
+            .add_note(AddNoteRequest {
+                source_file: source_file.into(),
+                anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+                content: source_file.to_string(),
+                tags: None,
+            })
+            .unwrap();
+    }
+
+    let results = service
+        .query_notes(&NoteQuery {
+            source_file: Some("src/core".into()),
+            keyword: None,
+            tag: None,
+            symbol: None,
+        })
+        .unwrap();
+
+    assert_eq!(
+        results
+            .iter()
+            .map(|view| view.source_file.to_string_lossy().to_string())
+            .collect::<Vec<_>>(),
+        vec!["src/core/cache.rs", "src/core/parser.rs"]
+    );
 }

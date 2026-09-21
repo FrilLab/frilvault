@@ -19,4 +19,9 @@ pub struct NoteQuery {
     ///
     /// 대소문자 무시 정확 tag 일치 검색입니다.
     pub tag: Option<String>,
+
+    /// Case-insensitive substring match on symbol anchor names.
+    ///
+    /// symbol anchor name에 대한 대소문자 무시 부분 문자열 검색입니다.
+    pub symbol: Option<String>,
 }
