@@ -35,6 +35,38 @@ fn parses_environment_identity_create_from_stdin() {
 }
 
 #[test]
+fn parses_environment_rotate_with_confirmation_and_identity_file() {
+    let cli = Cli::parse_from([
+        "flvt",
+        "env",
+        "rotate",
+        "--profile",
+        "development",
+        "--identity-file",
+        "/tmp/frilvault.identity",
+        "--yes",
+        "--format",
+        "json",
+    ]);
+
+    match cli.command {
+        Commands::Env(command) => match command.action {
+            crate::cli::env::EnvAction::Rotate(rotate) => {
+                assert_eq!(rotate.profile, "development");
+                assert_eq!(
+                    rotate.identity_file.as_deref(),
+                    Some(std::path::Path::new("/tmp/frilvault.identity"))
+                );
+                assert!(rotate.yes);
+                assert!(matches!(rotate.format, Some(FormatArg::Json)));
+            }
+            _ => panic!("expected environment rotate command"),
+        },
+        _ => panic!("expected env command"),
+    }
+}
+
+#[test]
 fn parses_environment_doctor_with_profile_and_identity_file() {
     let cli = Cli::parse_from([
         "flvt",

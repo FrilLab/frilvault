@@ -217,6 +217,10 @@ pub enum FrilVaultError {
     /// Returned when a Shared environment profile has no encryption recipients.
     #[error("Shared environment profiles require at least one registered recipient")]
     EmptySharedEnvRecipients,
+
+    /// Returned when a profile rotation has no current encryption recipients.
+    #[error("environment profile rotation requires at least one registered recipient")]
+    EmptyEnvRecipients,
 }
 
 pub type FrilVaultResult<T> = Result<T, FrilVaultError>;

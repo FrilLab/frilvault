@@ -8,7 +8,7 @@ mod unix {
         process::{Command, Output},
     };
 
-    use frilvault_core::{EnvIdentity, EnvProfileStore};
+    use frilvault_core::{EnvIdentity, EnvProfileStore, EnvRecipientStore};
     use uuid::Uuid;
 
     const SECRET_KEY: &str = "FLVT_ENV_TEST_SECRET";
@@ -60,9 +60,12 @@ mod unix {
 
     impl IdentityFile {
         fn new() -> Self {
+            Self::new_with_identity(&EnvIdentity::generate())
+        }
+
+        fn new_with_identity(identity: &EnvIdentity) -> Self {
             let path =
                 std::env::temp_dir().join(format!("frilvault-env-identity-{}", Uuid::new_v4()));
-            let identity = EnvIdentity::generate();
             let encoded = identity.with_encoded(str::to_owned);
             fs::write(&path, format!("{encoded}\n")).unwrap();
             fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
@@ -92,6 +95,40 @@ mod unix {
         EnvProfileStore::new(workspace.root())
             .save_profile("development", &values, &[&recipient])
             .unwrap();
+    }
+
+    fn configure_rotatable_profile(
+        workspace: &TestWorkspace,
+        identity_file: &IdentityFile,
+        current: &EnvIdentity,
+        removed: &EnvIdentity,
+    ) {
+        workspace.init();
+        fs::create_dir_all(workspace.root().join(".vault/env")).unwrap();
+        fs::write(
+            workspace.root().join(".vault/env/manifest.toml"),
+            manifest(false),
+        )
+        .unwrap();
+
+        let current_recipient = current.public_recipient();
+        let removed_recipient = removed.public_recipient();
+        EnvProfileStore::new(workspace.root())
+            .save_profile(
+                "development",
+                &BTreeMap::from([(SECRET_KEY.to_string(), SECRET_VALUE.to_string())]),
+                &[&current_recipient, &removed_recipient],
+            )
+            .unwrap();
+        let recipients = EnvRecipientStore::new(workspace.root().join(".vault"));
+        recipients
+            .add("current", &current_recipient.to_string())
+            .unwrap();
+        recipients
+            .add("removed", &removed_recipient.to_string())
+            .unwrap();
+
+        assert!(identity_file.path.exists());
     }
 
     fn manifest(required: bool) -> &'static str {
@@ -328,5 +365,134 @@ mod unix {
                 .contains("failed to spawn child process")
         );
         assert!(!String::from_utf8_lossy(&spawn_failure.stderr).contains(SECRET_VALUE));
+    }
+
+    #[test]
+    fn rotates_profile_for_current_recipients_and_warns_about_provider_credentials() {
+        let workspace = TestWorkspace::new();
+        let current = EnvIdentity::generate();
+        let removed = EnvIdentity::generate();
+        let identity_file = IdentityFile::new_with_identity(&current);
+        configure_rotatable_profile(&workspace, &identity_file, &current, &removed);
+
+        let profile_path = workspace.root().join(".vault/env/profiles/development.age");
+        let before_confirmation = fs::read(&profile_path).unwrap();
+        let without_confirmation = workspace.run_raw(&[
+            "env",
+            "rotate",
+            "--profile",
+            "development",
+            "--identity-file",
+            identity_file.path.to_str().unwrap(),
+        ]);
+        assert!(!without_confirmation.status.success());
+        assert!(String::from_utf8_lossy(&without_confirmation.stderr).contains("--yes"));
+        assert_eq!(fs::read(&profile_path).unwrap(), before_confirmation);
+
+        let removed_recipient = workspace.run_raw(&["env", "recipients", "remove", "removed"]);
+        assert!(removed_recipient.status.success());
+
+        let rotated = workspace.run_raw(&[
+            "env",
+            "rotate",
+            "--profile",
+            "development",
+            "--identity-file",
+            identity_file.path.to_str().unwrap(),
+            "--yes",
+        ]);
+        assert!(
+            rotated.status.success(),
+            "rotation failed: {}",
+            String::from_utf8_lossy(&rotated.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&rotated.stdout);
+        assert!(stdout.contains("Revoke and reissue"));
+        assert!(!stdout.contains(SECRET_VALUE));
+
+        let store = EnvProfileStore::new(workspace.root());
+        assert!(
+            store
+                .load_profile("development", &[current.age_identity()])
+                .is_ok()
+        );
+        assert!(
+            store
+                .load_profile("development", &[removed.age_identity()])
+                .is_err()
+        );
+
+        let json_rotated = workspace.run_raw(&[
+            "env",
+            "rotate",
+            "--profile",
+            "development",
+            "--identity-file",
+            identity_file.path.to_str().unwrap(),
+            "--yes",
+            "--format",
+            "json",
+        ]);
+        assert!(json_rotated.status.success());
+        let json_stdout = String::from_utf8_lossy(&json_rotated.stdout);
+        assert!(json_stdout.contains("\"profile\": \"development\""));
+        assert!(json_stdout.contains("\"warning\""));
+        assert!(!json_stdout.contains(SECRET_VALUE));
+    }
+
+    #[test]
+    fn rotation_rejects_corrupt_input_without_replacing_it() {
+        let workspace = TestWorkspace::new();
+        let current = EnvIdentity::generate();
+        let removed = EnvIdentity::generate();
+        let identity_file = IdentityFile::new_with_identity(&current);
+        configure_rotatable_profile(&workspace, &identity_file, &current, &removed);
+        let profile_path = workspace.root().join(".vault/env/profiles/development.age");
+        fs::write(&profile_path, b"corrupt ciphertext").unwrap();
+        let original = fs::read(&profile_path).unwrap();
+
+        let output = workspace.run_raw(&[
+            "env",
+            "rotate",
+            "--profile",
+            "development",
+            "--identity-file",
+            identity_file.path.to_str().unwrap(),
+            "--yes",
+        ]);
+
+        assert!(!output.status.success());
+        assert_eq!(fs::read(profile_path).unwrap(), original);
+        assert!(!String::from_utf8_lossy(&output.stderr).contains(SECRET_VALUE));
+    }
+
+    #[test]
+    fn rotation_rejects_empty_recipient_set_without_replacing_the_profile() {
+        let workspace = TestWorkspace::new();
+        let current = EnvIdentity::generate();
+        let removed = EnvIdentity::generate();
+        let identity_file = IdentityFile::new_with_identity(&current);
+        configure_rotatable_profile(&workspace, &identity_file, &current, &removed);
+        let recipient_store = EnvRecipientStore::new(workspace.root().join(".vault"));
+        recipient_store.remove("current").unwrap();
+        recipient_store.remove("removed").unwrap();
+        let profile_path = workspace.root().join(".vault/env/profiles/development.age");
+        let original = fs::read(&profile_path).unwrap();
+
+        let output = workspace.run_raw(&[
+            "env",
+            "rotate",
+            "--profile",
+            "development",
+            "--identity-file",
+            identity_file.path.to_str().unwrap(),
+            "--yes",
+        ]);
+
+        assert!(!output.status.success());
+        assert_eq!(fs::read(profile_path).unwrap(), original);
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("at least one registered recipient")
+        );
     }
 }

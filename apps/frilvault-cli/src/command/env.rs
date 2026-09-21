@@ -3,12 +3,12 @@ use std::{
     collections::BTreeMap,
     ffi::OsString,
     fs::{self, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, BufRead, IsTerminal, Read, Write},
     path::{Component, Path, PathBuf},
     process::{Command, ExitStatus},
 };
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use frilvault_core::{
     EnvIdentity, EnvIdentityManager, EnvIdentityStore, EnvManifestStore, EnvProfileStore,
     EnvRecipient, EnvRecipientStore, FrilVaultError, FrilVaultResult,
@@ -43,6 +43,7 @@ pub fn execute_with_vault(command: EnvCommand, vault_path: Option<&Path>) -> Res
             RecipientsAction::Add(add) => execute_recipients_add(add, vault_path),
             RecipientsAction::Remove(remove) => execute_recipients_remove(remove, vault_path),
         },
+        EnvAction::Rotate(rotate) => execute_rotate(rotate, vault_path),
         EnvAction::Run(run) => execute_run(run, vault_path),
     }
 }
@@ -153,6 +154,13 @@ struct IdentityShowOutput {
 #[derive(Debug, Serialize)]
 struct RemovedRecipientOutput {
     removed: EnvRecipient,
+    warning: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct RotateOutput {
+    profile: String,
+    recipients: usize,
     warning: &'static str,
 }
 
@@ -272,6 +280,129 @@ fn execute_recipients_remove(
     }
 
     Ok(())
+}
+
+fn execute_rotate(
+    command: crate::cli::env::EnvRotateCommand,
+    vault_path: Option<&Path>,
+) -> Result<()> {
+    let format = resolve_format(command.format);
+    if !command.yes && (matches!(format, OutputFormat::Json) || !io::stdin().is_terminal()) {
+        bail!(
+            "environment profile rotation requires explicit confirmation; pass --yes in non-interactive use"
+        );
+    }
+
+    let vault = super::open_vault(vault_path)?;
+    let identity_file = resolve_identity_file(command.identity_file, &vault)?;
+    let identity_store = PreferredIdentityStore::new(identity_file);
+    let identity = require_identity(&identity_store)?;
+    let recipients = EnvRecipientStore::new(vault.vault_root()).load()?;
+
+    if recipients.is_empty() {
+        bail!(
+            "environment profile rotation requires at least one registered recipient; add a recipient before rotating"
+        );
+    }
+
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut input = stdin.lock();
+    let mut output = stdout.lock();
+    let should_rotate = confirm_rotation(
+        command.yes,
+        format,
+        stdin.is_terminal(),
+        &command.profile,
+        recipients.len(),
+        &mut input,
+        &mut output,
+    )?;
+
+    if should_rotate {
+        EnvProfileStore::new_at_vault_root(vault.vault_root()).rotate_profile(
+            &command.profile,
+            &identity,
+            &recipients,
+        )?;
+
+        let output = RotateOutput {
+            profile: command.profile,
+            recipients: recipients.len(),
+            warning: "This rotates FrilVault ciphertext only. Revoke and reissue the actual API key, password, or token at its provider, then run this rotation workflow.",
+        };
+
+        match format {
+            OutputFormat::Text => {
+                println!(
+                    "Rotated environment profile '{}' for {} current recipient{}.",
+                    output.profile,
+                    output.recipients,
+                    if output.recipients == 1 { "" } else { "s" },
+                );
+                println!("Warning: {}", output.warning);
+            }
+            OutputFormat::Json => print_json(&output)?,
+        }
+    }
+
+    Ok(())
+}
+
+fn require_identity<S>(store: S) -> Result<EnvIdentity>
+where
+    S: EnvIdentityStore,
+{
+    EnvIdentityManager::new(store)
+        .load()?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no environment identity is configured; run `flvt env identity create` or provide --identity-file"
+            )
+        })
+}
+
+fn confirm_rotation(
+    yes: bool,
+    format: OutputFormat,
+    interactive: bool,
+    profile: &str,
+    recipient_count: usize,
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+) -> Result<bool> {
+    if !yes && (matches!(format, OutputFormat::Json) || !interactive) {
+        bail!(
+            "environment profile rotation requires explicit confirmation; pass --yes in non-interactive use"
+        );
+    }
+
+    if yes {
+        return Ok(true);
+    }
+
+    write!(
+        output,
+        "Rotate encrypted environment profile '{}' for {} current recipient{}? [y/N]: ",
+        profile,
+        recipient_count,
+        if recipient_count == 1 { "" } else { "s" },
+    )?;
+    output.flush().context("failed to flush stdout")?;
+
+    let mut confirmation = String::new();
+    input
+        .read_line(&mut confirmation)
+        .context("failed to read confirmation")?;
+    if !matches!(
+        confirmation.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ) {
+        writeln!(output, "Aborted.")?;
+        return Ok(false);
+    }
+
+    Ok(true)
 }
 
 fn read_identity_from_stdin() -> Result<EnvIdentity> {
@@ -618,10 +749,11 @@ impl EnvIdentityStore for &PreferredIdentityStore {
 mod tests {
     use std::{
         fs,
+        io::Cursor,
         path::{Path, PathBuf},
     };
 
-    use frilvault_core::{EnvIdentity, FrilVault};
+    use frilvault_core::{EnvIdentity, EnvIdentityStore, FrilVault, FrilVaultResult};
 
     use super::*;
 
@@ -645,6 +777,18 @@ mod tests {
     impl Drop for TestDirectory {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    struct EmptyIdentityStore;
+
+    impl EnvIdentityStore for EmptyIdentityStore {
+        fn load_identity(&self) -> FrilVaultResult<Option<EnvIdentity>> {
+            Ok(None)
+        }
+
+        fn save_identity(&self, _identity: &EnvIdentity) -> FrilVaultResult<()> {
+            Ok(())
         }
     }
 
@@ -700,6 +844,97 @@ mod tests {
         let error = resolve_identity_file(Some(identity_path), &vault).unwrap_err();
 
         assert!(error.to_string().contains("outside the workspace"));
+    }
+
+    #[test]
+    fn rotation_confirmation_covers_yes_no_and_interactive_acceptance() {
+        let mut accepted_input = Cursor::new(b"yes\n");
+        let mut accepted_output = Vec::new();
+        assert!(
+            confirm_rotation(
+                false,
+                OutputFormat::Text,
+                true,
+                "development",
+                1,
+                &mut accepted_input,
+                &mut accepted_output,
+            )
+            .unwrap()
+        );
+        assert!(
+            String::from_utf8(accepted_output)
+                .unwrap()
+                .contains("development")
+        );
+
+        let mut declined_input = Cursor::new(b"no\n");
+        let mut declined_output = Vec::new();
+        assert!(
+            !confirm_rotation(
+                false,
+                OutputFormat::Text,
+                true,
+                "development",
+                2,
+                &mut declined_input,
+                &mut declined_output,
+            )
+            .unwrap()
+        );
+        assert!(
+            String::from_utf8(declined_output)
+                .unwrap()
+                .contains("Aborted.")
+        );
+
+        let mut unused_input = Cursor::new(Vec::<u8>::new());
+        let mut unused_output = Vec::new();
+        assert!(
+            confirm_rotation(
+                true,
+                OutputFormat::Json,
+                false,
+                "development",
+                0,
+                &mut unused_input,
+                &mut unused_output,
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn rotation_confirmation_rejects_noninteractive_without_yes() {
+        let mut input = Cursor::new(Vec::<u8>::new());
+        let mut output = Vec::new();
+
+        let error = confirm_rotation(
+            false,
+            OutputFormat::Text,
+            false,
+            "development",
+            1,
+            &mut input,
+            &mut output,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("--yes"));
+    }
+
+    #[test]
+    fn require_identity_reports_missing_configuration_without_secret_material() {
+        EmptyIdentityStore
+            .save_identity(&EnvIdentity::generate())
+            .unwrap();
+        let error = require_identity(EmptyIdentityStore).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("no environment identity is configured")
+        );
     }
 
     #[cfg(windows)]
