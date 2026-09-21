@@ -233,9 +233,37 @@ impl EnvManifestStore {
         EnvManifest::new(stored.variables)
             .map_err(|_| FrilVaultError::InvalidEnvManifest(self.path.clone()))
     }
+
+    /// Creates the environment directory, profiles directory, and an empty
+    /// versioned manifest without replacing existing metadata.
+    pub fn initialize(&self) -> FrilVaultResult<bool> {
+        let Some(env_root) = self.path.parent() else {
+            return Err(FrilVaultError::InvalidEnvManifest(self.path.clone()));
+        };
+        fs::create_dir_all(env_root.join(PROFILES_DIR_NAME))?;
+
+        let stored = StoredEnvManifest {
+            version: ENV_MANIFEST_VERSION,
+            variables: BTreeMap::new(),
+        };
+        let contents = toml::to_string_pretty(&stored)
+            .map_err(|_| FrilVaultError::InvalidEnvManifest(self.path.clone()))?;
+
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        match options.open(&self.path) {
+            Ok(mut file) => {
+                file.write_all(contents.as_bytes())?;
+                file.sync_all()?;
+                Ok(true)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StoredEnvManifest {
     version: u32,
@@ -891,6 +919,29 @@ impl EnvProfileStore {
         self.save_payload_for_mode(profile_name, &payload, mode, recipients)
     }
 
+    /// Encrypts a profile for the selected vault policy using the caller's
+    /// identity for Local vaults or the public recipient registry for Shared
+    /// vaults.
+    pub fn save_profile_for_environment(
+        &self,
+        profile_name: &str,
+        values: &BTreeMap<String, String>,
+        mode: VaultMode,
+        identity: &EnvIdentity,
+        registry: &EnvRecipientRegistry,
+    ) -> FrilVaultResult<()> {
+        let recipients = if mode == VaultMode::Local {
+            vec![identity.public_recipient()]
+        } else {
+            registry.age_recipients()?
+        };
+        let recipient_refs: Vec<&dyn Recipient> = recipients
+            .iter()
+            .map(|recipient| recipient as &dyn Recipient)
+            .collect();
+        self.save_profile_for_mode(profile_name, values, mode, &recipient_refs)
+    }
+
     /// Reads, decrypts, and validates a profile ciphertext.
     pub fn load_profile(
         &self,
@@ -1499,7 +1550,8 @@ fn validate_values(values: &BTreeMap<String, String>) -> FrilVaultResult<()> {
     Ok(())
 }
 
-fn validate_env_variable_name(name: &str) -> FrilVaultResult<()> {
+/// Validates a portable environment variable name before file or process use.
+pub fn validate_env_variable_name(name: &str) -> FrilVaultResult<()> {
     let mut bytes = name.bytes();
     let valid = matches!(bytes.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
         && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
@@ -2147,6 +2199,34 @@ mod tests {
 
         assert!(matches!(error, FrilVaultError::InvalidEnvManifest(_)));
         assert!(!error.to_string().contains("fixture-secret"));
+    }
+
+    #[test]
+    fn manifest_store_initialization_is_idempotent_and_creates_profile_directory() {
+        let workspace = create_test_workspace();
+        let vault_root = workspace.root().join(VAULT_DIR_NAME);
+        let store = EnvManifestStore::new(&vault_root);
+
+        assert!(store.initialize().unwrap());
+        let original = fs::read_to_string(store.path()).unwrap();
+        assert!(
+            vault_root
+                .join(ENV_DIR_NAME)
+                .join(PROFILES_DIR_NAME)
+                .is_dir()
+        );
+
+        fs::write(
+            store.path(),
+            "version = 1\n\n[variables.CUSTOM]\nrequired = false\nsecret = true\n",
+        )
+        .unwrap();
+        assert!(!store.initialize().unwrap());
+        assert_eq!(
+            fs::read_to_string(store.path()).unwrap(),
+            "version = 1\n\n[variables.CUSTOM]\nrequired = false\nsecret = true\n"
+        );
+        assert_ne!(original, fs::read_to_string(store.path()).unwrap());
     }
 
     #[derive(Default)]
