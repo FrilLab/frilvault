@@ -421,6 +421,23 @@ mod unix {
                 .load_profile("development", &[removed.age_identity()])
                 .is_err()
         );
+
+        let json_rotated = workspace.run_raw(&[
+            "env",
+            "rotate",
+            "--profile",
+            "development",
+            "--identity-file",
+            identity_file.path.to_str().unwrap(),
+            "--yes",
+            "--format",
+            "json",
+        ]);
+        assert!(json_rotated.status.success());
+        let json_stdout = String::from_utf8_lossy(&json_rotated.stdout);
+        assert!(json_stdout.contains("\"profile\": \"development\""));
+        assert!(json_stdout.contains("\"warning\""));
+        assert!(!json_stdout.contains(SECRET_VALUE));
     }
 
     #[test]
