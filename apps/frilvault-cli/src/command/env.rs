@@ -11,13 +11,15 @@ use std::{
 use anyhow::{Context, Result, bail};
 use frilvault_core::{
     EnvIdentity, EnvIdentityManager, EnvIdentityStore, EnvManifestStore, EnvProfileStore,
-    EnvRecipient, EnvRecipientStore, FrilVaultError, FrilVaultResult,
+    EnvRecipient, EnvRecipientStore, FrilVaultError, FrilVaultResult, validate_env_variable_name,
+    validate_profile_name,
 };
 use serde::Serialize;
 
 use crate::{
     cli::env::{
-        EnvAction, EnvCommand, EnvRunCommand, IdentityAction, IdentityCreateCommand,
+        EnvAction, EnvCommand, EnvImportCommand, EnvInitCommand, EnvListCommand, EnvRunCommand,
+        EnvSetCommand, EnvValidateCommand, IdentityAction, IdentityCreateCommand,
         IdentityShowCommand, RecipientsAction, RecipientsAddCommand, RecipientsListCommand,
         RecipientsRemoveCommand,
     },
@@ -34,6 +36,7 @@ pub fn execute(command: EnvCommand) -> Result<()> {
 pub fn execute_with_vault(command: EnvCommand, vault_path: Option<&Path>) -> Result<()> {
     match command.action {
         EnvAction::Doctor(doctor) => crate::command::doctor::execute_env(doctor, vault_path),
+        EnvAction::Init(init) => execute_init(init, vault_path),
         EnvAction::Identity(identity) => match identity.action {
             IdentityAction::Create(create) => execute_identity_create(create, vault_path),
             IdentityAction::Show(show) => execute_identity_show(show, vault_path),
@@ -45,7 +48,479 @@ pub fn execute_with_vault(command: EnvCommand, vault_path: Option<&Path>) -> Res
         },
         EnvAction::Rotate(rotate) => execute_rotate(rotate, vault_path),
         EnvAction::Run(run) => execute_run(run, vault_path),
+        EnvAction::Set(set) => execute_set(set, vault_path),
+        EnvAction::List(list) => execute_list(list, vault_path),
+        EnvAction::Validate(validate) => execute_validate(validate, vault_path),
+        EnvAction::Import(import) => execute_import(import, vault_path),
     }
+}
+
+#[derive(Debug, Serialize)]
+struct EnvInitOutput {
+    manifest: PathBuf,
+    profiles: PathBuf,
+    created: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct EnvVariableStatus {
+    name: String,
+    status: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct EnvProfileStatus {
+    profile: String,
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<&'static str>,
+    variables: Vec<EnvVariableStatus>,
+}
+
+fn execute_init(command: EnvInitCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
+    let manifest_store = EnvManifestStore::new(vault.vault_root());
+    let created = manifest_store.initialize()?;
+    let output = EnvInitOutput {
+        manifest: manifest_store.path().to_path_buf(),
+        profiles: vault.vault_root().join("env").join("profiles"),
+        created,
+    };
+
+    match resolve_format(command.format) {
+        OutputFormat::Text => {
+            if created {
+                println!("Initialized FrilVault environment metadata.");
+            } else {
+                println!("Environment metadata already initialized.");
+            }
+            println!("Manifest: {}", output.manifest.display());
+            println!("Profiles: {}", output.profiles.display());
+        }
+        OutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+fn execute_set(command: EnvSetCommand, vault_path: Option<&Path>) -> Result<()> {
+    validate_env_variable_name(&command.key)?;
+    validate_profile_name(&command.profile)?;
+
+    let vault = super::open_vault(vault_path)?;
+    let manifest = EnvManifestStore::new(vault.vault_root()).load()?;
+    if !manifest.variables().contains_key(&command.key) {
+        bail!(
+            "environment variable is not declared by the manifest: {}",
+            command.key
+        );
+    }
+
+    let identity_file = resolve_identity_file(command.identity_file, &vault)?;
+    let identity = require_identity(PreferredIdentityStore::new(identity_file))?;
+    let profile_store = EnvProfileStore::new_at_vault_root(vault.vault_root());
+    let profile_path = profile_store.profile_path(&command.profile)?;
+    let mut values = if profile_path.is_file() {
+        profile_store
+            .load_profile(&command.profile, &[identity.age_identity()])?
+            .into_values()
+    } else if profile_path.exists() {
+        bail!("environment profile path is not a regular file");
+    } else {
+        BTreeMap::new()
+    };
+    if let Some(key) = values
+        .keys()
+        .find(|key| !manifest.variables().contains_key(*key))
+    {
+        bail!("environment profile contains undeclared variable: {key}");
+    }
+
+    let mode = vault.status()?.mode;
+    let recipients = EnvRecipientStore::new(vault.vault_root()).load()?;
+
+    let value = if command.stdin {
+        read_value_from_stdin()?
+    } else {
+        rpassword::prompt_password(format!("Enter value for {}: ", command.key))?
+    };
+    values.insert(command.key.clone(), value);
+
+    profile_store.save_profile_for_environment(
+        &command.profile,
+        &values,
+        mode,
+        &identity,
+        &recipients,
+    )?;
+
+    let output = serde_json::json!({
+        "profile": command.profile,
+        "variable": command.key,
+        "status": "configured",
+    });
+    match resolve_format(command.format) {
+        OutputFormat::Text => println!(
+            "Configured environment variable '{}' in profile '{}'.",
+            output["variable"].as_str().unwrap_or_default(),
+            output["profile"].as_str().unwrap_or_default(),
+        ),
+        OutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+fn execute_list(command: EnvListCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
+    let report = inspect_profile(&vault, &command.profile, command.identity_file)?;
+
+    match resolve_format(command.format) {
+        OutputFormat::Text => print_profile_status(&report),
+        OutputFormat::Json => print_json(&report)?,
+    }
+
+    Ok(())
+}
+
+fn execute_validate(command: EnvValidateCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
+    let report = inspect_profile(&vault, &command.profile, command.identity_file)?;
+    let ready = report.status == "ready";
+
+    match resolve_format(command.format) {
+        OutputFormat::Text => print_profile_status(&report),
+        OutputFormat::Json => print_json(&report)?,
+    }
+
+    if !ready {
+        bail!(
+            "environment profile '{}' is not valid ({})",
+            report.profile,
+            report.error_code.unwrap_or("validation_failed")
+        );
+    }
+
+    Ok(())
+}
+
+fn execute_import(command: EnvImportCommand, vault_path: Option<&Path>) -> Result<()> {
+    validate_profile_name(&command.profile)?;
+    let values = parse_dotenv(&command.source)?;
+    let vault = super::open_vault(vault_path)?;
+    let manifest = EnvManifestStore::new(vault.vault_root()).load()?;
+    for key in values.keys() {
+        if !manifest.variables().contains_key(key) {
+            bail!("environment variable is not declared by the manifest: {key}");
+        }
+    }
+
+    let profile_store = EnvProfileStore::new_at_vault_root(vault.vault_root());
+    let profile_path = profile_store.profile_path(&command.profile)?;
+    let replaced = profile_path.exists();
+    if replaced && !profile_path.is_file() {
+        bail!("environment profile path is not a regular file");
+    }
+    if replaced && !command.replace {
+        bail!(
+            "environment profile '{}' already exists; pass --replace to replace it",
+            command.profile
+        );
+    }
+    if replaced
+        && command.replace
+        && !confirm_import(
+            command.yes,
+            resolve_format(command.format),
+            &command.profile,
+        )?
+    {
+        return Ok(());
+    }
+
+    let identity_file = resolve_identity_file(command.identity_file, &vault)?;
+    let identity = require_identity(PreferredIdentityStore::new(identity_file))?;
+    let mode = vault.status()?.mode;
+    let recipients = EnvRecipientStore::new(vault.vault_root()).load()?;
+    profile_store.save_profile_for_environment(
+        &command.profile,
+        &values,
+        mode,
+        &identity,
+        &recipients,
+    )?;
+
+    let output = serde_json::json!({
+        "profile": command.profile,
+        "variables": values.len(),
+        "replaced": replaced,
+        "status": "configured",
+    });
+    match resolve_format(command.format) {
+        OutputFormat::Text => println!(
+            "Imported {} environment variable{} into profile '{}'.",
+            output["variables"].as_u64().unwrap_or_default(),
+            if output["variables"].as_u64() == Some(1) {
+                ""
+            } else {
+                "s"
+            },
+            output["profile"].as_str().unwrap_or_default(),
+        ),
+        OutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+fn inspect_profile(
+    vault: &frilvault_core::FrilVault,
+    profile_name: &str,
+    identity_file: Option<PathBuf>,
+) -> Result<EnvProfileStatus> {
+    validate_profile_name(profile_name)?;
+    let manifest_store = EnvManifestStore::new(vault.vault_root());
+    let manifest = match manifest_store.load() {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            return Ok(EnvProfileStatus {
+                profile: profile_name.to_string(),
+                status: "invalid",
+                error_code: Some(if is_not_found(&error) {
+                    "manifest_missing"
+                } else {
+                    "manifest_invalid"
+                }),
+                variables: Vec::new(),
+            });
+        }
+    };
+
+    let profile_store = EnvProfileStore::new_at_vault_root(vault.vault_root());
+    let profile_path = profile_store.profile_path(profile_name)?;
+    let variable_names: Vec<String> = manifest.variables().keys().cloned().collect();
+    if !profile_path.is_file() {
+        return Ok(EnvProfileStatus {
+            profile: profile_name.to_string(),
+            status: if profile_path.exists() {
+                "invalid"
+            } else {
+                "missing"
+            },
+            error_code: Some(if profile_path.exists() {
+                "profile_invalid"
+            } else {
+                "profile_missing"
+            }),
+            variables: variable_statuses(&manifest, None, false),
+        });
+    }
+
+    let identity_file = resolve_identity_file(identity_file, vault)?;
+    let identity_store = PreferredIdentityStore::new(identity_file);
+    let identity = match identity_store.load_identity() {
+        Ok(Some(identity)) => identity,
+        Ok(None) => {
+            return Ok(EnvProfileStatus {
+                profile: profile_name.to_string(),
+                status: "unavailable",
+                error_code: Some("identity_missing"),
+                variables: variable_names
+                    .into_iter()
+                    .map(|name| EnvVariableStatus {
+                        name,
+                        status: "unavailable",
+                    })
+                    .collect(),
+            });
+        }
+        Err(_) => {
+            return Ok(EnvProfileStatus {
+                profile: profile_name.to_string(),
+                status: "unavailable",
+                error_code: Some("identity_unavailable"),
+                variables: variable_names
+                    .into_iter()
+                    .map(|name| EnvVariableStatus {
+                        name,
+                        status: "unavailable",
+                    })
+                    .collect(),
+            });
+        }
+    };
+
+    let payload = match profile_store.load_profile(profile_name, &[identity.age_identity()]) {
+        Ok(payload) => payload,
+        Err(error) => {
+            return Ok(EnvProfileStatus {
+                profile: profile_name.to_string(),
+                status: "invalid",
+                error_code: Some(profile_error_code(&error)),
+                variables: variable_statuses(&manifest, None, true),
+            });
+        }
+    };
+    let variables = variable_statuses(&manifest, Some(payload.values()), false);
+    let status = match manifest.resolve_profile(payload) {
+        Ok(_) => "ready",
+        Err(FrilVaultError::MissingRequiredEnvVariable(_)) => "missing",
+        Err(FrilVaultError::UnknownEnvProfileVariable(_)) => "invalid",
+        Err(_) => "invalid",
+    };
+    let error_code = match status {
+        "ready" => None,
+        "missing" => Some("required_variable_missing"),
+        _ => Some("profile_values_invalid"),
+    };
+
+    Ok(EnvProfileStatus {
+        profile: profile_name.to_string(),
+        status,
+        error_code,
+        variables,
+    })
+}
+
+fn variable_statuses(
+    manifest: &frilvault_core::EnvManifest,
+    values: Option<&BTreeMap<String, String>>,
+    invalid: bool,
+) -> Vec<EnvVariableStatus> {
+    manifest
+        .variables()
+        .iter()
+        .map(|(name, spec)| EnvVariableStatus {
+            name: name.clone(),
+            status: if invalid {
+                "invalid"
+            } else if values.is_some_and(|values| values.contains_key(name)) {
+                "configured"
+            } else if spec.default.is_some() {
+                "default"
+            } else {
+                "missing"
+            },
+        })
+        .collect()
+}
+
+fn print_profile_status(report: &EnvProfileStatus) {
+    println!("Environment profile '{}'", report.profile);
+    println!("Status: {}", report.status);
+    if let Some(error_code) = report.error_code {
+        println!("Error: {error_code}");
+    }
+    for variable in &report.variables {
+        println!("{}: {}", variable.name, variable.status);
+    }
+}
+
+fn profile_error_code(error: &FrilVaultError) -> &'static str {
+    match error {
+        FrilVaultError::Io(_) => "profile_unavailable",
+        FrilVaultError::EnvProfileDecryptionFailed => "profile_unreadable",
+        FrilVaultError::InvalidEnvProfilePayload
+        | FrilVaultError::InvalidEnvProfileUtf8
+        | FrilVaultError::UnsupportedEnvProfilePayloadVersion(_) => "profile_invalid",
+        _ => "profile_invalid",
+    }
+}
+
+fn is_not_found(error: &FrilVaultError) -> bool {
+    matches!(error, FrilVaultError::Io(error) if error.kind() == io::ErrorKind::NotFound)
+}
+
+fn read_value_from_stdin() -> Result<String> {
+    let mut value = String::new();
+    io::stdin().read_to_string(&mut value)?;
+    if let Some(stripped) = value.strip_suffix('\n') {
+        value = stripped.strip_suffix('\r').unwrap_or(stripped).to_string();
+    }
+    Ok(value)
+}
+
+fn parse_dotenv(path: &Path) -> Result<BTreeMap<String, String>> {
+    let contents = fs::read_to_string(path).with_context(|| {
+        format!(
+            "failed to read dotenv source '{}'; check its path",
+            path.display()
+        )
+    })?;
+
+    for (line_number, line) in contents.lines().enumerate() {
+        if contains_unsupported_shell_syntax(line) {
+            bail!(
+                "unsupported shell syntax in dotenv source at line {}",
+                line_number + 1
+            );
+        }
+    }
+
+    let mut values = BTreeMap::new();
+    for entry in dotenvy::from_read_iter(contents.as_bytes()) {
+        let (key, value) = entry.map_err(|error| match error {
+            dotenvy::Error::LineParse(line, _) => {
+                let line_number = contents
+                    .lines()
+                    .position(|candidate| candidate == line)
+                    .map_or(1, |index| index + 1);
+                anyhow::anyhow!("invalid dotenv syntax at line {line_number}")
+            }
+            dotenvy::Error::Io(_) | dotenvy::Error::EnvVar(_) => {
+                anyhow::anyhow!("invalid dotenv source; expected KEY=VALUE entries")
+            }
+            _ => anyhow::anyhow!("invalid dotenv source; expected KEY=VALUE entries"),
+        })?;
+        validate_env_variable_name(&key).map_err(|_| {
+            anyhow::anyhow!("invalid environment variable name in dotenv source: {key}")
+        })?;
+        if values.insert(key.clone(), value).is_some() {
+            bail!("duplicate environment variable in dotenv source: {key}");
+        }
+    }
+    Ok(values)
+}
+
+fn contains_unsupported_shell_syntax(line: &str) -> bool {
+    let mut single_quoted = false;
+    let mut escaped = false;
+    for character in line.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' && !single_quoted {
+            escaped = true;
+            continue;
+        }
+        if character == '\'' {
+            single_quoted = !single_quoted;
+            continue;
+        }
+        if character == '`' || (character == '$' && !single_quoted) {
+            return true;
+        }
+    }
+    false
+}
+
+fn confirm_import(yes: bool, format: OutputFormat, profile: &str) -> Result<bool> {
+    if yes {
+        return Ok(true);
+    }
+    if matches!(format, OutputFormat::Json) || !io::stdin().is_terminal() {
+        bail!("replacing an environment profile requires --yes in non-interactive use");
+    }
+
+    print!("Replace encrypted environment profile '{profile}'? [y/N]: ");
+    io::stdout().flush()?;
+    let mut confirmation = String::new();
+    io::stdin().read_line(&mut confirmation)?;
+    Ok(matches!(
+        confirmation.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 pub(crate) fn load_identity_for_doctor(

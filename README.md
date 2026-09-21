@@ -240,6 +240,59 @@ pre-operation cache state. The returned error always reports whether rollback
 succeeded; a rollback failure requires inspecting the reported paths before
 retrying the operation.
 
+### Environment profiles
+
+Initialize the encrypted environment layout once, then define the allowed
+variables in `.vault/env/manifest.toml`. `env init` is idempotent and never
+overwrites an existing manifest:
+
+```bash
+flvt env init
+```
+
+Declare variables before setting them, for example:
+
+```toml
+version = 1
+
+[variables.DATABASE_URL]
+required = true
+secret = true
+
+[variables.LOG_LEVEL]
+required = false
+secret = false
+default = "info"
+```
+
+Then configure and validate a profile:
+
+```bash
+flvt env set DATABASE_URL --profile development --stdin
+flvt env list --profile development
+flvt env validate --profile development
+```
+
+`env set` accepts a hidden interactive value by default or a value from
+`--stdin` for automation. Values are encrypted directly into
+`.vault/env/profiles/<profile>.age`; no plaintext profile file is created.
+`env list` reports only `configured`, `missing`, or `default` statuses, and
+`env validate --format json` emits value-free status codes and exits non-zero
+when the profile is not runnable.
+
+Import an existing dotenv file without deleting or changing its source:
+
+```bash
+flvt env import .env --profile development
+flvt env import .env --profile development --replace --yes
+```
+
+The importer supports comments, blank lines, `KEY=VALUE`, quoted values, empty
+values, and an optional `export` prefix. It rejects duplicate keys, invalid
+names, variable expansion, and shell syntax. Existing encrypted profiles are
+never replaced unless `--replace` is supplied; non-interactive replacement
+also requires `--yes`.
+
 ### Environment identity and recipients
 
 Environment encryption uses age identities. The private identity is created or

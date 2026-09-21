@@ -35,6 +35,53 @@ fn parses_environment_identity_create_from_stdin() {
 }
 
 #[test]
+fn parses_environment_profile_commands() {
+    let cli = Cli::parse_from([
+        "flvt",
+        "env",
+        "set",
+        "DATABASE_URL",
+        "--profile",
+        "development",
+        "--stdin",
+    ]);
+    match cli.command {
+        Commands::Env(command) => match command.action {
+            crate::cli::env::EnvAction::Set(set) => {
+                assert_eq!(set.key, "DATABASE_URL");
+                assert_eq!(set.profile, "development");
+                assert!(set.stdin);
+            }
+            _ => panic!("expected env set command"),
+        },
+        _ => panic!("expected env command"),
+    }
+
+    let cli = Cli::parse_from([
+        "flvt",
+        "env",
+        "import",
+        ".env",
+        "--profile",
+        "development",
+        "--replace",
+        "--yes",
+    ]);
+    match cli.command {
+        Commands::Env(command) => match command.action {
+            crate::cli::env::EnvAction::Import(import) => {
+                assert_eq!(import.source, std::path::Path::new(".env"));
+                assert_eq!(import.profile, "development");
+                assert!(import.replace);
+                assert!(import.yes);
+            }
+            _ => panic!("expected env import command"),
+        },
+        _ => panic!("expected env command"),
+    }
+}
+
+#[test]
 fn parses_environment_rotate_with_confirmation_and_identity_file() {
     let cli = Cli::parse_from([
         "flvt",

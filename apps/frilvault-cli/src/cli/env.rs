@@ -12,10 +12,95 @@ pub struct EnvCommand {
 #[derive(Debug, Subcommand)]
 pub enum EnvAction {
     Doctor(EnvDoctorCommand),
+    Init(EnvInitCommand),
     Identity(IdentityCommand),
     Recipients(RecipientsCommand),
     Rotate(EnvRotateCommand),
     Run(EnvRunCommand),
+    Set(EnvSetCommand),
+    List(EnvListCommand),
+    Validate(EnvValidateCommand),
+    Import(EnvImportCommand),
+}
+
+#[derive(Debug, Args)]
+pub struct EnvInitCommand {
+    #[arg(long, value_enum)]
+    pub format: Option<FormatArg>,
+}
+
+#[derive(Debug, Args)]
+pub struct EnvSetCommand {
+    /// Environment variable name declared in the manifest.
+    pub key: String,
+
+    /// Environment profile to update.
+    #[arg(long, required = true, value_name = "NAME")]
+    pub profile: String,
+
+    /// Read the value from stdin without echoing it.
+    #[arg(long)]
+    pub stdin: bool,
+
+    /// Explicit permission-restricted identity fallback file.
+    #[arg(long, value_name = "PATH")]
+    pub identity_file: Option<PathBuf>,
+
+    #[arg(long, value_enum)]
+    pub format: Option<FormatArg>,
+}
+
+#[derive(Debug, Args)]
+pub struct EnvListCommand {
+    /// Environment profile to inspect.
+    #[arg(long, required = true, value_name = "NAME")]
+    pub profile: String,
+
+    /// Explicit permission-restricted identity fallback file.
+    #[arg(long, value_name = "PATH")]
+    pub identity_file: Option<PathBuf>,
+
+    #[arg(long, value_enum)]
+    pub format: Option<FormatArg>,
+}
+
+#[derive(Debug, Args)]
+pub struct EnvValidateCommand {
+    /// Environment profile to validate.
+    #[arg(long, required = true, value_name = "NAME")]
+    pub profile: String,
+
+    /// Explicit permission-restricted identity fallback file.
+    #[arg(long, value_name = "PATH")]
+    pub identity_file: Option<PathBuf>,
+
+    #[arg(long, value_enum)]
+    pub format: Option<FormatArg>,
+}
+
+#[derive(Debug, Args)]
+pub struct EnvImportCommand {
+    /// Existing dotenv file to import.
+    pub source: PathBuf,
+
+    /// Environment profile to create or replace.
+    #[arg(long, required = true, value_name = "NAME")]
+    pub profile: String,
+
+    /// Replace an existing encrypted profile.
+    #[arg(long)]
+    pub replace: bool,
+
+    /// Confirm replacement without an interactive prompt.
+    #[arg(long, short = 'y', alias = "force")]
+    pub yes: bool,
+
+    /// Explicit permission-restricted identity fallback file.
+    #[arg(long, value_name = "PATH")]
+    pub identity_file: Option<PathBuf>,
+
+    #[arg(long, value_enum)]
+    pub format: Option<FormatArg>,
 }
 
 #[derive(Debug, Args)]
