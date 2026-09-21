@@ -3,12 +3,12 @@ use std::{
     collections::BTreeMap,
     ffi::OsString,
     fs::{self, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, IsTerminal, Read, Write},
     path::{Component, Path, PathBuf},
     process::{Command, ExitStatus},
 };
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use frilvault_core::{
     EnvIdentity, EnvIdentityManager, EnvIdentityStore, EnvManifestStore, EnvProfileStore,
     EnvRecipient, EnvRecipientStore, FrilVaultError, FrilVaultResult,
@@ -43,6 +43,7 @@ pub fn execute_with_vault(command: EnvCommand, vault_path: Option<&Path>) -> Res
             RecipientsAction::Add(add) => execute_recipients_add(add, vault_path),
             RecipientsAction::Remove(remove) => execute_recipients_remove(remove, vault_path),
         },
+        EnvAction::Rotate(rotate) => execute_rotate(rotate, vault_path),
         EnvAction::Run(run) => execute_run(run, vault_path),
     }
 }
@@ -156,6 +157,13 @@ struct RemovedRecipientOutput {
     warning: &'static str,
 }
 
+#[derive(Debug, Serialize)]
+struct RotateOutput {
+    profile: String,
+    recipients: usize,
+    warning: &'static str,
+}
+
 fn execute_identity_create(
     command: IdentityCreateCommand,
     vault_path: Option<&Path>,
@@ -266,6 +274,82 @@ fn execute_recipients_remove(
     match resolve_format(command.format) {
         OutputFormat::Text => {
             println!("Removed environment recipient '{}'.", output.removed.id);
+            println!("Warning: {}", output.warning);
+        }
+        OutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+fn execute_rotate(
+    command: crate::cli::env::EnvRotateCommand,
+    vault_path: Option<&Path>,
+) -> Result<()> {
+    let format = resolve_format(command.format);
+    if !command.yes && (matches!(format, OutputFormat::Json) || !io::stdin().is_terminal()) {
+        bail!(
+            "environment profile rotation requires explicit confirmation; pass --yes in non-interactive use"
+        );
+    }
+
+    let vault = super::open_vault(vault_path)?;
+    let identity_file = resolve_identity_file(command.identity_file, &vault)?;
+    let identity_store = PreferredIdentityStore::new(identity_file);
+    let identity = EnvIdentityManager::new(&identity_store)
+        .load()?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no environment identity is configured; run `flvt env identity create` or provide --identity-file"
+            )
+        })?;
+    let recipients = EnvRecipientStore::new(vault.vault_root()).load()?;
+
+    if recipients.is_empty() {
+        bail!(
+            "environment profile rotation requires at least one registered recipient; add a recipient before rotating"
+        );
+    }
+
+    if !command.yes {
+        print!(
+            "Rotate encrypted environment profile '{}' for {} current recipient{}? [y/N]: ",
+            command.profile,
+            recipients.len(),
+            if recipients.len() == 1 { "" } else { "s" },
+        );
+        io::stdout().flush().context("failed to flush stdout")?;
+
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .context("failed to read confirmation")?;
+        if !matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
+
+    EnvProfileStore::new_at_vault_root(vault.vault_root()).rotate_profile(
+        &command.profile,
+        &identity,
+        &recipients,
+    )?;
+
+    let output = RotateOutput {
+        profile: command.profile,
+        recipients: recipients.len(),
+        warning: "This rotates FrilVault ciphertext only. Revoke and reissue the actual API key, password, or token at its provider, then run this rotation workflow.",
+    };
+
+    match format {
+        OutputFormat::Text => {
+            println!(
+                "Rotated environment profile '{}' for {} current recipient{}.",
+                output.profile,
+                output.recipients,
+                if output.recipients == 1 { "" } else { "s" },
+            );
             println!("Warning: {}", output.warning);
         }
         OutputFormat::Json => print_json(&output)?,

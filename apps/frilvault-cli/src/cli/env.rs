@@ -14,6 +14,7 @@ pub enum EnvAction {
     Doctor(EnvDoctorCommand),
     Identity(IdentityCommand),
     Recipients(RecipientsCommand),
+    Rotate(EnvRotateCommand),
     Run(EnvRunCommand),
 }
 
@@ -44,6 +45,24 @@ pub struct EnvRunCommand {
     /// Child executable and arguments. The `--` separator is required.
     #[arg(last = true, required = true, value_name = "COMMAND")]
     pub command: Vec<OsString>,
+}
+
+#[derive(Debug, Args)]
+pub struct EnvRotateCommand {
+    /// Environment profile to re-encrypt for the current recipient registry.
+    #[arg(long, required = true, value_name = "NAME")]
+    pub profile: String,
+
+    /// Explicit permission-restricted identity fallback file.
+    #[arg(long, value_name = "PATH")]
+    pub identity_file: Option<PathBuf>,
+
+    /// Confirm rotation without an interactive prompt.
+    #[arg(long, short = 'y', alias = "force")]
+    pub yes: bool,
+
+    #[arg(long, value_enum)]
+    pub format: Option<FormatArg>,
 }
 
 #[derive(Debug, Args)]

@@ -903,6 +903,40 @@ impl EnvProfileStore {
         EnvProfileCrypto::decrypt(&ciphertext, identities)
     }
 
+    /// Re-encrypts a profile for the current recipient registry.
+    ///
+    /// The existing ciphertext is read and decrypted before any replacement is
+    /// attempted. Plaintext remains in memory only long enough to produce the
+    /// new ciphertext, and the existing atomic ciphertext replacement path is
+    /// used for the final write.
+    pub fn rotate_profile(
+        &self,
+        profile_name: &str,
+        identity: &EnvIdentity,
+        registry: &EnvRecipientRegistry,
+    ) -> FrilVaultResult<()> {
+        if registry.is_empty() {
+            return Err(FrilVaultError::EmptyEnvRecipients);
+        }
+
+        let profile_path = self.profile_path(profile_name)?;
+        let ciphertext = fs::read(&profile_path)?;
+        let payload = EnvProfileCrypto::decrypt(&ciphertext, &[identity.age_identity()])?;
+        let recipients = registry.age_recipients()?;
+        let recipient_refs: Vec<&dyn Recipient> = recipients
+            .iter()
+            .map(|recipient| recipient as &dyn Recipient)
+            .collect();
+        let rotated_ciphertext = EnvProfileCrypto::encrypt(&payload, &recipient_refs)?;
+
+        atomic_write_ciphertext(
+            &profile_path,
+            &rotated_ciphertext,
+            #[cfg(test)]
+            &self.fail_replacement,
+        )
+    }
+
     #[cfg(test)]
     fn fail_next_replacement(&self) {
         self.fail_replacement.store(true, Ordering::SeqCst);
@@ -1662,6 +1696,122 @@ mod tests {
             let decrypted = EnvProfileCrypto::decrypt(&ciphertext, &[identity]).unwrap();
             assert!(decrypted.values() == payload.values());
         }
+    }
+
+    #[test]
+    fn rotation_reencrypts_for_current_recipients_only() {
+        let workspace = create_test_workspace();
+        let store = EnvProfileStore::new(workspace.root());
+        let current = EnvIdentity::generate();
+        let removed = EnvIdentity::generate();
+        let current_recipient = current.public_recipient();
+        let removed_recipient = removed.public_recipient();
+        let mut registry = EnvRecipientRegistry::default();
+        registry
+            .add("current", &current_recipient.to_string())
+            .unwrap();
+
+        store
+            .save_profile(
+                "development",
+                &test_values(),
+                &[&current_recipient, &removed_recipient],
+            )
+            .unwrap();
+        let original = fs::read(store.profile_path("development").unwrap()).unwrap();
+
+        store
+            .rotate_profile("development", &current, &registry)
+            .unwrap();
+
+        let rotated = fs::read(store.profile_path("development").unwrap()).unwrap();
+        assert_ne!(rotated, original);
+        assert!(
+            store
+                .load_profile("development", &[current.age_identity()])
+                .is_ok()
+        );
+        assert!(matches!(
+            store.load_profile("development", &[removed.age_identity()]),
+            Err(FrilVaultError::EnvProfileDecryptionFailed)
+        ));
+        assert!(
+            !rotated
+                .windows(b"fixture-api-key".len())
+                .any(|window| window == b"fixture-api-key")
+        );
+    }
+
+    #[test]
+    fn rotation_rejects_corrupt_input_empty_recipients_and_wrong_identity() {
+        let workspace = create_test_workspace();
+        let store = EnvProfileStore::new(workspace.root());
+        let current = EnvIdentity::generate();
+        let wrong = EnvIdentity::generate();
+        let current_recipient = current.public_recipient();
+        let mut registry = EnvRecipientRegistry::default();
+        registry
+            .add("current", &current_recipient.to_string())
+            .unwrap();
+
+        store
+            .save_profile("development", &test_values(), &[&current_recipient])
+            .unwrap();
+        let profile_path = store.profile_path("development").unwrap();
+        let original = fs::read(&profile_path).unwrap();
+
+        assert!(matches!(
+            store.rotate_profile("development", &wrong, &registry),
+            Err(FrilVaultError::EnvProfileDecryptionFailed)
+        ));
+        assert_eq!(fs::read(&profile_path).unwrap(), original);
+
+        let empty_registry = EnvRecipientRegistry::default();
+        assert!(matches!(
+            store.rotate_profile("development", &current, &empty_registry),
+            Err(FrilVaultError::EmptyEnvRecipients)
+        ));
+        assert_eq!(fs::read(&profile_path).unwrap(), original);
+
+        fs::write(&profile_path, b"corrupt ciphertext").unwrap();
+        let corrupt_original = fs::read(&profile_path).unwrap();
+        assert!(matches!(
+            store.rotate_profile("development", &current, &registry),
+            Err(FrilVaultError::EnvProfileDecryptionFailed)
+        ));
+        assert_eq!(fs::read(profile_path).unwrap(), corrupt_original);
+    }
+
+    #[test]
+    fn rotation_replacement_failure_keeps_existing_ciphertext() {
+        let workspace = create_test_workspace();
+        let store = EnvProfileStore::new(workspace.root());
+        let current = EnvIdentity::generate();
+        let current_recipient = current.public_recipient();
+        let mut registry = EnvRecipientRegistry::default();
+        registry
+            .add("current", &current_recipient.to_string())
+            .unwrap();
+
+        store
+            .save_profile("development", &test_values(), &[&current_recipient])
+            .unwrap();
+        let profile_path = store.profile_path("development").unwrap();
+        let original = fs::read(&profile_path).unwrap();
+        store.fail_next_replacement();
+
+        assert!(matches!(
+            store.rotate_profile("development", &current, &registry),
+            Err(FrilVaultError::Io(_))
+        ));
+        assert_eq!(fs::read(&profile_path).unwrap(), original);
+        assert!(
+            store
+                .profiles_root()
+                .read_dir()
+                .unwrap()
+                .all(|entry| entry.unwrap().file_name() == "development.age")
+        );
     }
 
     #[test]

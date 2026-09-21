@@ -72,6 +72,13 @@ verified. Private identities never cross into the selected vault.
 recipient records. Shared-mode profile writes reject an empty recipient set
 before any ciphertext replacement.
 
+Profile rotation is also owned by `frilvault-core`: it decrypts the existing
+ciphertext with the caller-provided identity, encrypts the in-memory payload
+for the current recipient registry, and atomically replaces the ciphertext
+only after all validation and encryption steps succeed. The CLI owns
+confirmation, identity-store selection, and redacted diagnostics. Rotation
+does not revoke or reissue the external credential represented by a profile.
+
 The core's `EnvReadiness::inspect` combines these validation boundaries into a
 value-free readiness report. It can structurally inspect all profile
 ciphertext files, and only decrypts profiles in memory when an identity is

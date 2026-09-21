@@ -253,13 +253,32 @@ flvt env identity show
 flvt env recipients list
 flvt env recipients add alice age1...
 flvt env recipients remove alice
+flvt env rotate --profile development
 ```
 
 Only recipient IDs and public `age1...` keys are written to
 `.vault/env/recipients.toml`. The registry is sorted by ID and updated through
 an atomic replacement. Removing a recipient changes the registry but does not
-revoke plaintext that person may already have viewed; profile rotation is a
-separate follow-up operation.
+revoke plaintext that person may already have viewed. Rotate each affected
+profile after the removal:
+
+```bash
+flvt env rotate --profile development
+```
+
+Rotation requires confirmation in an interactive terminal. Automation and JSON
+output must explicitly opt in with `--yes`:
+
+```bash
+flvt env rotate --profile development --identity-file "$RUNNER_TEMP/frilvault.identity" --yes
+```
+
+Rotation only changes the FrilVault ciphertext. It does not revoke or reissue
+the external API key, password, or token. Revoke/reissue that credential at its
+provider first, then run the FrilVault rotation workflow. The current identity
+must still decrypt the old profile, and at least one current recipient must be
+registered. Profile plaintext stays in memory and is never written to a
+temporary or export file.
 
 For headless CI, provide an identity through stdin and explicitly select a
 permission-restricted file outside the workspace as the fallback location. The
@@ -324,13 +343,15 @@ ciphertext are never included.
 redacted Env summary when `.vault/env` exists. A workspace without Env
 configuration remains healthy under the existing note-health rules. Use
 `flvt env identity create`, `flvt env recipients list`, and
+`flvt env rotate --profile NAME` after recipient removal, then
 `flvt env run --profile NAME -- COMMAND` as the primary remediation and runtime
 commands.
 
 Removing a recipient only updates the public registry. It cannot retroactively
 erase plaintext already viewed, copied into process memory, or retained in
 backups; rotate affected profiles separately before treating the removal as a
-complete access change.
+complete access change. A removed recipient cannot decrypt the newly rotated
+ciphertext, but provider-side credential revocation remains required.
 
 ### Workspace status
 
