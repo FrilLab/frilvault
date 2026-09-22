@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    FrilVaultError, FrilVaultResult,
+    AgentsFileStatus, FrilVaultError, FrilVaultResult,
     note::{NoteRepository, NoteService},
     runtime::VaultContext,
     workspace::{
@@ -17,6 +17,7 @@ use crate::{
 pub struct InitializationResult {
     pub mode: VaultMode,
     pub git_exclude: Option<GitExcludeStatus>,
+    pub agents_file: AgentsFileStatus,
 }
 
 /// Top-level entry point for opening a FrilVault workspace.
@@ -111,6 +112,8 @@ impl FrilVault {
         let index_repository = WorkspaceIndexRepository::new(resolver);
         index_repository.create_if_missing()?;
 
+        let agents_file = crate::agents::ensure_agents_file(&vault_root)?;
+
         let git_exclude = if metadata.mode == VaultMode::Local {
             Some(crate::workspace::ensure_local_vault_excluded_at(
                 &self.workspace_root,
@@ -123,6 +126,7 @@ impl FrilVault {
         Ok(InitializationResult {
             mode: metadata.mode,
             git_exclude,
+            agents_file,
         })
     }
 
