@@ -25,7 +25,7 @@ pub use env::{
     EnvIdentityManager, EnvIdentityStore, EnvManifest, EnvManifestStore, EnvProfileCrypto,
     EnvProfileListing, EnvProfilePayload, EnvProfileReadiness, EnvProfileStore, EnvReadiness,
     EnvReadinessCheck, EnvReadinessReport, EnvReadinessStatus, EnvRecipient, EnvRecipientRegistry,
-    EnvRecipientStore, EnvVariableSpec, validate_profile_name,
+    EnvRecipientStore, EnvVariableSpec, validate_env_variable_name, validate_profile_name,
 };
 pub use error::{FrilVaultError, FrilVaultResult, TagOperationRollback};
 pub use note::{
