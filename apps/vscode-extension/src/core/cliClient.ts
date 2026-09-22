@@ -35,6 +35,7 @@ type ExecFileLike = (
   args: string[],
   options: {
     cwd: string;
+    signal?: AbortSignal;
   },
 ) => Promise<ExecFileResult>;
 
@@ -98,9 +99,11 @@ export interface SearchNotesInput {
   workspaceRoot: string;
   keyword?: string;
   sourceFile?: string;
+  symbol?: string;
   tag?: string;
   tags?: string[];
   tagQuery?: string;
+  signal?: AbortSignal;
 }
 
 /**
@@ -220,6 +223,10 @@ export class CliClient {
       args.push('--file', input.sourceFile);
     }
 
+    if (input.symbol) {
+      args.push('--symbol', input.symbol);
+    }
+
     if (input.tag) {
       args.push('--tag', input.tag);
     }
@@ -234,7 +241,7 @@ export class CliClient {
 
     args.push('--format', 'json');
 
-    const stdout = await this.execInWorkspace(input.workspaceRoot, args);
+    const stdout = await this.execInWorkspace(input.workspaceRoot, args, input.signal);
 
     return parseJson<NoteView[]>(stdout);
   }
@@ -426,7 +433,11 @@ export class CliClient {
     ]);
   }
 
-  private async execInWorkspace(workspaceRoot: string, args: string[]): Promise<string> {
+  private async execInWorkspace(
+    workspaceRoot: string,
+    args: string[],
+    signal?: AbortSignal,
+  ): Promise<string> {
     const resolution = this.resolveCli();
 
     if (!resolution.cliPath) {
@@ -446,6 +457,7 @@ export class CliClient {
     try {
       const result = await this.dependencies.execFile(resolvedCli.cliPath, commandArgs, {
         cwd: workspaceRoot,
+        signal,
       });
 
       if (result.stderr.trim().length > 0) {

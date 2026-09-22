@@ -54,12 +54,27 @@ CodeLens is the closest stable supported editor API for this UI. VS Code does no
 | --- | --- | --- |
 | `Add` | `frilvault.addNote` | Add a note at the current line or symbol |
 | `Show Notes` | `frilvault.showNotesForCurrentFile` | Show notes for the active file |
-| `Search Notes` | `frilvault.searchNotes` | Search notes in the current workspace |
+| `Search Notes` | `frilvault.searchNotes` | Search notes in the current workspace with the native Quick Pick |
 | `Show Stats` | `frilvault.showStats` | Show workspace note statistics |
 | `Show Health` | `frilvault.showHealth` | Show missing-file health information |
 | `Apply Repairs` | `frilvault.applyRepairs` | Apply note repair suggestions for renamed or moved files |
 
 The viewer also exposes `frilvault.noteViewer.toggle` and `frilvault.noteViewer.actions` through its CodeLens rows; these commands receive stable note IDs from the provider.
+
+### Search syntax
+
+`Search Notes` searches while you type and keeps the source editor layout unchanged. Plain text searches note content and symbol names. Add filters to narrow the same query:
+
+```text
+parser cache
+tag:todo
+file:src/parser.rs
+symbol:parse_config
+tag:todo parser
+file:src/core tag:architecture
+```
+
+Select a result to open the source file and reveal its line or symbol anchor. Results are labeled as FrilVault notes and unresolved symbol anchors are shown as metadata rather than source diagnostics.
 
 ## Requirements
 
@@ -114,7 +129,7 @@ Release automation is split into two stages:
 | --- | --- | --- |
 | `Add` | `frilvault.addNote` | Add a note at the current line or symbol |
 | `Show Notes` | `frilvault.showNotesForCurrentFile` | Show notes for the active file |
-| `Search Notes` | `frilvault.searchNotes` | Search notes in the current workspace |
+| `Search Notes` | `frilvault.searchNotes` | Search notes in the current workspace with native Quick Pick search |
 | `Set Tag Color` | `frilvault.setTagColor` | Assign a theme-safe color from a tag's context menu |
 | `Remove Tag Color` | `frilvault.removeTagColor` | Restore a tag's default uncolored appearance |
 | `Show Stats` | `frilvault.showStats` | Show workspace note statistics |

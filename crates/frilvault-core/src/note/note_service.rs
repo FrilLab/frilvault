@@ -105,6 +105,7 @@ impl NoteService {
             source_file: Some(source_file.as_ref().to_path_buf()),
             keyword: None,
             tag: None,
+            symbol: None,
         })
     }
 
@@ -116,6 +117,7 @@ impl NoteService {
             source_file: Some(source_file.as_ref().to_path_buf()),
             keyword: None,
             tag: None,
+            symbol: None,
         })
     }
 
@@ -137,13 +139,32 @@ impl NoteService {
             .as_deref()
             .map(|tag| TagQuery::all([tag]))
             .transpose()?;
-        let mut results = if let Some(source_file) = &query.source_file {
+        let source_file = query
+            .source_file
+            .as_ref()
+            .map(|source_file| self.vault_context.normalize_source_file(source_file))
+            .transpose()?;
+        let source_file_prefix = source_file
+            .as_deref()
+            .filter(|source_file| self.source_file_is_directory(source_file))
+            .map(Path::to_path_buf);
+        let mut results = if source_file_prefix.is_some() {
+            self.all_note_views()?
+        } else if let Some(source_file) = &source_file {
             self.note_views_for_source_file(source_file)?
-        } else if query.keyword.is_some() || exact_tag_query.is_some() || tag_query.is_some() {
+        } else if query.keyword.is_some()
+            || exact_tag_query.is_some()
+            || tag_query.is_some()
+            || query.symbol.is_some()
+        {
             self.all_note_views()?
         } else {
             Vec::new()
         };
+
+        if let Some(prefix) = source_file_prefix {
+            results.retain(|view| Path::new(&view.source_file).starts_with(&prefix));
+        }
 
         if let Some(exact_tag_query) = &exact_tag_query {
             results.retain(|view| exact_tag_query.matches(&view.note.tags));
@@ -156,6 +177,11 @@ impl NoteService {
         if let Some(keyword) = &query.keyword {
             let keyword = keyword.to_lowercase();
             results.retain(|view| note_matches_keyword(view, &keyword));
+        }
+
+        if let Some(symbol) = &query.symbol {
+            let symbol = symbol.to_lowercase();
+            results.retain(|view| note_matches_symbol(view, &symbol));
         }
 
         results.sort_by(|left, right| {
@@ -182,6 +208,14 @@ impl NoteService {
             .into_iter()
             .map(|note| self.build_note_view(&source_file, note))
             .collect())
+    }
+
+    fn source_file_is_directory(&self, source_file: &Path) -> bool {
+        self.vault_context
+            .workspace_index_repository
+            .workspace_root()
+            .join(source_file)
+            .is_dir()
     }
 
     pub fn preload_notes(&mut self, source_file: impl AsRef<Path>) -> FrilVaultResult<()> {
@@ -408,6 +442,7 @@ impl NoteService {
             source_file: None,
             keyword: Some(keyword.to_string()),
             tag: None,
+            symbol: None,
         })
     }
 
@@ -432,6 +467,7 @@ impl NoteService {
             source_file: None,
             keyword: None,
             tag: Some(tag.to_string()),
+            symbol: None,
         })
     }
 
@@ -1029,6 +1065,13 @@ fn note_matches_keyword(view: &NoteView, keyword: &str) -> bool {
     );
 
     content_match || symbol_match
+}
+
+fn note_matches_symbol(view: &NoteView, symbol: &str) -> bool {
+    matches!(
+        &view.note.anchor,
+        NoteAnchor::Symbol(anchor) if anchor.name.to_lowercase().contains(symbol)
+    )
 }
 
 fn validate_tag_name(tag: &str, field_name: &str) -> FrilVaultResult<String> {
