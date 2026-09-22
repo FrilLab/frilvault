@@ -87,6 +87,14 @@ available. The CLI supplies the identity-store result and formats the report;
 directories, so legacy workspaces without Env data retain their existing
 note/workspace health behavior.
 
+The CLI owns the user-facing profile workflow. `flvt env init` creates the
+versioned manifest and profile directory without replacing existing metadata;
+`env set`, `env list`, and `env validate` keep values in memory while using the
+core encrypted profile store. `env import` uses the maintained `dotenvy` parser
+for the supported dotenv subset, rejects duplicate keys and expansion syntax,
+and writes only age ciphertext. Existing profiles require an explicit replace
+flag and confirmation before import can replace them.
+
 ### Vault modes
 
 `frilvault-core` owns the `VaultMode` policy used by workspace initialization:
