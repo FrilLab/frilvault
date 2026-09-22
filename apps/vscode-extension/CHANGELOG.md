@@ -6,6 +6,7 @@ All notable changes to the FrilVault VS Code extension are documented here.
 
 ### Added
 
+- Generate a customizable `.vault/AGENTS.md` with AI-safe Vault operation guidance during initialization
 - Expandable CodeLens note viewer displayed above associated code anchors with collapsed and expanded states
 - Multiline note content is rendered as stacked CodeLens rows with stable toggle and action commands
 - Configuration settings `frilvault.noteViewer.enabled` and `frilvault.noteViewer.defaultState`

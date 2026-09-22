@@ -178,6 +178,54 @@ fn cli_crud_flow_accepts_absolute_paths_and_preserves_source() {
 }
 
 #[test]
+fn cli_init_generates_and_preserves_agents_file() {
+    let workspace = TestWorkspace::new();
+
+    let initialized = workspace.run(&["init", "--format", "json"]);
+    let initialized: Value = serde_json::from_slice(&initialized.stdout).unwrap();
+    assert_eq!(initialized["agents_file"], "created");
+
+    let agents_path = workspace.root().join(".vault/AGENTS.md");
+    let generated = fs::read_to_string(&agents_path).unwrap();
+    assert!(generated.starts_with("<!-- FrilVault AGENTS template version: 1 -->"));
+    assert!(generated.contains("Scope: `.vault/**` only."));
+
+    let custom = "# Customized\nKeep this content.\n";
+    fs::write(&agents_path, custom).unwrap();
+
+    let repeated = workspace.run(&["init"]);
+    assert!(String::from_utf8_lossy(&repeated.stdout).contains("AGENTS.md: preserved"));
+    assert_eq!(fs::read_to_string(agents_path).unwrap(), custom);
+}
+
+#[test]
+fn cli_init_generates_agents_file_at_explicit_external_vault() {
+    let workspace = TestWorkspace::new();
+    let external = workspace
+        .root()
+        .parent()
+        .unwrap()
+        .join(format!("frilvault-external-agents-{}", Uuid::new_v4()));
+    let external_string = external.to_str().unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_flvt"))
+        .args(["--vault", external_string, "init", "--shared"])
+        .current_dir(workspace.root())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "external init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(external.join("AGENTS.md").is_file());
+    assert!(!workspace.root().join(".vault").exists());
+
+    fs::remove_dir_all(external).unwrap();
+}
+
+#[test]
 fn cli_workspace_commands_return_valid_results_after_repeated_init() {
     let workspace = TestWorkspace::new();
     workspace.run(&["init"]);

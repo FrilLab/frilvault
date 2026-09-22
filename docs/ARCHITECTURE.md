@@ -40,6 +40,7 @@ The current repository does not contain a desktop application source tree yet. R
 │   └── profiles/
 │       └── <profile>.age
 ├── index/
+├── AGENTS.md
 └── workspace.json
 ```
 
@@ -48,6 +49,7 @@ The current repository does not contain a desktop application source tree yet. R
 - `.vault/env/recipients.toml`: environment profile recipient IDs and public age keys
 - `.vault/env/profiles/<profile>.age`: versioned UTF-8 profile payload encrypted with age
 - `.vault/index`: workspace index data
+- `.vault/AGENTS.md`: generated AI guidance for safe Vault metadata operations
 - `.vault/workspace.json`: workspace-level metadata
 
 `frilvault-core` owns the encrypted profile storage boundary. Profile names are
@@ -150,6 +152,7 @@ The core crate owns:
 - workspace sync and gitignore helpers
 - repair suggestions and repair application
 - `.vault` persistence
+- generated `.vault/AGENTS.md` template and safe first-write behavior
 
 ### `frilvault-cli`
 

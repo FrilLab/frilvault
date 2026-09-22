@@ -2,9 +2,30 @@ use std::{fs, process::Command};
 
 use super::helper::create_test_workspace;
 use crate::{
-    AddNoteRequest, FrilVault, FrilVaultError, GitTrackingStatus, LineAnchor, NoteAnchor,
-    VaultMode, workspace::PathResolver,
+    AddNoteRequest, AgentsFileStatus, FrilVault, FrilVaultError, GitTrackingStatus, LineAnchor,
+    NoteAnchor, VaultMode, workspace::PathResolver,
 };
+
+#[test]
+fn initialize_generates_agents_file_and_preserves_custom_content() {
+    let workspace = create_test_workspace();
+    let vault = FrilVault::open(workspace.root()).unwrap();
+    let agents_path = workspace.root().join(".vault/AGENTS.md");
+
+    let first = vault.initialize_with_status(VaultMode::Local).unwrap();
+    assert_eq!(first.agents_file, AgentsFileStatus::Created);
+    let generated = fs::read_to_string(&agents_path).unwrap();
+    assert!(generated.contains("Scope: `.vault/**` only."));
+    assert!(generated.contains("This file does not grant permission to modify source"));
+
+    let custom = "# Custom Vault instructions\nDo not replace this file.\n";
+    fs::write(&agents_path, custom).unwrap();
+
+    let second = vault.initialize_with_status(VaultMode::Shared).unwrap();
+    assert_eq!(second.mode, VaultMode::Local);
+    assert_eq!(second.agents_file, AgentsFileStatus::Preserved);
+    assert_eq!(fs::read_to_string(agents_path).unwrap(), custom);
+}
 
 #[test]
 fn frilvault_open_creates_note_service() {

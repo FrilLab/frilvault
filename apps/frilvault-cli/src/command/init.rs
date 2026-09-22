@@ -12,6 +12,7 @@ use crate::{
 struct InitOutput {
     mode: &'static str,
     git_exclude: Option<GitExcludeStatus>,
+    agents_file: &'static str,
 }
 
 pub fn execute(command: InitCommand) -> Result<()> {
@@ -31,6 +32,7 @@ pub fn execute_with_vault(command: InitCommand, vault_path: Option<&Path>) -> Re
         print_json(&InitOutput {
             mode: result.mode.as_str(),
             git_exclude: result.git_exclude,
+            agents_file: result.agents_file.as_str(),
         })?;
         return Ok(());
     }
@@ -39,6 +41,7 @@ pub fn execute_with_vault(command: InitCommand, vault_path: Option<&Path>) -> Re
     println!();
     println!("Vault: {}", vault.vault_path().display());
     println!("Mode: {}", result.mode.as_str());
+    println!("AGENTS.md: {}", result.agents_file.as_str());
 
     if result.git_exclude == Some(GitExcludeStatus::VaultTracked) {
         eprintln!();

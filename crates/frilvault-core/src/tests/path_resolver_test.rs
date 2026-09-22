@@ -111,6 +111,7 @@ fn external_vault_preserves_workspace_relative_anchors_and_mode() {
         .unwrap();
 
     assert!(external.root().join("notes/src/main.rs.json").exists());
+    assert!(external.root().join("AGENTS.md").exists());
     assert!(!workspace.root().join(".vault").exists());
     let view = notes.list_notes("src/main.rs").unwrap();
     assert_eq!(view[0].source_file, std::path::Path::new("src/main.rs"));

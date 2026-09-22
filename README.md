@@ -102,6 +102,7 @@ FrilVault `v0.0.3` adds Explorer note counts and a workspace note overview in `F
 ├── images/
 ├── cache/
 ├── index/
+├── AGENTS.md
 └── workspace.json
 ```
 
@@ -143,6 +144,7 @@ Initialized FrilVault workspace
 
 Vault: .vault
 Mode: local
+AGENTS.md: created
 ```
 
 Local mode is intended for private, checkout-local knowledge. When the
@@ -165,6 +167,7 @@ Initialized FrilVault workspace
 
 Vault: .vault
 Mode: shared
+AGENTS.md: created
 ```
 
 Shared mode does not add `.vault/` to `.git/info/exclude` and does not modify
@@ -173,6 +176,20 @@ user to review and commit the files they want to share. Pre-existing Git
 ignore rules can still affect whether Git reports the vault as ignored.
 See [Workspace status](#workspace-status) for the mode and Git tracking values
 reported after initialization.
+
+### AI-safe Vault instructions
+
+`flvt init` also creates `.vault/AGENTS.md` with concise instructions for AI
+tools operating on FrilVault metadata. It explains the note storage model,
+CLI-first updates, line and symbol anchors, tag normalization, validation, and
+the separation between Vault metadata and source code. It is scoped to
+`.vault/**`; repository-wide instructions remain in the root `AGENTS.md`.
+
+Initialization never overwrites an existing `.vault/AGENTS.md`, so users can
+customize it safely. Re-running `flvt init` preserves customized content. The
+file is written to the selected Vault Path, including nested or external Vaults.
+See [AI Integration](docs/AI-INTEGRATION.md) for the recommended agent
+workflow.
 
 The `mode` is stored in `.vault/workspace.json` as a top-level field. A newly
 initialized workspace has this shape (the timestamps vary):
