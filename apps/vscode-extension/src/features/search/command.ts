@@ -122,7 +122,9 @@ function tokenizeSearchInput(input: string): { values: string[]; error?: string 
 
   for (const character of input.trim()) {
     if (escaped) {
-      value += character;
+      value += character === '"' || character === '\\'
+        ? character
+        : `\\${character}`;
       escaped = false;
     } else if (character === '\\' && quoted) {
       escaped = true;
@@ -309,6 +311,7 @@ function searchHelpItem(): SearchQuickPickItem {
 function statusItem(message: string): SearchQuickPickItem {
   return {
     label: `FrilVault search status: ${message}`,
+    alwaysShow: true,
   };
 }
 
@@ -328,6 +331,7 @@ export function buildSearchQuickPickItems(results: NoteView[]): SearchQuickPickI
       label: `$(note) FrilVault note: ${title}`,
       description: `${note.source_file} · ${anchor}`,
       detail: tags ? `${tags} · ${preview}` : preview,
+      alwaysShow: true,
       note,
     };
   });
@@ -339,11 +343,17 @@ function formatSearchAnchor(note: NoteView): string {
   }
 
   const name = note.note.anchor.name ?? 'Symbol';
-  const line = note.resolved?.line ?? note.note.anchor.line_hint;
-
-  return typeof line === 'number'
-    ? `Line ${line} · Symbol ${name}`
+  return note.resolved
+    ? `Line ${note.resolved.line} · Symbol ${name}`
     : `Unresolved symbol · ${name}`;
+}
+
+export function getSearchHighlightLine(note: NoteView): number | undefined {
+  if (note.note.anchor.type === 'Line') {
+    return (note.note.anchor.line ?? 1) - 1;
+  }
+
+  return note.resolved ? note.resolved.line - 1 : undefined;
 }
 
 function highlightSearchResult(note: NoteView): void {
@@ -352,9 +362,11 @@ function highlightSearchResult(note: NoteView): void {
     return;
   }
 
-  const line = note.note.anchor.type === 'Line'
-    ? (note.note.anchor.line ?? 1) - 1
-    : (note.resolved?.line ?? note.note.anchor.line_hint ?? 1) - 1;
+  const line = getSearchHighlightLine(note);
+  if (line === undefined) {
+    return;
+  }
+
   const lineIndex = Math.min(Math.max(line, 0), Math.max(editor.document.lineCount - 1, 0));
   const lineText = editor.document.lineAt(lineIndex);
   const decoration = vscode.window.createTextEditorDecorationType({

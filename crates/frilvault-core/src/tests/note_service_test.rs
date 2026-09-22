@@ -1095,4 +1095,15 @@ fn query_notes_file_filter_accepts_a_workspace_directory() {
             .collect::<Vec<_>>(),
         vec!["src/core/cache.rs", "src/core/parser.rs"]
     );
+
+    let absolute_results = service
+        .query_notes(&NoteQuery {
+            source_file: Some(workspace.root().join("src/core")),
+            keyword: None,
+            tag: None,
+            symbol: None,
+        })
+        .unwrap();
+
+    assert_eq!(absolute_results.len(), 2);
 }

@@ -139,14 +139,18 @@ impl NoteService {
             .as_deref()
             .map(|tag| TagQuery::all([tag]))
             .transpose()?;
-        let source_file_prefix = query
+        let source_file = query
             .source_file
+            .as_ref()
+            .map(|source_file| self.vault_context.normalize_source_file(source_file))
+            .transpose()?;
+        let source_file_prefix = source_file
             .as_deref()
             .filter(|source_file| self.source_file_is_directory(source_file))
             .map(Path::to_path_buf);
         let mut results = if source_file_prefix.is_some() {
             self.all_note_views()?
-        } else if let Some(source_file) = &query.source_file {
+        } else if let Some(source_file) = &source_file {
             self.note_views_for_source_file(source_file)?
         } else if query.keyword.is_some()
             || exact_tag_query.is_some()

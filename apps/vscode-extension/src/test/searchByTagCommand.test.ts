@@ -12,6 +12,7 @@ import {
   buildTagSearchQuickPickItems,
   createSearchByTagCommand,
   createWorkspaceSearchCommand,
+  getSearchHighlightLine,
   parseSearchQuery,
   type SearchQuickPickItem,
 } from '../features/search/command';
@@ -94,6 +95,13 @@ suite('Search notes by tag command', () => {
         symbol: 'parse_config',
       },
     );
+
+    assert.deepStrictEqual(parseSearchQuery('file:"C:\\My Project\\src"'), {
+      keyword: undefined,
+      sourceFile: 'C:\\My Project\\src',
+      tags: [],
+      symbol: undefined,
+    });
   });
 
   test('explains invalid search syntax without throwing', () => {
@@ -109,6 +117,83 @@ suite('Search notes by tag command', () => {
     assert.match(item?.description ?? '', /src\/main\.rs · Line 3/);
     assert.match(item?.label ?? '', /FrilVault note/);
     assert.ok((item?.detail?.length ?? 0) < 130);
+    assert.strictEqual(item?.alwaysShow, true);
+  });
+
+  test('marks unresolved symbols and avoids highlighting a stale hint', () => {
+    const unresolved = createUnresolvedSymbolNote();
+    const [item] = buildSearchQuickPickItems([unresolved]);
+
+    assert.match(item?.description ?? '', /Unresolved symbol/);
+    assert.strictEqual(getSearchHighlightLine(unresolved), undefined);
+    assert.strictEqual(getSearchHighlightLine(createLineNote()), 2);
+    assert.strictEqual(getSearchHighlightLine(createSymbolNote()), 11);
+  });
+
+  test('cancels stale searches and refreshes the active query after note changes', async () => {
+    let changeValue: ((value: string) => void) | undefined;
+    let hide: (() => void) | undefined;
+    let notesChanged: (() => void) | undefined;
+    const searchInputs: SearchNotesInput[] = [];
+    const quickPick = {
+      title: '',
+      placeholder: '',
+      value: '',
+      items: [] as SearchQuickPickItem[],
+      selectedItems: [] as SearchQuickPickItem[],
+      busy: false,
+      matchOnDescription: false,
+      matchOnDetail: false,
+      onDidChangeValue: (listener: (value: string) => void) => {
+        changeValue = listener;
+        return { dispose: () => undefined };
+      },
+      onDidAccept: () => ({ dispose: () => undefined }),
+      onDidHide: (listener: () => void) => {
+        hide = listener;
+        return { dispose: () => undefined };
+      },
+      show: () => undefined,
+      hide: () => hide?.(),
+      dispose: () => undefined,
+    } as unknown as vscode.QuickPick<SearchQuickPickItem>;
+
+    const command = createWorkspaceSearchCommand({
+      cliClient: {
+        searchNotes: async (input) => {
+          searchInputs.push(input);
+          return [];
+        },
+      } as Pick<CliClient, 'searchNotes'>,
+      getWorkspaceRoot: () => '/workspace',
+      createQuickPick: () => quickPick,
+      onDidChangeNotes: (listener) => {
+        notesChanged = listener;
+        return { dispose: () => undefined };
+      },
+      debounceMs: 0,
+    });
+
+    const commandPromise = command();
+    quickPick.value = 'parser';
+    changeValue?.(quickPick.value);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.strictEqual(searchInputs.length, 1);
+    const firstSignal = searchInputs[0]?.signal;
+    quickPick.value = 'cache';
+    changeValue?.(quickPick.value);
+    assert.strictEqual(firstSignal?.aborted, true);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.strictEqual(searchInputs.length, 2);
+
+    notesChanged?.();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.strictEqual(searchInputs.length, 3);
+    assert.strictEqual(searchInputs[2]?.keyword, 'cache');
+
+    hide?.();
+    await commandPromise;
   });
 
   test('searches by tag, shows source and anchors, and reveals the selected note', async () => {
@@ -282,5 +367,24 @@ function createSymbolNote(): NoteView {
       updated_at: '2026-08-24T00:00:00Z',
     },
     resolved: { line: 12, column: 1 },
+  };
+}
+
+function createUnresolvedSymbolNote(): NoteView {
+  return {
+    source_file: 'src/lib.rs',
+    note: {
+      id: 'unresolved-symbol-note',
+      anchor: {
+        type: 'Symbol',
+        name: 'missing_symbol',
+        kind: 'Function',
+        line_hint: 27,
+      },
+      content: 'Document a missing symbol',
+      tags: [],
+      created_at: '2026-08-24T00:00:00Z',
+      updated_at: '2026-08-24T00:00:00Z',
+    },
   };
 }
