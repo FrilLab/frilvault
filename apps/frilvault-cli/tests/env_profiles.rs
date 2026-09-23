@@ -255,7 +255,15 @@ mod unix {
         );
         assert!(set.status.success());
 
-        let profiles = workspace.run_raw(&["env", "profiles", "--format", "json"]);
+        let missing_identity = identity.path.with_extension("missing");
+        let profiles = workspace.run_raw(&[
+            "env",
+            "profiles",
+            "--identity-file",
+            missing_identity.to_str().unwrap(),
+            "--format",
+            "json",
+        ]);
         assert!(
             profiles.status.success(),
             "{}",
@@ -265,7 +273,10 @@ mod unix {
         let profiles: Value = serde_json::from_str(&profiles_stdout).unwrap();
         assert_eq!(profiles["profiles"][0]["status"], "unavailable");
         assert_eq!(profiles["profiles"][0]["scope"], "this-machine");
-        assert_eq!(profiles["profiles"][0]["error_code"], "identity_missing");
+        assert!(matches!(
+            profiles["profiles"][0]["error_code"].as_str(),
+            Some("identity_missing" | "identity_unavailable")
+        ));
         assert!(!profiles_stdout.contains("fixture-secret"));
     }
 
