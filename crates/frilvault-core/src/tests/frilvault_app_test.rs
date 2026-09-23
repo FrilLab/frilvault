@@ -2,28 +2,35 @@ use std::{fs, process::Command};
 
 use super::helper::create_test_workspace;
 use crate::{
-    AddNoteRequest, AgentsFileStatus, FrilVault, FrilVaultError, GitTrackingStatus, LineAnchor,
-    NoteAnchor, VaultMode, workspace::PathResolver,
+    AddNoteRequest, FrilVault, FrilVaultError, GitTrackingStatus, LineAnchor, NoteAnchor,
+    VaultMode, workspace::PathResolver,
 };
 
 #[test]
-fn initialize_generates_agents_file_and_preserves_custom_content() {
+fn initialize_does_not_generate_agents_file_for_local_or_shared_vaults() {
+    for mode in [VaultMode::Local, VaultMode::Shared] {
+        let workspace = create_test_workspace();
+        FrilVault::open(workspace.root())
+            .unwrap()
+            .initialize(mode)
+            .unwrap();
+
+        assert!(!workspace.root().join(".vault/AGENTS.md").exists());
+    }
+}
+
+#[test]
+fn initialize_preserves_existing_agents_file_without_managing_it() {
     let workspace = create_test_workspace();
-    let vault = FrilVault::open(workspace.root()).unwrap();
     let agents_path = workspace.root().join(".vault/AGENTS.md");
-
-    let first = vault.initialize_with_status(VaultMode::Local).unwrap();
-    assert_eq!(first.agents_file, AgentsFileStatus::Created);
-    let generated = fs::read_to_string(&agents_path).unwrap();
-    assert!(generated.contains("Scope: `.vault/**` only."));
-    assert!(generated.contains("This file does not grant permission to modify source"));
-
-    let custom = "# Custom Vault instructions\nDo not replace this file.\n";
+    fs::create_dir_all(agents_path.parent().unwrap()).unwrap();
+    let custom = "# User-owned instructions\nKeep this file unchanged.\n";
     fs::write(&agents_path, custom).unwrap();
 
-    let second = vault.initialize_with_status(VaultMode::Shared).unwrap();
-    assert_eq!(second.mode, VaultMode::Local);
-    assert_eq!(second.agents_file, AgentsFileStatus::Preserved);
+    let vault = FrilVault::open(workspace.root()).unwrap();
+    vault.initialize(VaultMode::Local).unwrap();
+    vault.initialize(VaultMode::Shared).unwrap();
+
     assert_eq!(fs::read_to_string(agents_path).unwrap(), custom);
 }
 
