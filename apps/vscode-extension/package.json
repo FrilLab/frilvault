@@ -32,6 +32,7 @@
   "activationEvents": [
     "onView:frilvault.notes",
     "onView:frilvault.tags",
+    "onView:frilvault.environments",
     "onCommand:frilvault.enable",
     "onCommand:frilvault.disable",
     "onCommand:frilvault.addNote",
@@ -61,6 +62,10 @@
         {
           "id": "frilvault.tags",
           "name": "FrilVault Tags"
+        },
+        {
+          "id": "frilvault.environments",
+          "name": "FrilVault Environments"
         }
       ]
     },
@@ -163,6 +168,26 @@
       {
         "command": "frilvault.noteViewer.actions",
         "title": "Note Viewer Actions"
+      },
+      {
+        "command": "frilvault.environment.addVariable",
+        "title": "Add Environment Variable"
+      },
+      {
+        "command": "frilvault.environment.replaceValue",
+        "title": "Replace Environment Value"
+      },
+      {
+        "command": "frilvault.environment.import",
+        "title": "Import Dotenv File"
+      },
+      {
+        "command": "frilvault.environment.run",
+        "title": "Run with Environment Profile"
+      },
+      {
+        "command": "frilvault.environment.refresh",
+        "title": "Refresh Environments"
       }
     ],
     "menus": {
@@ -206,6 +231,26 @@
           "command": "frilvault.refresh",
           "when": "view == frilvault.tags && frilvault.enabled",
           "group": "navigation"
+        },
+        {
+          "command": "frilvault.environment.addVariable",
+          "when": "view == frilvault.environments && frilvault.enabled",
+          "group": "navigation"
+        },
+        {
+          "command": "frilvault.environment.import",
+          "when": "view == frilvault.environments && frilvault.enabled",
+          "group": "navigation@1"
+        },
+        {
+          "command": "frilvault.environment.run",
+          "when": "view == frilvault.environments && frilvault.enabled",
+          "group": "navigation@2"
+        },
+        {
+          "command": "frilvault.environment.refresh",
+          "when": "view == frilvault.environments",
+          "group": "navigation@3"
         }
       ],
       "editor/title": [
@@ -247,6 +292,21 @@
           "command": "frilvault.removeTagColor",
           "when": "view == frilvault.tags && viewItem == frilvault.tag && frilvault.enabled",
           "group": "inline@1"
+        },
+        {
+          "command": "frilvault.environment.replaceValue",
+          "when": "view == frilvault.environments && viewItem == frilvault.environmentVariable && frilvault.enabled",
+          "group": "inline"
+        },
+        {
+          "command": "frilvault.environment.run",
+          "when": "view == frilvault.environments && viewItem == frilvault.environmentProfile && frilvault.enabled",
+          "group": "inline"
+        },
+        {
+          "command": "frilvault.environment.import",
+          "when": "view == frilvault.environments && viewItem == frilvault.environmentDotenv && frilvault.enabled",
+          "group": "inline"
         }
       ],
       "commandPalette": [
@@ -288,6 +348,18 @@
         },
         {
           "command": "frilvault.applyRepairs",
+          "when": "frilvault.enabled"
+        },
+        {
+          "command": "frilvault.environment.addVariable",
+          "when": "frilvault.enabled"
+        },
+        {
+          "command": "frilvault.environment.import",
+          "when": "frilvault.enabled"
+        },
+        {
+          "command": "frilvault.environment.run",
           "when": "frilvault.enabled"
         }
       ]

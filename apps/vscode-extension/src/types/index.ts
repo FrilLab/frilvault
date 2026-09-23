@@ -9,6 +9,27 @@
  * `frilvault-core` read model과 대응하며, extension은 CLI output과 UI state
  * 사이의 경계로 사용합니다.
  */
+export type EnvironmentVariableStatus = {
+  name: string;
+  status: 'configured' | 'default' | 'missing' | 'invalid' | 'unavailable';
+  source: 'encrypted-profile' | 'manifest-default' | 'unknown';
+  secret: boolean;
+  required: boolean;
+  description?: string;
+};
+
+export type EnvironmentProfileStatus = {
+  profile: string;
+  status: 'ready' | 'missing' | 'invalid' | 'unavailable';
+  scope: 'this-machine' | 'project-shared' | 'unknown';
+  error_code?: string;
+  variables: EnvironmentVariableStatus[];
+};
+
+export interface EnvironmentProfilesResult {
+  profiles: EnvironmentProfileStatus[];
+}
+
 export type NoteAnchor = {
   type: 'Line' | 'Symbol';
   line?: number;

@@ -11,17 +11,17 @@ use std::{
 use anyhow::{Context, Result, bail};
 use frilvault_core::{
     EnvIdentity, EnvIdentityManager, EnvIdentityStore, EnvManifestStore, EnvProfileStore,
-    EnvRecipient, EnvRecipientStore, FrilVaultError, FrilVaultResult, validate_env_variable_name,
-    validate_profile_name,
+    EnvRecipient, EnvRecipientStore, FrilVaultError, FrilVaultResult, VaultMode,
+    validate_env_variable_name, validate_profile_name,
 };
 use serde::Serialize;
 
 use crate::{
     cli::env::{
-        EnvAction, EnvCommand, EnvImportCommand, EnvInitCommand, EnvListCommand, EnvRunCommand,
-        EnvSetCommand, EnvValidateCommand, IdentityAction, IdentityCreateCommand,
-        IdentityShowCommand, RecipientsAction, RecipientsAddCommand, RecipientsListCommand,
-        RecipientsRemoveCommand,
+        EnvAction, EnvCommand, EnvImportCommand, EnvInitCommand, EnvListCommand,
+        EnvProfilesCommand, EnvRunCommand, EnvSetCommand, EnvValidateCommand, IdentityAction,
+        IdentityCreateCommand, IdentityShowCommand, RecipientsAction, RecipientsAddCommand,
+        RecipientsListCommand, RecipientsRemoveCommand,
     },
     output::{OutputFormat, print_json, resolve_format},
 };
@@ -50,6 +50,7 @@ pub fn execute_with_vault(command: EnvCommand, vault_path: Option<&Path>) -> Res
         EnvAction::Run(run) => execute_run(run, vault_path),
         EnvAction::Set(set) => execute_set(set, vault_path),
         EnvAction::List(list) => execute_list(list, vault_path),
+        EnvAction::Profiles(profiles) => execute_profiles(profiles, vault_path),
         EnvAction::Validate(validate) => execute_validate(validate, vault_path),
         EnvAction::Import(import) => execute_import(import, vault_path),
     }
@@ -66,15 +67,26 @@ struct EnvInitOutput {
 struct EnvVariableStatus {
     name: String,
     status: &'static str,
+    source: &'static str,
+    secret: bool,
+    required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct EnvProfileStatus {
     profile: String,
     status: &'static str,
+    scope: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     error_code: Option<&'static str>,
     variables: Vec<EnvVariableStatus>,
+}
+
+#[derive(Debug, Serialize)]
+struct EnvProfilesOutput {
+    profiles: Vec<EnvProfileStatus>,
 }
 
 fn execute_init(command: EnvInitCommand, vault_path: Option<&Path>) -> Result<()> {
@@ -183,6 +195,50 @@ fn execute_list(command: EnvListCommand, vault_path: Option<&Path>) -> Result<()
     Ok(())
 }
 
+fn execute_profiles(command: EnvProfilesCommand, vault_path: Option<&Path>) -> Result<()> {
+    let vault = super::open_vault(vault_path)?;
+    let store = EnvProfileStore::new_at_vault_root(vault.vault_root());
+    let listing = store.list_profile_listing()?;
+    let scope = availability_scope(&vault);
+    let mut profiles = Vec::new();
+
+    for profile in listing.valid_names() {
+        profiles.push(inspect_profile(
+            &vault,
+            profile,
+            command.identity_file.clone(),
+        )?);
+    }
+
+    for profile in listing.invalid_names() {
+        profiles.push(EnvProfileStatus {
+            profile: profile.clone(),
+            status: "invalid",
+            scope,
+            error_code: Some("profile_name_invalid"),
+            variables: Vec::new(),
+        });
+    }
+
+    profiles.sort_by(|left, right| left.profile.cmp(&right.profile));
+    let output = EnvProfilesOutput { profiles };
+
+    match resolve_format(command.format) {
+        OutputFormat::Text => {
+            if output.profiles.is_empty() {
+                println!("No encrypted environment profiles found.");
+            } else {
+                for profile in &output.profiles {
+                    println!("{}\t{}", profile.profile, profile.status);
+                }
+            }
+        }
+        OutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
 fn execute_validate(command: EnvValidateCommand, vault_path: Option<&Path>) -> Result<()> {
     let vault = super::open_vault(vault_path)?;
     let report = inspect_profile(&vault, &command.profile, command.identity_file)?;
@@ -286,6 +342,7 @@ fn inspect_profile(
             return Ok(EnvProfileStatus {
                 profile: profile_name.to_string(),
                 status: "invalid",
+                scope: availability_scope(vault),
                 error_code: Some(if is_not_found(&error) {
                     "manifest_missing"
                 } else {
@@ -298,7 +355,6 @@ fn inspect_profile(
 
     let profile_store = EnvProfileStore::new_at_vault_root(vault.vault_root());
     let profile_path = profile_store.profile_path(profile_name)?;
-    let variable_names: Vec<String> = manifest.variables().keys().cloned().collect();
     if !profile_path.is_file() {
         return Ok(EnvProfileStatus {
             profile: profile_name.to_string(),
@@ -307,6 +363,7 @@ fn inspect_profile(
             } else {
                 "missing"
             },
+            scope: availability_scope(vault),
             error_code: Some(if profile_path.exists() {
                 "profile_invalid"
             } else {
@@ -324,28 +381,18 @@ fn inspect_profile(
             return Ok(EnvProfileStatus {
                 profile: profile_name.to_string(),
                 status: "unavailable",
+                scope: availability_scope(vault),
                 error_code: Some("identity_missing"),
-                variables: variable_names
-                    .into_iter()
-                    .map(|name| EnvVariableStatus {
-                        name,
-                        status: "unavailable",
-                    })
-                    .collect(),
+                variables: unavailable_variable_statuses(&manifest),
             });
         }
         Err(_) => {
             return Ok(EnvProfileStatus {
                 profile: profile_name.to_string(),
                 status: "unavailable",
+                scope: availability_scope(vault),
                 error_code: Some("identity_unavailable"),
-                variables: variable_names
-                    .into_iter()
-                    .map(|name| EnvVariableStatus {
-                        name,
-                        status: "unavailable",
-                    })
-                    .collect(),
+                variables: unavailable_variable_statuses(&manifest),
             });
         }
     };
@@ -356,6 +403,7 @@ fn inspect_profile(
             return Ok(EnvProfileStatus {
                 profile: profile_name.to_string(),
                 status: "invalid",
+                scope: availability_scope(vault),
                 error_code: Some(profile_error_code(&error)),
                 variables: variable_statuses(&manifest, None, true),
             });
@@ -377,6 +425,7 @@ fn inspect_profile(
     Ok(EnvProfileStatus {
         profile: profile_name.to_string(),
         status,
+        scope: availability_scope(vault),
         error_code,
         variables,
     })
@@ -401,8 +450,43 @@ fn variable_statuses(
             } else {
                 "missing"
             },
+            source: if invalid {
+                "unknown"
+            } else if values.is_some_and(|values| values.contains_key(name)) {
+                "encrypted-profile"
+            } else if spec.default.is_some() {
+                "manifest-default"
+            } else {
+                "unknown"
+            },
+            secret: spec.secret,
+            required: spec.required,
+            description: spec.description.clone(),
         })
         .collect()
+}
+
+fn unavailable_variable_statuses(manifest: &frilvault_core::EnvManifest) -> Vec<EnvVariableStatus> {
+    manifest
+        .variables()
+        .iter()
+        .map(|(name, spec)| EnvVariableStatus {
+            name: name.clone(),
+            status: "unavailable",
+            source: "unknown",
+            secret: spec.secret,
+            required: spec.required,
+            description: spec.description.clone(),
+        })
+        .collect()
+}
+
+fn availability_scope(vault: &frilvault_core::FrilVault) -> &'static str {
+    match vault.status().map(|status| status.mode) {
+        Ok(VaultMode::Local) => "this-machine",
+        Ok(VaultMode::Shared) => "project-shared",
+        Err(_) => "unknown",
+    }
 }
 
 fn print_profile_status(report: &EnvProfileStatus) {

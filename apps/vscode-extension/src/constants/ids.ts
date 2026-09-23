@@ -10,6 +10,7 @@
 export const VIEW_IDS = {
   notes: 'frilvault.notes',
   tags: 'frilvault.tags',
+  environments: 'frilvault.environments',
 } as const;
 
 export const COMMAND_IDS = {
@@ -35,6 +36,11 @@ export const COMMAND_IDS = {
   noteViewerToggle: 'frilvault.noteViewer.toggle',
   noteViewerActions: 'frilvault.noteViewer.actions',
   noteViewerNoop: 'frilvault.noteViewer.noop',
+  environmentAddVariable: 'frilvault.environment.addVariable',
+  environmentReplaceValue: 'frilvault.environment.replaceValue',
+  environmentImport: 'frilvault.environment.import',
+  environmentRun: 'frilvault.environment.run',
+  environmentRefresh: 'frilvault.environment.refresh',
 } as const;
 
 export const CONTEXT_KEYS = {
@@ -50,6 +56,10 @@ export const VIEW_ITEM_CONTEXT = {
   notesUnresolvedGroup: 'frilvault.notesUnresolvedGroup',
   tag: 'frilvault.tag',
   tagNote: 'frilvault.tagNote',
+  environmentProfile: 'frilvault.environmentProfile',
+  environmentVariable: 'frilvault.environmentVariable',
+  environmentDotenv: 'frilvault.environmentDotenv',
+  environmentStatus: 'frilvault.environmentStatus',
 } as const;
 
 /** VS Code focus command for the notes sidebar view. */
@@ -65,4 +75,9 @@ export function notesViewActivationEvent(): string {
 /** Activation event emitted when the tags view becomes visible. */
 export function tagsViewActivationEvent(): string {
   return `onView:${VIEW_IDS.tags}`;
+}
+
+/** Activation event emitted when the environments view becomes visible. */
+export function environmentsViewActivationEvent(): string {
+  return `onView:${VIEW_IDS.environments}`;
 }

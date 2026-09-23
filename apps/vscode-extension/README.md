@@ -13,6 +13,23 @@ notes to source code without modifying the source file.
 - Store all note data locally as JSON
 - Keep project knowledge inside `.vault`
 
+## Environment Manager
+
+The `FrilVault Environments` view uses the native VS Code Tree View, Quick Pick,
+and Input Box APIs to manage encrypted environment profiles through the
+existing `flvt` CLI. It shows profile readiness and manifest metadata without
+displaying environment values. Secret values are entered through a masked
+Input Box and sent to the CLI over stdin; they are not placed in command
+arguments or extension logs.
+
+Project dotenv files are listed as discovered sources only. They are never
+read or imported automatically. Select `Import Dotenv File` to explicitly copy
+the parsed values into an encrypted profile; the source file is preserved.
+
+`Run with Environment Profile` launches the selected child through `flvt env
+run`, so the environment is injected only into that child process and the
+extension does not decrypt or persist values itself.
+
 ## Note Viewer
 
 FrilVault displays note content above associated source-code anchors in an expandable block format without modifying source files. It uses the supported VS Code CodeLens API: each visible note line is a stacked CodeLens row immediately above the anchor.
@@ -58,6 +75,10 @@ CodeLens is the closest stable supported editor API for this UI. VS Code does no
 | `Show Stats` | `frilvault.showStats` | Show workspace note statistics |
 | `Show Health` | `frilvault.showHealth` | Show missing-file health information |
 | `Apply Repairs` | `frilvault.applyRepairs` | Apply note repair suggestions for renamed or moved files |
+| `Add Environment Variable` | `frilvault.environment.addVariable` | Add a declared variable through masked input and CLI stdin |
+| `Replace Environment Value` | `frilvault.environment.replaceValue` | Replace a profile value without displaying it |
+| `Import Dotenv File` | `frilvault.environment.import` | Explicitly import a discovered dotenv file into a profile |
+| `Run with Environment Profile` | `frilvault.environment.run` | Launch a direct child command with a profile injected by the CLI |
 
 The viewer also exposes `frilvault.noteViewer.toggle` and `frilvault.noteViewer.actions` through its CodeLens rows; these commands receive stable note IDs from the provider.
 
