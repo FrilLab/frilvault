@@ -204,6 +204,134 @@ suite('CliClient', () => {
     assert.ok(calls.some((call) => call.endsWith('init --format json')));
   });
 
+  test('loads environment profiles through the CLI JSON boundary', async () => {
+    const calls: string[][] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+
+        calls.push(args);
+        return {
+          stdout: JSON.stringify({
+            profiles: [
+              {
+                profile: 'development',
+                status: 'ready',
+                variables: [],
+              },
+            ],
+          }),
+          stderr: '',
+        };
+      },
+    });
+
+    const result = await cliClient.environmentProfiles('/workspace');
+
+    assert.deepStrictEqual(result.profiles[0]?.profile, 'development');
+    assert.deepStrictEqual(calls, [['env', 'profiles', '--format', 'json']]);
+  });
+
+  test('sends environment values through stdin without putting them in CLI args or logs', async () => {
+    const calls: string[][] = [];
+    const inputs: string[] = [];
+    const logs: string[] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+
+        throw new Error(`unexpected execFile call: ${args.join(' ')}`);
+      },
+      spawnWithInput: async (_file, args, options) => {
+        calls.push(args);
+        inputs.push(options.input);
+        return { stdout: '{"status":"configured"}', stderr: '' };
+      },
+      outputChannel: {
+        appendLine(value) {
+          logs.push(value);
+        },
+      },
+    });
+
+    await cliClient.setEnvironmentValue({
+      workspaceRoot: '/workspace',
+      profile: 'development',
+      key: 'DATABASE_URL',
+      value: 'super-secret-value',
+    });
+
+    assert.deepStrictEqual(calls, [[
+      'env',
+      'set',
+      'DATABASE_URL',
+      '--profile',
+      'development',
+      '--stdin',
+      '--format',
+      'json',
+    ]]);
+    assert.deepStrictEqual(inputs, ['super-secret-value\n']);
+    assert.ok(!logs.some((line) => line.includes('super-secret-value')));
+  });
+
+  test('suppresses child output when an environment run fails', async () => {
+    const logs: string[] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+
+        const error = new Error('child exited') as Error & {
+          stdout: string;
+          stderr: string;
+        };
+        error.stdout = 'child-secret-value';
+        error.stderr = 'child-secret-value';
+        throw error;
+      },
+      outputChannel: {
+        appendLine(value) {
+          logs.push(value);
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        cliClient.runEnvironment({
+          workspaceRoot: '/workspace',
+          profile: 'development',
+          command: ['npm', 'run', 'dev'],
+        }),
+      /output was suppressed/i,
+    );
+    assert.ok(!logs.some((line) => line.includes('child-secret-value')));
+  });
+
   test('searches notes by tag through the CLI JSON boundary', async () => {
     const calls: string[] = [];
     const cliClient = new CliClient({

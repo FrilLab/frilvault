@@ -79,6 +79,29 @@ fn parses_environment_profile_commands() {
         },
         _ => panic!("expected env command"),
     }
+
+    let cli = Cli::parse_from([
+        "flvt",
+        "env",
+        "profiles",
+        "--identity-file",
+        "/tmp/frilvault.identity",
+        "--format",
+        "json",
+    ]);
+    match cli.command {
+        Commands::Env(command) => match command.action {
+            crate::cli::env::EnvAction::Profiles(profiles) => {
+                assert_eq!(
+                    profiles.identity_file.as_deref(),
+                    Some(std::path::Path::new("/tmp/frilvault.identity"))
+                );
+                assert!(matches!(profiles.format, Some(FormatArg::Json)));
+            }
+            _ => panic!("expected env profiles command"),
+        },
+        _ => panic!("expected env command"),
+    }
 }
 
 #[test]

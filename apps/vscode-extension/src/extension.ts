@@ -12,6 +12,7 @@
  * JSON을 직접 쓰지 않습니다.
  */
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 
 import { CliClient } from './core/cliClient';
 import { COMMAND_IDS, VIEW_IDS } from './constants/ids';
@@ -56,6 +57,17 @@ import { registerSourceRenameHandler } from './features/workspace/rename';
 import { registerNoteUriHandler } from './features/uri/handler';
 import { registerWorkspaceWatcher } from './features/workspace/watcher';
 import { createShowStatsCommand } from './features/workspace/stats';
+import {
+  createAddEnvironmentVariableCommand,
+  createImportEnvironmentCommand,
+  createRefreshEnvironmentCommand,
+  createReplaceEnvironmentValueCommand,
+  createRunEnvironmentCommand,
+} from './features/environment/commands';
+import {
+  FrilVaultEnvironmentProvider,
+  type EnvironmentRuntimeState,
+} from './features/environment/provider';
 import type { NoteView } from './types';
 import {
   getWorkspaceRoot,
@@ -103,6 +115,7 @@ export function activate(context: vscode.ExtensionContext): void {
       ?? context.extension.packageJSON.version,
     outputChannel: cliOutputChannel,
   });
+  let environmentRuntimeState: EnvironmentRuntimeState = { status: 'unknown' };
 
   const isEnabled = () => {
     const workspaceRoot = tryGetWorkspaceRoot();
@@ -202,6 +215,8 @@ export function activate(context: vscode.ExtensionContext): void {
     openInlineEditor: (noteView) => inlineNoteEditor.openEdit(noteView),
   });
 
+  let environmentProvider: FrilVaultEnvironmentProvider | undefined;
+
   const clearUi = () => {
     store.clear();
     noteCountStore.clear();
@@ -210,7 +225,36 @@ export function activate(context: vscode.ExtensionContext): void {
     noteViewer.clearAll();
     notesProvider.refresh();
     tagExplorerProvider.refresh();
+    environmentProvider?.refresh();
   };
+
+  const discoverDotenv = async (): Promise<string[]> => {
+    const workspaceRoot = getWorkspaceRoot();
+    const files = await vscode.workspace.findFiles(
+      '**/.env*',
+      '**/{.git,.vault,node_modules}/**',
+      100,
+    );
+    return files
+      .filter((uri) => {
+        const relative = vscode.workspace.asRelativePath(uri, false);
+        const basename = relative.split(/[\\/]/).pop() ?? relative;
+        return /^\.env(?:\..+)?$/.test(basename);
+      })
+      .map((uri) => uri.fsPath)
+      .filter((filePath) => {
+        const relative = path.relative(workspaceRoot, filePath);
+        return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+      });
+  };
+
+  environmentProvider = new FrilVaultEnvironmentProvider({
+    cliClient,
+    getWorkspaceRoot,
+    isEnabled,
+    discoverDotenv,
+    getRuntimeState: () => environmentRuntimeState,
+  });
 
   const refreshAfterWorkspaceEvent = async (editor?: vscode.TextEditor) => {
     await runBackgroundRefresh(
@@ -251,6 +295,20 @@ export function activate(context: vscode.ExtensionContext): void {
 
       await handler(...args);
     };
+  };
+
+  const environmentCommandDependencies = {
+    cliClient,
+    getWorkspaceRoot,
+    refresh: () => environmentProvider?.refresh(),
+    setRuntimeState: (state: EnvironmentRuntimeState) => {
+      environmentRuntimeState = state;
+    },
+    discoverDotenv,
+    showErrorMessage: (message: string) => vscode.window.showErrorMessage(message),
+    showInformationMessage: (message: string) => vscode.window.showInformationMessage(message),
+    showWarningMessage: (message: string, ...items: string[]) =>
+      vscode.window.showWarningMessage(message, ...items),
   };
 
   context.subscriptions.push(
@@ -374,6 +432,34 @@ export function activate(context: vscode.ExtensionContext): void {
         await refreshAfterMutation();
       }),
     ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.environmentAddVariable,
+      runWhenEnabled(
+        createAddEnvironmentVariableCommand(environmentCommandDependencies),
+      ),
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.environmentReplaceValue,
+      runWhenEnabled(
+        createReplaceEnvironmentValueCommand(environmentCommandDependencies),
+      ),
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.environmentImport,
+      runWhenEnabled(
+        createImportEnvironmentCommand(environmentCommandDependencies),
+      ),
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.environmentRun,
+      runWhenEnabled(
+        createRunEnvironmentCommand(environmentCommandDependencies),
+      ),
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.environmentRefresh,
+      createRefreshEnvironmentCommand(() => environmentProvider?.refresh()),
+    ),
     vscode.window.onDidChangeActiveTextEditor(refreshAfterWorkspaceEvent),
     vscode.workspace.onDidSaveTextDocument(() => refreshAfterWorkspaceEvent()),
   );
@@ -382,6 +468,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider(VIEW_IDS.tags, tagExplorerProvider),
   );
+  if (environmentProvider) {
+    context.subscriptions.push(
+      vscode.window.registerTreeDataProvider(VIEW_IDS.environments, environmentProvider),
+    );
+  }
 
   registerSourceRenameHandler(context, cliClient, isEnabled, refreshAfterMutation);
   registerWorkspaceWatcher(context, cliClient, isEnabled, refreshAfterMutation);

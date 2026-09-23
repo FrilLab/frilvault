@@ -19,6 +19,7 @@ pub enum EnvAction {
     Run(EnvRunCommand),
     Set(EnvSetCommand),
     List(EnvListCommand),
+    Profiles(EnvProfilesCommand),
     Validate(EnvValidateCommand),
     Import(EnvImportCommand),
 }
@@ -56,6 +57,16 @@ pub struct EnvListCommand {
     #[arg(long, required = true, value_name = "NAME")]
     pub profile: String,
 
+    /// Explicit permission-restricted identity fallback file.
+    #[arg(long, value_name = "PATH")]
+    pub identity_file: Option<PathBuf>,
+
+    #[arg(long, value_enum)]
+    pub format: Option<FormatArg>,
+}
+
+#[derive(Debug, Args)]
+pub struct EnvProfilesCommand {
     /// Explicit permission-restricted identity fallback file.
     #[arg(long, value_name = "PATH")]
     pub identity_file: Option<PathBuf>,

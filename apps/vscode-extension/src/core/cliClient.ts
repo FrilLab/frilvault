@@ -1,6 +1,6 @@
 import { constants as fsConstants, existsSync } from 'node:fs';
 import { access } from 'node:fs/promises';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import type {
@@ -14,6 +14,8 @@ import type {
   WorkspaceHealth,
   WorkspaceIndex,
   WorkspaceStats,
+  EnvironmentProfilesResult,
+  EnvironmentProfileStatus,
 } from '../types';
 import { parseJson } from '../utils/parser';
 import {
@@ -39,6 +41,16 @@ type ExecFileLike = (
   },
 ) => Promise<ExecFileResult>;
 
+type SpawnWithInputLike = (
+  file: string,
+  args: string[],
+  options: {
+    cwd: string;
+    signal?: AbortSignal;
+    input: string;
+  },
+) => Promise<ExecFileResult>;
+
 export interface OutputChannelLike {
   appendLine(value: string): void;
 }
@@ -54,6 +66,7 @@ export interface CliClientDependencies {
   execFile?: ExecFileLike;
   access?: (path: string, mode: number) => Promise<void>;
   existsSync?: (path: string) => boolean;
+  spawnWithInput?: SpawnWithInputLike;
 }
 
 export interface AddLineNoteInput {
@@ -114,9 +127,15 @@ export interface SearchNotesInput {
  */
 export class CliClient {
   private readonly dependencies: Required<
-    Pick<CliClientDependencies, 'platform' | 'arch' | 'execFile' | 'access' | 'existsSync'>
+    Pick<
+      CliClientDependencies,
+      'platform' | 'arch' | 'execFile' | 'access' | 'existsSync' | 'spawnWithInput'
+    >
   > &
-    Omit<CliClientDependencies, 'platform' | 'arch' | 'execFile' | 'access' | 'existsSync'>;
+    Omit<
+      CliClientDependencies,
+      'platform' | 'arch' | 'execFile' | 'access' | 'existsSync' | 'spawnWithInput'
+    >;
   private readonly verifiedCliPaths = new Map<string, Promise<void>>();
 
   public constructor(
@@ -138,6 +157,7 @@ export class CliClient {
       execFile: normalized.execFile ?? execFileAsync,
       access: normalized.access ?? access,
       existsSync: normalized.existsSync ?? existsSync,
+      spawnWithInput: normalized.spawnWithInput ?? spawnWithInput,
     };
   }
 
@@ -167,6 +187,76 @@ export class CliClient {
   public async initializeLocal(workspaceRoot: string): Promise<InitResult> {
     const stdout = await this.execInWorkspace(workspaceRoot, ['init', '--format', 'json']);
     return parseJson<InitResult>(stdout);
+  }
+
+  public async environmentProfiles(
+    workspaceRoot: string,
+    signal?: AbortSignal,
+  ): Promise<EnvironmentProfilesResult> {
+    const stdout = await this.execInWorkspace(
+      workspaceRoot,
+      ['env', 'profiles', '--format', 'json'],
+      signal,
+    );
+    return parseJson<EnvironmentProfilesResult>(stdout);
+  }
+
+  public async environmentProfile(
+    workspaceRoot: string,
+    profile: string,
+    signal?: AbortSignal,
+  ): Promise<EnvironmentProfileStatus> {
+    const stdout = await this.execInWorkspace(
+      workspaceRoot,
+      ['env', 'list', '--profile', profile, '--format', 'json'],
+      signal,
+    );
+    return parseJson<EnvironmentProfileStatus>(stdout);
+  }
+
+  public async setEnvironmentValue(input: {
+    workspaceRoot: string;
+    profile: string;
+    key: string;
+    value: string;
+  }): Promise<void> {
+    await this.execInWorkspaceWithStdin(
+      input.workspaceRoot,
+      ['env', 'set', input.key, '--profile', input.profile, '--stdin', '--format', 'json'],
+      `${input.value}\n`,
+    );
+  }
+
+  public async importEnvironment(input: {
+    workspaceRoot: string;
+    source: string;
+    profile: string;
+  }): Promise<void> {
+    await this.execInWorkspace(input.workspaceRoot, [
+      'env',
+      'import',
+      input.source,
+      '--profile',
+      input.profile,
+      '--replace',
+      '--yes',
+      '--format',
+      'json',
+    ]);
+  }
+
+  public async runEnvironment(input: {
+    workspaceRoot: string;
+    profile: string;
+    command: string[];
+    signal?: AbortSignal;
+  }): Promise<string> {
+    return this.execInWorkspace(
+      input.workspaceRoot,
+      ['env', 'run', '--profile', input.profile, '--', ...input.command],
+      input.signal,
+      true,
+    );
   }
 
   public async addSymbolNote(input: AddSymbolNoteInput): Promise<NoteView> {
@@ -433,10 +523,44 @@ export class CliClient {
     ]);
   }
 
+  private async execInWorkspaceWithStdin(
+    workspaceRoot: string,
+    args: string[],
+    input: string,
+  ): Promise<string> {
+    const resolution = this.resolveCli();
+
+    if (!resolution.cliPath) {
+      this.logResolution(resolution);
+      throw new Error(this.formatMissingCliMessage());
+    }
+
+    const resolvedCli = { ...resolution, cliPath: resolution.cliPath };
+    const configuredVaultPath = this.dependencies.getConfiguredVaultPath?.();
+    const commandArgs = configuredVaultPath
+      ? ['--vault', configuredVaultPath, ...args]
+      : args;
+
+    await this.ensureCliCompatibility(workspaceRoot, resolvedCli);
+    this.logResolution(resolvedCli, commandArgs);
+
+    try {
+      const result = await this.dependencies.spawnWithInput(resolvedCli.cliPath, commandArgs, {
+        cwd: workspaceRoot,
+        input,
+      });
+      return result.stdout.trim();
+    } catch (error) {
+      this.log('environment value command failed; output suppressed');
+      throw this.formatSensitiveCommandError(error, resolvedCli);
+    }
+  }
+
   private async execInWorkspace(
     workspaceRoot: string,
     args: string[],
     signal?: AbortSignal,
+    suppressOutput = false,
   ): Promise<string> {
     const resolution = this.resolveCli();
 
@@ -460,12 +584,17 @@ export class CliClient {
         signal,
       });
 
-      if (result.stderr.trim().length > 0) {
+      if (!suppressOutput && result.stderr.trim().length > 0) {
         this.log(`stderr: ${result.stderr.trim()}`);
       }
 
       return result.stdout.trim();
     } catch (error) {
+      if (suppressOutput) {
+        this.log('environment run failed; child output suppressed');
+        throw this.formatSensitiveCommandError(error, resolvedCli);
+      }
+
       this.logExecutionError(error);
       throw this.formatCommandError(error, resolvedCli);
     }
@@ -608,6 +737,19 @@ export class CliClient {
     return new Error(message);
   }
 
+  private formatSensitiveCommandError(
+    error: unknown,
+    resolution: CliResolution & { cliPath: string },
+  ): Error {
+    if (isSpawnFailure(error)) {
+      return this.formatStartupError(error, resolution);
+    }
+
+    return new Error(
+      'FrilVault environment command failed. Output was suppressed to protect environment values.',
+    );
+  }
+
   private logResolution(resolution: CliResolution, args: string[] = []): void {
     this.log(
       [
@@ -644,6 +786,38 @@ export class CliClient {
 function extractSemver(raw: string): string | undefined {
   return raw.match(VERSION_PATTERN)?.[1];
 }
+
+const spawnWithInput: SpawnWithInputLike = (file, args, options) =>
+  new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      cwd: options.cwd,
+      signal: options.signal,
+    });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout?.on('data', (chunk: Buffer | string) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      stderr += chunk.toString();
+    });
+    child.once('error', reject);
+    child.once('close', (code, signal) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+
+      const error = new Error(
+        signal ? `FrilVault CLI terminated by ${signal}.` : `FrilVault CLI exited with code ${code}.`,
+      ) as Error & { stdout: string; stderr: string };
+      error.stdout = stdout;
+      error.stderr = stderr;
+      reject(error);
+    });
+    child.stdin?.end(options.input);
+  });
 
 function isSpawnFailure(error: unknown): boolean {
   return isMissingExecutableError(error) || isPermissionError(error);
