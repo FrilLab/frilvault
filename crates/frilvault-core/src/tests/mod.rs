@@ -1,6 +1,9 @@
 mod helper;
 
 #[cfg(test)]
+mod env_test;
+
+#[cfg(test)]
 mod attachment_test;
 
 #[cfg(test)]
