@@ -102,7 +102,6 @@ FrilVault `v0.0.3` adds Explorer note counts and a workspace note overview in `F
 ├── images/
 ├── cache/
 ├── index/
-├── AGENTS.md
 └── workspace.json
 ```
 
@@ -144,7 +143,6 @@ Initialized FrilVault workspace
 
 Vault: .vault
 Mode: local
-AGENTS.md: created
 ```
 
 Local mode is intended for private, checkout-local knowledge. When the
@@ -167,7 +165,6 @@ Initialized FrilVault workspace
 
 Vault: .vault
 Mode: shared
-AGENTS.md: created
 ```
 
 Shared mode does not add `.vault/` to `.git/info/exclude` and does not modify
@@ -177,19 +174,18 @@ ignore rules can still affect whether Git reports the vault as ignored.
 See [Workspace status](#workspace-status) for the mode and Git tracking values
 reported after initialization.
 
-### AI-safe Vault instructions
+### AI integration and existing `AGENTS.md` files
 
-`flvt init` also creates `.vault/AGENTS.md` with concise instructions for AI
-tools operating on FrilVault metadata. It explains the note storage model,
-CLI-first updates, line and symbol anchors, tag normalization, validation, and
-the separation between Vault metadata and source code. It is scoped to
-`.vault/**`; repository-wide instructions remain in the root `AGENTS.md`.
+`flvt init` does not create or manage `.vault/AGENTS.md`, and it never creates
+or modifies a repository-root `AGENTS.md`. Existing `.vault/AGENTS.md` files
+are user-owned and remain untouched during initialization and other Vault
+operations. If an older FrilVault version created one, review its contents and
+remove it manually when appropriate.
 
-Initialization never overwrites an existing `.vault/AGENTS.md`, so users can
-customize it safely. Re-running `flvt init` preserves customized content. The
-file is written to the selected Vault Path, including nested or external Vaults.
-See [AI Integration](docs/AI-INTEGRATION.md) for the recommended agent
-workflow.
+Vault safety is enforced by Core and CLI behavior such as path validation,
+validated and atomic persistence, preservation of unrelated data, and redacted
+output. It does not depend on an AI tool discovering or following a generated
+Markdown instruction file.
 
 The `mode` is stored in `.vault/workspace.json` as a top-level field. A newly
 initialized workspace has this shape (the timestamps vary):

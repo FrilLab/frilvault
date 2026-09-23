@@ -92,6 +92,20 @@ fn explicit_file_path_is_rejected_without_falling_back_to_legacy_vault() {
 }
 
 #[test]
+fn nested_vault_initialization_does_not_generate_agents_file() {
+    let workspace = create_test_workspace();
+    let nested = workspace.root().join("packages/app");
+    fs::create_dir_all(&nested).unwrap();
+
+    FrilVault::open(&nested)
+        .unwrap()
+        .initialize(VaultMode::Local)
+        .unwrap();
+
+    assert!(!nested.join(".vault/AGENTS.md").exists());
+}
+
+#[test]
 fn external_vault_preserves_workspace_relative_anchors_and_mode() {
     let workspace = create_test_workspace();
     let external = create_test_workspace();
@@ -111,7 +125,7 @@ fn external_vault_preserves_workspace_relative_anchors_and_mode() {
         .unwrap();
 
     assert!(external.root().join("notes/src/main.rs.json").exists());
-    assert!(external.root().join("AGENTS.md").exists());
+    assert!(!external.root().join("AGENTS.md").exists());
     assert!(!workspace.root().join(".vault").exists());
     let view = notes.list_notes("src/main.rs").unwrap();
     assert_eq!(view[0].source_file, std::path::Path::new("src/main.rs"));
