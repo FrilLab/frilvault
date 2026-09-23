@@ -84,6 +84,13 @@ export interface WorkspaceStats {
   symbol_notes: number;
 }
 
+export interface WorkspaceStatus {
+  vault_path: string;
+  mode: 'local' | 'shared';
+  git_tracking: 'excluded' | 'trackable' | 'tracked' | 'not_git_repository';
+  note_count: number;
+}
+
 export interface WorkspaceHealth {
   missing_source_files: string[];
 }

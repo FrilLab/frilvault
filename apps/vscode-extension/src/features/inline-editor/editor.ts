@@ -37,7 +37,6 @@ export interface InlineNoteEditorDependencies {
   cliClient: CliClient;
   getWorkspaceRoot?: () => string;
   refreshNoteState: () => Promise<void>;
-  runOptionalPostSaveTasks?: () => Promise<void>;
   showErrorMessage?: (message: string) => Thenable<string | undefined>;
   showInformationMessage?: (message: string) => Thenable<string | undefined>;
   showWarningMessage?: (message: string) => Thenable<string | undefined>;
@@ -314,9 +313,6 @@ export class InlineNoteEditor {
 
       await this.refreshTagSuggestions(draftAtSaveStart.workspaceRoot);
 
-      void this.dependencies.runOptionalPostSaveTasks?.().catch(async (error) => {
-        await this.reportOptionalFailure('running post-save tasks', error);
-      });
     } catch (error) {
       if (!this.draft || revision < this.lastPersistedRevision) {
         return;

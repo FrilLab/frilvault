@@ -29,6 +29,31 @@ impl WorkspaceRepository {
         self.path_resolver.workspace_metadata_path().is_file()
     }
 
+    pub(crate) fn require_initialized(&self) -> FrilVaultResult<WorkspaceMetadata> {
+        let metadata_path = self.path_resolver.workspace_metadata_path();
+        if self.exists() {
+            let metadata = self.load()?;
+            for directory in [
+                NOTES_DIR_NAME,
+                CACHE_DIR_NAME,
+                INDEX_DIR_NAME,
+                IMAGES_DIR_NAME,
+            ] {
+                let path = self.path_resolver.vault_root().join(directory);
+                if !path.is_dir() {
+                    return Err(FrilVaultError::IncompleteWorkspace(path));
+                }
+            }
+            return Ok(metadata);
+        }
+
+        if self.path_resolver.vault_root_ref().exists() {
+            return Err(FrilVaultError::IncompleteWorkspace(metadata_path));
+        }
+
+        Err(FrilVaultError::WorkspaceNotFound)
+    }
+
     pub fn save(&self, metadata: &WorkspaceMetadata) -> FrilVaultResult<()> {
         let path = self.path_resolver.workspace_metadata_path();
 
@@ -43,12 +68,14 @@ impl WorkspaceRepository {
         Ok(())
     }
 
-    pub fn create_if_missing(&self) -> FrilVaultResult<()> {
-        self.initialize(VaultMode::Local).map(|_| ())
-    }
-
-    pub fn initialize(&self, mode: VaultMode) -> FrilVaultResult<WorkspaceMetadata> {
+    pub(crate) fn initialize(&self, mode: VaultMode) -> FrilVaultResult<WorkspaceMetadata> {
         let vault_root = self.path_resolver.vault_root();
+        let path = self.path_resolver.workspace_metadata_path();
+        let existing_metadata = if path.exists() {
+            Some(self.load()?)
+        } else {
+            None
+        };
 
         for directory in [
             NOTES_DIR_NAME,
@@ -59,10 +86,8 @@ impl WorkspaceRepository {
             fs::create_dir_all(vault_root.join(directory))?;
         }
 
-        let path = self.path_resolver.workspace_metadata_path();
-
-        if path.exists() {
-            return self.load();
+        if let Some(metadata) = existing_metadata {
+            return Ok(metadata);
         }
 
         let metadata = WorkspaceMetadata {

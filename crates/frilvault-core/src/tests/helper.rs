@@ -40,7 +40,9 @@ pub fn create_test_note_service(workspace_root: &Path) -> NoteService {
 pub fn create_test_vault_context(workspace_root: &Path) -> VaultContext {
     let resolver = PathResolver::new(workspace_root);
     let workspace_repository = WorkspaceRepository::new(resolver.clone());
-    workspace_repository.create_if_missing().unwrap();
+    workspace_repository
+        .initialize(crate::workspace::VaultMode::Local)
+        .unwrap();
 
     let note_repository = NoteRepository::new(resolver.clone());
     let index_repository = WorkspaceIndexRepository::new(resolver);

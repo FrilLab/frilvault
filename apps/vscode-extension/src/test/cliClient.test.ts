@@ -2,7 +2,11 @@ import * as assert from 'node:assert';
 
 import { suite, test } from 'mocha';
 
-import { CliClient } from '../core/cliClient';
+import {
+  CliClient,
+  CliCommandError,
+  isWorkspaceNotFoundError,
+} from '../core/cliClient';
 
 suite('CliClient', () => {
   test('uses the bundled CLI by default when cliPath is empty', async () => {
@@ -202,6 +206,144 @@ suite('CliClient', () => {
 
     assert.deepStrictEqual(result, { mode: 'local', git_exclude: 'added' });
     assert.ok(calls.some((call) => call.endsWith('init --format json')));
+  });
+
+  test('initializes a shared vault through the explicit CLI contract', async () => {
+    const calls: string[][] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        calls.push(args);
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+        return {
+          stdout: JSON.stringify({ mode: 'shared', git_exclude: null }),
+          stderr: '',
+        };
+      },
+    });
+
+    const result = await cliClient.initializeShared('/workspace');
+
+    assert.deepStrictEqual(result, { mode: 'shared', git_exclude: null });
+    assert.deepStrictEqual(calls[1], ['init', '--shared', '--format', 'json']);
+  });
+
+  test('reads workspace mode and Git tracking through the CLI status command', async () => {
+    const calls: string[][] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        calls.push(args);
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+        return {
+          stdout: JSON.stringify({
+            vault_path: '.vault',
+            mode: 'local',
+            git_tracking: 'excluded',
+            note_count: 0,
+          }),
+          stderr: '',
+        };
+      },
+    });
+
+    const status = await cliClient.workspaceStatus('/workspace');
+
+    assert.deepStrictEqual(status, {
+      vault_path: '.vault',
+      mode: 'local',
+      git_tracking: 'excluded',
+      note_count: 0,
+    });
+    assert.deepStrictEqual(calls[1], ['status', '--format', 'json']);
+  });
+
+  test('validates the configured external vault path through status', async () => {
+    const calls: string[][] = [];
+    const cliClient = new CliClient({
+      getConfiguredVaultPath: () => '../external-vault',
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        calls.push(args);
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+        return {
+          stdout: JSON.stringify({
+            vault_path: '../external-vault',
+            mode: 'shared',
+            git_tracking: 'trackable',
+            note_count: 0,
+          }),
+          stderr: '',
+        };
+      },
+    });
+
+    const status = await cliClient.workspaceStatus('/workspace');
+
+    assert.strictEqual(status.mode, 'shared');
+    assert.deepStrictEqual(calls[1], [
+      '--vault',
+      '../external-vault',
+      'status',
+      '--format',
+      'json',
+    ]);
+  });
+
+  test('preserves structured missing-workspace errors from the CLI', async () => {
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\n', stderr: '' };
+        }
+        const error = new Error('flvt exited with code 1') as Error & { stderr?: string };
+        error.stderr = JSON.stringify({
+          error: {
+            code: 'workspace_not_found',
+            message: 'No FrilVault workspace found. Run `flvt init`.',
+          },
+        });
+        throw error;
+      },
+    });
+
+    await assert.rejects(
+      () => cliClient.workspaceStatus('/workspace'),
+      (error: unknown) => {
+        assert.ok(error instanceof CliCommandError);
+        assert.strictEqual(error.code, 'workspace_not_found');
+        assert.strictEqual(isWorkspaceNotFoundError(error), true);
+        assert.match(error.message, /Run `flvt init`/);
+        return true;
+      },
+    );
   });
 
   test('loads environment profiles through the CLI JSON boundary', async () => {

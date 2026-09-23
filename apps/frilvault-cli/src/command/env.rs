@@ -34,6 +34,8 @@ pub fn execute(command: EnvCommand) -> Result<()> {
 }
 
 pub fn execute_with_vault(command: EnvCommand, vault_path: Option<&Path>) -> Result<()> {
+    super::open_vault(vault_path)?.require_initialized()?;
+
     match command.action {
         EnvAction::Doctor(doctor) => crate::command::doctor::execute_env(doctor, vault_path),
         EnvAction::Init(init) => execute_init(init, vault_path),

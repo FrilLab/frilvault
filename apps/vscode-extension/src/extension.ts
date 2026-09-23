@@ -19,7 +19,6 @@ import { COMMAND_IDS, VIEW_IDS } from './constants/ids';
 import { CurrentFileNotesStore } from './features/current-file/store';
 import { createDisableCommand, createEnableCommand } from './features/enablement/command';
 import { isFrilVaultEnabled, syncEnabledContext } from './features/enablement/state';
-import { runOptionalPostSaveTasks } from './features/post-save/tasks';
 import { registerExplorerNoteCountDecorations } from './features/explorer-badges/provider';
 import { WorkspaceNoteCountStore } from './features/explorer-badges/store';
 import { FrilVaultDecorator } from './features/decorations/decorator';
@@ -198,11 +197,6 @@ export function activate(context: vscode.ExtensionContext): void {
     cliClient,
     getWorkspaceRoot,
     refreshNoteState: () => refreshAfterMutation(),
-    runOptionalPostSaveTasks: () =>
-      runOptionalPostSaveTasks({
-        getWorkspaceRoot,
-        cliClient,
-      }),
     showWarningMessage: (message) => vscode.window.showWarningMessage(message),
   });
   inlineNoteEditor.register(context);
@@ -311,6 +305,17 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showWarningMessage(message, ...items),
   };
 
+  const enableCommand = createEnableCommand({
+    getWorkspaceRoot,
+    workspaceState: context.workspaceState,
+    cliClient,
+    refreshUi: refreshAfterMutation,
+    clearUi,
+    showWarningMessage: (message, ...items) =>
+      vscode.window.showWarningMessage(message, ...items),
+    showErrorMessage: (message) => vscode.window.showErrorMessage(message),
+  });
+
   context.subscriptions.push(
     cliOutputChannel,
     searchRefreshEmitter,
@@ -328,18 +333,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand(
       COMMAND_IDS.enable,
-      createEnableCommand({
-        getWorkspaceRoot,
-        workspaceState: context.workspaceState,
-        refreshUi: refreshAfterMutation,
-        clearUi,
-      }),
+      enableCommand,
     ),
     vscode.commands.registerCommand(
       COMMAND_IDS.disable,
       createDisableCommand({
         getWorkspaceRoot,
         workspaceState: context.workspaceState,
+        cliClient,
         refreshUi: refreshAfterMutation,
         clearUi,
       }),
@@ -490,7 +491,10 @@ export function activate(context: vscode.ExtensionContext): void {
   void syncEnabledContext(isEnabled()).then(async () => {
     try {
       if (isEnabled()) {
-        await refreshAfterMutation();
+        await enableCommand();
+        if (isEnabled()) {
+          await refreshAfterMutation();
+        }
         return;
       }
 

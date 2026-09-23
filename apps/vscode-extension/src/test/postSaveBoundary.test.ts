@@ -6,9 +6,8 @@ import { suite, test } from 'mocha';
 
 import { COMMAND_IDS } from '../constants/ids';
 import { initializeLocalVault } from '../features/initialization/localVault';
-import { runOptionalPostSaveTasks } from '../features/post-save/tasks';
 
-suite('Post-save boundaries', () => {
+suite('Explicit initialization boundaries', () => {
   test('initializeLocalVault reports tracked vaults', async () => {
     let warning = '';
 
@@ -26,26 +25,6 @@ suite('Post-save boundaries', () => {
     assert.match(warning, /already tracked by Git/i);
   });
 
-  test('runOptionalPostSaveTasks reports initialization failures without throwing', async () => {
-    let warning = '';
-
-    await runOptionalPostSaveTasks(
-      {
-        getWorkspaceRoot: () => '/tmp/workspace',
-        cliClient: {
-          initializeLocal: async () => {
-            throw new Error('initialization failed');
-          },
-        } as never,
-      },
-      async (message) => {
-        warning = message;
-        return undefined;
-      },
-    );
-
-    assert.match(warning, /local vault initialization failed/i);
-  });
 });
 
 suite('Canonical add note command registration', () => {
