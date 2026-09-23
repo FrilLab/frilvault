@@ -64,9 +64,23 @@ suite('Extension Test Suite', function () {
   });
 
   test('extension activates and registers every contributed command', async () => {
+    const workspace = createTestWorkspace();
+    await configureExtension(workspace);
+    assert.strictEqual(fs.existsSync(path.join(workspace.root, '.vault')), false);
+
     const extension = vscode.extensions.getExtension('frillab.frilvault');
     assert.ok(extension, 'FrilVault extension is available in the Extension Host');
     await extension.activate();
+    await flushMicrotasks();
+    assert.strictEqual(fs.existsSync(path.join(workspace.root, '.vault')), false);
+
+    const editor = await openFile(workspace.sourceFile);
+    await editor.edit((builder) => {
+      builder.insert(new vscode.Position(0, 0), '// saved after activation\n');
+    });
+    await editor.document.save();
+    await flushMicrotasks();
+    assert.strictEqual(fs.existsSync(path.join(workspace.root, '.vault')), false);
 
     const registered = new Set(await vscode.commands.getCommands(true));
     const contributed = (extension.packageJSON.contributes?.commands ?? []) as Array<{

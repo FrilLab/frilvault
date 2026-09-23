@@ -117,14 +117,16 @@ explicitly:
 
 ```bash
 flvt --vault ../frilvault-data init
-flvt --vault /path/to/shared-vault status
+flvt --vault /path/to/frilvault-data status
 ```
 
 An explicit `--vault` path is authoritative: if it is missing or invalid,
 FrilVault reports the error and does not silently use another `.vault`. Without
 an explicit path, FrilVault chooses the nearest existing `.vault` from the
 current directory through its ancestors; if none exists, it creates the
-workspace-root `.vault` as before. VS Code uses the same CLI-backed rule; set
+workspace-root `.vault` as the default initialization target. Opening,
+refreshing, or reading an uninitialized workspace does not create that
+directory; run `flvt init` to create it. VS Code uses the same CLI-backed rule; set
 `frilvault.vaultPath` to the same path when an explicit external vault is
 needed. Relative VS Code paths are resolved from `frilvault.workspaceRoot`.
 
@@ -151,11 +153,17 @@ repository's `.git/info/exclude`. This is a repository-local exclusion: it
 does not change the shared `.gitignore` file. If `.vault` is already tracked,
 the exclusion cannot untrack it and initialization reports a warning.
 
+To create a Local vault at an external path, use:
+
+```bash
+flvt --vault ../frilvault-data init
+```
+
 To explicitly create a vault intended to be shared through Git, use:
 
 ```bash
 flvt init --shared
-flvt --vault ../frilvault-data init
+flvt --vault ../frilvault-data init --shared
 ```
 
 The command prints:
@@ -173,6 +181,10 @@ user to review and commit the files they want to share. Pre-existing Git
 ignore rules can still affect whether Git reports the vault as ignored.
 See [Workspace status](#workspace-status) for the mode and Git tracking values
 reported after initialization.
+
+Vault location, Local/Shared mode, and Git tracking are independent: an
+external path can use either mode, and Git tracking is determined by repository
+rules and the selected mode's initialization policy.
 
 ### AI integration and existing `AGENTS.md` files
 

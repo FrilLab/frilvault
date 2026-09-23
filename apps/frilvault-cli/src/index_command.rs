@@ -6,7 +6,7 @@ use std::{
 };
 
 use clap::Parser;
-use frilvault_core::{AddNoteRequest, FrilVault, LineAnchor, NoteAnchor};
+use frilvault_core::{AddNoteRequest, FrilVault, LineAnchor, NoteAnchor, VaultMode};
 
 use crate::{
     cli::{Cli, format::FormatArg, index::IndexCommand},
@@ -48,6 +48,9 @@ fn create_index_fixture() -> PathBuf {
     fs::write(workspace.join("src/main.rs"), "").expect("create source file");
 
     let vault = FrilVault::open(&workspace).expect("open workspace");
+    vault
+        .initialize(VaultMode::Local)
+        .expect("initialize workspace");
     let mut note_service = vault.notes().expect("create note service");
     note_service
         .add_note(AddNoteRequest {

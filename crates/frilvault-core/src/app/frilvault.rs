@@ -37,12 +37,12 @@ impl FrilVault {
     /// Opens a workspace rooted at `workspace_root`.
     ///
     /// The selected vault is discovered without creating it. Vault directories
-    /// are created lazily when services first touch repositories.
+    /// are never created by opening the workspace or constructing services.
     ///
     /// `workspace_root`를 루트로 하는 워크스페이스를 엽니다.
     ///
-    /// 선택된 vault는 생성하지 않고 찾습니다. vault 디렉터리는 서비스가 저장소에
-    /// 처음 접근할 때 지연 생성됩니다.
+    /// 선택된 vault는 생성하지 않고 찾습니다. workspace metadata가 없는 읽기 및
+    /// 서비스 접근은 초기화 오류를 반환하며 파일을 만들지 않습니다.
     pub fn open(workspace_root: impl AsRef<Path>) -> FrilVaultResult<Self> {
         let path_resolver = PathResolver::discover(workspace_root.as_ref());
         let workspace_root = path_resolver.workspace_root().to_path_buf();
@@ -95,6 +95,16 @@ impl FrilVault {
         self.path_resolver.display_vault_path()
     }
 
+    /// Confirms that the selected vault contains valid workspace metadata.
+    ///
+    /// This check is read-only and distinguishes a missing vault from a partial
+    /// vault directory that needs inspection.
+    pub fn require_initialized(&self) -> FrilVaultResult<()> {
+        WorkspaceRepository::new(self.path_resolver.clone())
+            .require_initialized()
+            .map(|_| ())
+    }
+
     /// Initializes the workspace with the requested storage policy.
     ///
     /// Existing workspace metadata is preserved, including its current mode.
@@ -130,12 +140,7 @@ impl FrilVault {
     pub fn status(&self) -> FrilVaultResult<WorkspaceStatus> {
         let resolver = self.path_resolver.clone();
         let workspace_repository = WorkspaceRepository::new(resolver.clone());
-
-        if !workspace_repository.exists() {
-            return Err(FrilVaultError::WorkspaceNotFound);
-        }
-
-        let metadata = workspace_repository.load()?;
+        let metadata = workspace_repository.require_initialized()?;
         // Status promises the current count, so read note files directly rather
         // than trusting an index that may be stale after an external edit.
         let display_vault_path = resolver.display_vault_path();
@@ -160,7 +165,7 @@ impl FrilVault {
     /// Returns the workspace-level tag color assignments, keyed case-insensitively.
     pub fn tag_colors(&self) -> FrilVaultResult<BTreeMap<String, TagColor>> {
         let repository = WorkspaceRepository::new(self.path_resolver.clone());
-        let metadata = repository.load()?;
+        let metadata = repository.require_initialized()?;
 
         Ok(metadata
             .settings
@@ -180,7 +185,7 @@ impl FrilVault {
         }
 
         let repository = WorkspaceRepository::new(self.path_resolver.clone());
-        let mut metadata = repository.load()?;
+        let mut metadata = repository.require_initialized()?;
         metadata
             .settings
             .tags
@@ -199,7 +204,7 @@ impl FrilVault {
         }
 
         let repository = WorkspaceRepository::new(self.path_resolver.clone());
-        let mut metadata = repository.load()?;
+        let mut metadata = repository.require_initialized()?;
         let removed = metadata.settings.tags.remove(&tag.to_lowercase()).is_some();
         if removed {
             metadata.updated_at = chrono::Utc::now();
@@ -212,10 +217,9 @@ impl FrilVault {
         let resolver = self.path_resolver.clone();
 
         let workspace_repository = WorkspaceRepository::new(resolver.clone());
-        workspace_repository.create_if_missing()?;
+        workspace_repository.require_initialized()?;
 
         let index_repository = WorkspaceIndexRepository::new(resolver.clone());
-        index_repository.create_if_missing()?;
 
         let note_repository = NoteRepository::new(resolver.clone());
 

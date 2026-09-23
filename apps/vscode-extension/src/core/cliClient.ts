@@ -14,6 +14,7 @@ import type {
   WorkspaceHealth,
   WorkspaceIndex,
   WorkspaceStats,
+  WorkspaceStatus,
   EnvironmentProfilesResult,
   EnvironmentProfileStatus,
 } from '../types';
@@ -108,6 +109,20 @@ export interface InitResult {
     | null;
 }
 
+export class CliCommandError extends Error {
+  public constructor(
+    message: string,
+    public readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'CliCommandError';
+  }
+}
+
+export function isWorkspaceNotFoundError(error: unknown): error is CliCommandError {
+  return error instanceof CliCommandError && error.code === 'workspace_not_found';
+}
+
 export interface SearchNotesInput {
   workspaceRoot: string;
   keyword?: string;
@@ -187,6 +202,21 @@ export class CliClient {
   public async initializeLocal(workspaceRoot: string): Promise<InitResult> {
     const stdout = await this.execInWorkspace(workspaceRoot, ['init', '--format', 'json']);
     return parseJson<InitResult>(stdout);
+  }
+
+  public async initializeShared(workspaceRoot: string): Promise<InitResult> {
+    const stdout = await this.execInWorkspace(workspaceRoot, [
+      'init',
+      '--shared',
+      '--format',
+      'json',
+    ]);
+    return parseJson<InitResult>(stdout);
+  }
+
+  public async workspaceStatus(workspaceRoot: string): Promise<WorkspaceStatus> {
+    const stdout = await this.execInWorkspace(workspaceRoot, ['status', '--format', 'json']);
+    return parseJson<WorkspaceStatus>(stdout);
   }
 
   public async environmentProfiles(
@@ -728,7 +758,7 @@ export class CliClient {
 
     const stderr = readExecErrorStream(error, 'stderr');
     if (stderr) {
-      return new Error(stderr);
+      return parseCliCommandError(stderr) ?? new Error(stderr);
     }
 
     const message =
@@ -781,6 +811,23 @@ export class CliClient {
   private log(message: string): void {
     this.dependencies.outputChannel?.appendLine(`[FrilVault CLI] ${message}`);
   }
+}
+
+function parseCliCommandError(stderr: string): CliCommandError | undefined {
+  try {
+    const parsed = JSON.parse(stderr) as {
+      error?: { code?: unknown; message?: unknown };
+    };
+    if (
+      typeof parsed.error?.code === 'string' &&
+      typeof parsed.error.message === 'string'
+    ) {
+      return new CliCommandError(parsed.error.message, parsed.error.code);
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 function extractSemver(raw: string): string | undefined {

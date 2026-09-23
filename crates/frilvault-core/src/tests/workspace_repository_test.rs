@@ -7,27 +7,27 @@ use crate::{
 };
 
 #[test]
-fn create_if_missing_creates_workspace_metadata() {
+fn explicit_repository_initialization_creates_workspace_metadata() {
     let workspace = create_test_workspace();
     let workspace_root = workspace.root();
     let resolver = PathResolver::new(workspace_root);
 
     let repository = WorkspaceRepository::new(resolver.clone());
 
-    repository.create_if_missing().unwrap();
+    repository.initialize(VaultMode::Local).unwrap();
 
     assert!(resolver.workspace_metadata_path().exists());
 }
 
 #[test]
-fn create_if_missing_creates_default_directories() {
+fn explicit_repository_initialization_creates_default_directories() {
     let workspace = create_test_workspace();
     let workspace_root = workspace.root();
     let resolver = PathResolver::new(workspace_root);
 
     let repository = WorkspaceRepository::new(resolver.clone());
 
-    repository.create_if_missing().unwrap();
+    repository.initialize(VaultMode::Local).unwrap();
 
     assert!(resolver.vault_root().join("notes").exists());
 
@@ -75,7 +75,7 @@ fn legacy_workspace_without_mode_loads_as_local() {
     let workspace = create_test_workspace();
     let resolver = PathResolver::new(workspace.root());
     let repository = WorkspaceRepository::new(resolver.clone());
-    repository.create_if_missing().unwrap();
+    repository.initialize(VaultMode::Local).unwrap();
 
     let metadata_path = resolver.workspace_metadata_path();
     let mut metadata: serde_json::Value =
@@ -93,7 +93,7 @@ fn initializing_legacy_workspace_preserves_notes_and_metadata() {
     let workspace = create_test_workspace();
     let resolver = PathResolver::new(workspace.root());
     let repository = WorkspaceRepository::new(resolver.clone());
-    repository.create_if_missing().unwrap();
+    repository.initialize(VaultMode::Local).unwrap();
 
     let metadata_path = resolver.workspace_metadata_path();
     let mut metadata: serde_json::Value =
@@ -138,7 +138,7 @@ fn legacy_workspace_without_tag_settings_loads_uncolored() {
     let workspace = create_test_workspace();
     let resolver = PathResolver::new(workspace.root());
     let repository = WorkspaceRepository::new(resolver.clone());
-    repository.create_if_missing().unwrap();
+    repository.initialize(VaultMode::Local).unwrap();
 
     let metadata_path = resolver.workspace_metadata_path();
     let mut metadata: serde_json::Value =

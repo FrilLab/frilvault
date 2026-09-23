@@ -35,10 +35,11 @@ fn initialize_preserves_existing_agents_file_without_managing_it() {
 }
 
 #[test]
-fn frilvault_open_creates_note_service() {
+fn notes_service_requires_explicit_initialization() {
     let workspace = create_test_workspace();
     let workspace_root = workspace.root();
     let vault = FrilVault::open(workspace_root).unwrap();
+    vault.initialize(VaultMode::Local).unwrap();
 
     let mut notes = vault.notes().unwrap();
 
@@ -58,10 +59,11 @@ fn frilvault_open_creates_note_service() {
 }
 
 #[test]
-fn frilvault_open_creates_workspace_service() {
+fn workspace_service_requires_explicit_initialization() {
     let workspace = create_test_workspace();
     let workspace_root = workspace.root();
     let vault = FrilVault::open(workspace_root).unwrap();
+    vault.initialize(VaultMode::Local).unwrap();
 
     let mut workspace = vault.workspace().unwrap();
 
@@ -164,6 +166,74 @@ fn status_fails_without_creating_a_missing_workspace() {
 }
 
 #[test]
+fn service_construction_and_tag_metadata_reads_do_not_initialize_a_missing_workspace() {
+    let workspace = create_test_workspace();
+    let vault = FrilVault::open(workspace.root()).unwrap();
+
+    assert!(matches!(
+        vault.notes(),
+        Err(FrilVaultError::WorkspaceNotFound)
+    ));
+    assert!(matches!(
+        vault.workspace(),
+        Err(FrilVaultError::WorkspaceNotFound)
+    ));
+    assert!(matches!(
+        vault.tag_colors(),
+        Err(FrilVaultError::WorkspaceNotFound)
+    ));
+    assert!(matches!(
+        vault.set_tag_color("todo", crate::TagColor::Blue),
+        Err(FrilVaultError::WorkspaceNotFound)
+    ));
+    assert!(matches!(
+        vault.remove_tag_color("todo"),
+        Err(FrilVaultError::WorkspaceNotFound)
+    ));
+    assert!(!workspace.root().join(".vault").exists());
+}
+
+#[test]
+fn partial_vault_reports_its_missing_metadata_without_creating_files() {
+    let workspace = create_test_workspace();
+    let partial_vault = workspace.root().join(".vault");
+    fs::create_dir_all(partial_vault.join("notes")).unwrap();
+    let vault = FrilVault::open(workspace.root()).unwrap();
+
+    let error = match vault.notes() {
+        Err(error) => error,
+        Ok(_) => panic!("partial vault unexpectedly opened"),
+    };
+
+    assert!(matches!(
+        &error,
+        FrilVaultError::IncompleteWorkspace(path) if path == &partial_vault.join("workspace.json")
+    ));
+    assert!(!partial_vault.join("workspace.json").exists());
+    assert!(!partial_vault.join("index").exists());
+}
+
+#[test]
+fn partial_initialized_vault_reports_missing_directory_without_recreating_it() {
+    let workspace = create_test_workspace();
+    let vault = FrilVault::open(workspace.root()).unwrap();
+    vault.initialize(VaultMode::Local).unwrap();
+    let missing_directory = workspace.root().join(".vault/images");
+    fs::remove_dir(&missing_directory).unwrap();
+
+    let error = match vault.workspace() {
+        Err(error) => error,
+        Ok(_) => panic!("partial vault unexpectedly opened"),
+    };
+
+    assert!(matches!(
+        error,
+        FrilVaultError::IncompleteWorkspace(path) if path == missing_directory
+    ));
+    assert!(!missing_directory.exists());
+}
+
+#[test]
 fn status_reports_corrupted_workspace_metadata() {
     let workspace = create_test_workspace();
     let vault = FrilVault::open(workspace.root()).unwrap();
@@ -178,6 +248,24 @@ fn status_reports_corrupted_workspace_metadata() {
         FrilVaultError::InvalidWorkspaceMetadata { .. }
     ));
     assert!(error.to_string().contains("workspace.json is invalid"));
+}
+
+#[test]
+fn explicit_initialization_does_not_extend_a_workspace_with_invalid_metadata() {
+    let workspace = create_test_workspace();
+    let vault_root = workspace.root().join(".vault");
+    fs::create_dir_all(&vault_root).unwrap();
+    let metadata_path = vault_root.join("workspace.json");
+    fs::write(&metadata_path, "not json").unwrap();
+    let vault = FrilVault::open(workspace.root()).unwrap();
+
+    assert!(matches!(
+        vault.initialize(VaultMode::Local),
+        Err(FrilVaultError::InvalidWorkspaceMetadata { .. })
+    ));
+    assert_eq!(fs::read_to_string(metadata_path).unwrap(), "not json");
+    assert!(!vault_root.join("notes").exists());
+    assert!(!vault_root.join("index").exists());
 }
 
 #[test]

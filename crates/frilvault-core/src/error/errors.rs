@@ -33,6 +33,11 @@ pub enum FrilVaultError {
     #[error("No FrilVault workspace found.\nRun `flvt init` to initialize one.")]
     WorkspaceNotFound,
 
+    #[error(
+        "FrilVault workspace is incomplete at {0}. Inspect the selected vault before running `flvt init`."
+    )]
+    IncompleteWorkspace(PathBuf),
+
     #[error("vault path is not a directory: {0}")]
     InvalidVaultPath(PathBuf),
 
@@ -221,6 +226,18 @@ pub enum FrilVaultError {
     /// Returned when a profile rotation has no current encryption recipients.
     #[error("environment profile rotation requires at least one registered recipient")]
     EmptyEnvRecipients,
+}
+
+impl FrilVaultError {
+    /// Returns a stable machine-readable identifier for CLI diagnostics.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::WorkspaceNotFound => "workspace_not_found",
+            Self::IncompleteWorkspace(_) => "incomplete_workspace",
+            Self::InvalidWorkspaceMetadata { .. } => "invalid_workspace_metadata",
+            _ => "operation_failed",
+        }
+    }
 }
 
 pub type FrilVaultResult<T> = Result<T, FrilVaultError>;
