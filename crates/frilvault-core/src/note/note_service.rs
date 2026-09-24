@@ -22,9 +22,9 @@ use uuid::Uuid;
 use crate::{
     AddNoteRequest, AttachmentRepository, FrilVaultError, FrilVaultResult, NoteAnchor,
     NoteAttachment, NoteQuery, NoteView, SymbolKind, TagBreakdown, TagGroupBy, TagOperationResult,
-    TagQuery, TagStatistic, TagSummary, UpdateNoteRequest,
+    TagOperationRollback, TagQuery, TagStatistic, TagSummary, UpdateNoteRequest,
     note::{Note, normalize_tag, normalize_tags, restore_file},
-    runtime::VaultContext,
+    runtime::{VaultContext, VaultMutationLock},
     symbol::SymbolResolver,
     workspace::{IndexedFile, WorkspaceIndex, read_source_file_content},
 };
@@ -38,11 +38,17 @@ use crate::{
 /// 저장소, 캐시, symbol 해석, workspace index 갱신을 조율합니다.
 pub struct NoteService {
     vault_context: VaultContext,
+    mutation_lock: VaultMutationLock,
 }
 
 impl NoteService {
     pub fn new(vault_context: VaultContext) -> Self {
-        Self { vault_context }
+        let mutation_lock =
+            VaultMutationLock::new(vault_context.workspace_index_repository.vault_root());
+        Self {
+            vault_context,
+            mutation_lock,
+        }
     }
 
     fn load_notes(&mut self, source_file: impl AsRef<Path>) -> FrilVaultResult<Vec<Note>> {
@@ -56,12 +62,42 @@ impl NoteService {
     ) -> FrilVaultResult<()> {
         let source_file = source_file.as_ref();
 
-        self.vault_context
+        let note_path = self
+            .vault_context
             .note_repository
-            .replace_notes(source_file.as_ref(), notes)?;
+            .resolve_note_path(source_file);
+        let index_path = self.vault_context.workspace_index_repository.path();
+        let note_snapshot = FileSnapshot::capture(note_path)?;
+        let index_snapshot = FileSnapshot::capture(index_path)?;
 
-        self.vault_context.invalidate_notes(source_file.as_ref());
+        let result = self
+            .vault_context
+            .note_repository
+            .replace_notes(source_file, notes)
+            .and_then(|()| self.vault_context.sync_index_for_source_file(source_file));
 
+        if let Err(source) = result {
+            let note_rollback = note_snapshot.restore();
+            let index_rollback = index_snapshot.restore();
+            self.vault_context.invalidate_notes(source_file);
+            let rollback = match (note_rollback, index_rollback) {
+                (Ok(()), Ok(())) => TagOperationRollback::Succeeded,
+                (note, index) => TagOperationRollback::Failed(
+                    [note.err(), index.err()]
+                        .into_iter()
+                        .flatten()
+                        .map(|error| error.to_string())
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                ),
+            };
+            return Err(FrilVaultError::NoteOperationFailed {
+                source: Box::new(source),
+                rollback,
+            });
+        }
+
+        self.vault_context.invalidate_notes(source_file);
         Ok(())
     }
 
@@ -77,6 +113,7 @@ impl NoteService {
     ///
     /// 해당 파일의 workspace index note count를 갱신합니다.
     pub fn add_note(&mut self, input: AddNoteRequest) -> FrilVaultResult<Note> {
+        let _lock = self.mutation_lock.acquire()?;
         let mut input = input;
         validate_anchor(&input.anchor)?;
         let source_file = self
@@ -85,14 +122,9 @@ impl NoteService {
         input.source_file = source_file.clone();
         let note = Note::new(input);
 
-        self.vault_context
-            .note_repository
-            .append_note(&source_file, &note)?;
-
-        self.vault_context.invalidate_notes(&source_file);
-
-        self.vault_context
-            .sync_index_for_source_file(&source_file)?;
+        let mut notes = self.load_notes(&source_file)?;
+        notes.push(note.clone());
+        self.save_notes(&source_file, notes)?;
 
         Ok(note)
     }
@@ -234,6 +266,7 @@ impl NoteService {
         source_file: impl AsRef<Path>,
         note_id: Uuid,
     ) -> FrilVaultResult<()> {
+        let _lock = self.mutation_lock.acquire()?;
         let source_file = self
             .vault_context
             .normalize_source_file(source_file.as_ref())?;
@@ -244,9 +277,6 @@ impl NoteService {
         notes.remove(note_index);
 
         self.save_notes(&source_file, notes)?;
-
-        self.vault_context
-            .sync_index_for_source_file(&source_file)?;
 
         self.attachment_repository().remove_all_for_note(note_id)?;
 
@@ -271,6 +301,7 @@ impl NoteService {
         note_id: Uuid,
         request: UpdateNoteRequest,
     ) -> FrilVaultResult<Note> {
+        let _lock = self.mutation_lock.acquire()?;
         let source_file = self
             .vault_context
             .normalize_source_file(source_file.as_ref())?;
@@ -297,9 +328,6 @@ impl NoteService {
         let updated = note.clone();
         self.save_notes(&source_file, notes)?;
 
-        self.vault_context
-            .sync_index_for_source_file(&source_file)?;
-
         Ok(updated)
     }
 
@@ -309,6 +337,7 @@ impl NoteService {
         note_id: Uuid,
         image_path: impl AsRef<Path>,
     ) -> FrilVaultResult<NoteAttachment> {
+        let _lock = self.mutation_lock.acquire()?;
         let source_file = self
             .vault_context
             .normalize_source_file(source_file.as_ref())?;
@@ -327,9 +356,6 @@ impl NoteService {
             let _ = attachment_repository.remove(note_id, &attachment);
             return Err(error);
         }
-        self.vault_context
-            .sync_index_for_source_file(&source_file)?;
-
         Ok(attachment)
     }
 
@@ -339,6 +365,7 @@ impl NoteService {
         note_id: Uuid,
         attachment_id: Uuid,
     ) -> FrilVaultResult<()> {
+        let _lock = self.mutation_lock.acquire()?;
         let source_file = self
             .vault_context
             .normalize_source_file(source_file.as_ref())?;
@@ -357,9 +384,6 @@ impl NoteService {
         note.updated_at = Utc::now();
 
         self.save_notes(&source_file, notes)?;
-        self.vault_context
-            .sync_index_for_source_file(&source_file)?;
-
         self.attachment_repository().remove(note_id, &attachment)?;
 
         Ok(())
@@ -675,6 +699,7 @@ impl NoteService {
     where
         F: FnMut(&mut Note) -> bool,
     {
+        let _lock = self.mutation_lock.acquire()?;
         let mut records = self.vault_context.note_repository.list_all_note_files()?;
         let mut affected_notes = 0;
         let mut affected_files = 0;

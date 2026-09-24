@@ -77,10 +77,16 @@ impl WorkspaceIndexRepository {
             return self.load();
         }
 
-        self.rebuild()
+        self.rebuild_in_memory()
     }
 
     pub fn rebuild(&self) -> FrilVaultResult<WorkspaceIndex> {
+        let index = self.rebuild_in_memory()?;
+        self.save(&index)?;
+        Ok(index)
+    }
+
+    fn rebuild_in_memory(&self) -> FrilVaultResult<WorkspaceIndex> {
         let note_repository = NoteRepository::new(self.path_resolver.clone());
 
         let records = note_repository.list_all_note_files()?;
@@ -100,11 +106,7 @@ impl WorkspaceIndexRepository {
             })
             .collect();
 
-        let index = WorkspaceIndex { version: 1, files };
-
-        self.save(&index)?;
-
-        Ok(index)
+        Ok(WorkspaceIndex { version: 1, files })
     }
 
     pub fn load_and_refresh_exists(&self) -> FrilVaultResult<WorkspaceIndex> {

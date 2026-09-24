@@ -22,6 +22,10 @@ displaying environment values. Secret values are entered through a masked
 Input Box and sent to the CLI over stdin; they are not placed in command
 arguments or extension logs.
 
+The displayed scope follows the Vault mode: Local is shown as this-machine and
+Shared as project-shared. This describes profile availability; values are
+injected only into a child started with `Run with Environment Profile`.
+
 Project dotenv files are listed as discovered sources only. They are never
 read or imported automatically. Select `Import Dotenv File` to explicitly copy
 the parsed values into an encrypted profile; the source file is preserved.
@@ -32,20 +36,20 @@ extension does not decrypt or persist values itself.
 
 ## Note Viewer
 
-FrilVault displays note content above associated source-code anchors in an expandable block format without modifying source files. It uses the supported VS Code CodeLens API: each visible note line is a stacked CodeLens row immediately above the anchor.
+FrilVault displays note content above associated source-code anchors without modifying source files. It uses the supported VS Code CodeLens API to show a compact, single-line summary or preview above each anchor; CodeLens does not support a multiline block inside the editor.
 
 - **Collapsed State**: Displays a compact one-line summary (e.g., `▶ Note · 3 lines · #todo #parser` or `▶ Notes (2)`).
-- **Expanded State**: Displays the multi-line note content, tags, and structure above the anchor line. Intentional line breaks are preserved.
+- **Expanded State**: Displays a compact preview of the note content and tags above the anchor line. Whitespace is flattened and long previews are shortened; the full note remains available from hover and `Open Note`.
 - **Multiple Notes**: Grouped cleanly above the same anchor without visual duplication or overlapping widgets.
 - **Actions**: Select `Actions…` in the viewer, hover the anchor, or use the gutter marker to open the existing View, Edit, Delete, Copy Link, Copy Content, and Copy Markdown actions.
 
-CodeLens is the closest stable supported editor API for this UI. VS Code does not expose an extension-owned multiline block widget inside a normal text editor, so the expanded viewer is a set of dedicated CodeLens rows rather than a custom DOM overlay. Very long individual lines are shortened to keep the editor layout responsive; the full note remains available from hover and `Open Note`. Unresolved symbol anchors stay available in the sidebar and hover paths but are not assigned a guessed editor location.
+CodeLens is the closest stable supported editor API for this UI. Unresolved symbol anchors stay available in the sidebar and hover paths but are not assigned a guessed editor location.
 
 ### Viewer Differences
 
 | UI Surface | Purpose |
 | --- | --- |
-| **Block Note Viewer** | Inline editor reading surface displayed above code anchors (expandable/collapsible) |
+| **CodeLens Note Preview** | Compact editor preview displayed above code anchors (expandable/collapsible) |
 | **Gutter Markers** | Interactive line indicators showing where notes exist and quick action menus |
 | **Hover Preview** | Rich documentation popup on cursor hover with full markdown, tags, and actions |
 | **Notes Sidebar** | Workspace-wide and file-level tree navigation for browsing all notes |
@@ -171,8 +175,7 @@ No cloud account is required.
 ## Known Limitations
 
 - FrilVault targets one workspace root at a time, so multi-root workspace support is limited
-- The note viewer uses stacked CodeLens rows because normal editor decorations cannot provide a supported clickable multiline block layout
-- Long individual viewer lines are shortened in the editor; hover and `Open Note` provide the complete content
+- CodeLens previews flatten whitespace and shorten long content; hover and `Open Note` provide the complete content
 - This is an early preview release
 
 ## Roadmap

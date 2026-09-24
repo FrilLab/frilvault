@@ -60,7 +60,7 @@ fn warm_up_succeeds_without_notes_folder() {
     let index = service.warm_up().unwrap();
 
     assert!(index.files.is_empty());
-    assert!(resolver.workspace_index_path().exists());
+    assert!(!resolver.workspace_index_path().exists());
 
     let loaded = service.index_repository.load().unwrap();
     assert!(loaded.files.is_empty());

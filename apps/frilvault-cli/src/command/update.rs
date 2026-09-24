@@ -39,7 +39,11 @@ pub fn execute_with_vault(command: UpdateCommand, vault_path: Option<&Path>) -> 
         note_id,
         UpdateNoteRequest {
             content: command.content,
-            tags: (!command.tags.is_empty()).then_some(command.tags),
+            tags: if command.clear_tags {
+                Some(Vec::new())
+            } else {
+                (!command.tags.is_empty()).then_some(command.tags)
+            },
             expected_updated_at,
         },
     )?;

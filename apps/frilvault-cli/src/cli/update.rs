@@ -13,8 +13,12 @@ pub struct UpdateCommand {
     #[arg(long)]
     pub content: String,
 
-    #[arg(long = "tag")]
+    #[arg(long = "tag", conflicts_with = "clear_tags")]
     pub tags: Vec<String>,
+
+    /// Remove every existing tag. Without this flag, omitted tags are preserved.
+    #[arg(long, conflicts_with = "tags")]
+    pub clear_tags: bool,
 
     #[arg(long)]
     pub expected_updated_at: Option<String>,

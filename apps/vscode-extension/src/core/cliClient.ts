@@ -52,6 +52,12 @@ type SpawnWithInputLike = (
   },
 ) => Promise<ExecFileResult>;
 
+type RunCommandLike = (
+  file: string,
+  args: string[],
+  options: { cwd: string; signal?: AbortSignal; onSpawn?: () => void },
+) => Promise<void>;
+
 export interface OutputChannelLike {
   appendLine(value: string): void;
 }
@@ -68,6 +74,7 @@ export interface CliClientDependencies {
   access?: (path: string, mode: number) => Promise<void>;
   existsSync?: (path: string) => boolean;
   spawnWithInput?: SpawnWithInputLike;
+  runCommand?: RunCommandLike;
 }
 
 export interface AddLineNoteInput {
@@ -96,6 +103,7 @@ export interface UpdateNoteInput {
   noteId: string;
   content: string;
   tags?: string[];
+  clearTags?: boolean;
   expectedUpdatedAt?: string;
 }
 
@@ -144,12 +152,12 @@ export class CliClient {
   private readonly dependencies: Required<
     Pick<
       CliClientDependencies,
-      'platform' | 'arch' | 'execFile' | 'access' | 'existsSync' | 'spawnWithInput'
+      'platform' | 'arch' | 'execFile' | 'access' | 'existsSync' | 'spawnWithInput' | 'runCommand'
     >
   > &
     Omit<
       CliClientDependencies,
-      'platform' | 'arch' | 'execFile' | 'access' | 'existsSync' | 'spawnWithInput'
+      'platform' | 'arch' | 'execFile' | 'access' | 'existsSync' | 'spawnWithInput' | 'runCommand'
     >;
   private readonly verifiedCliPaths = new Map<string, Promise<void>>();
 
@@ -173,6 +181,13 @@ export class CliClient {
       access: normalized.access ?? access,
       existsSync: normalized.existsSync ?? existsSync,
       spawnWithInput: normalized.spawnWithInput ?? spawnWithInput,
+      runCommand: normalized.runCommand
+        ?? (normalized.execFile
+          ? async (file, args, options) => {
+              options.onSpawn?.();
+              await normalized.execFile!(file, args, options);
+            }
+          : runCommandWithoutBuffer),
     };
   }
 
@@ -261,18 +276,20 @@ export class CliClient {
     workspaceRoot: string;
     source: string;
     profile: string;
+    replace?: boolean;
   }): Promise<void> {
-    await this.execInWorkspace(input.workspaceRoot, [
+    const args = [
       'env',
       'import',
       input.source,
       '--profile',
       input.profile,
-      '--replace',
-      '--yes',
-      '--format',
-      'json',
-    ]);
+    ];
+    if (input.replace) {
+      args.push('--replace', '--yes');
+    }
+    args.push('--format', 'json');
+    await this.execInWorkspace(input.workspaceRoot, args);
   }
 
   public async runEnvironment(input: {
@@ -280,12 +297,14 @@ export class CliClient {
     profile: string;
     command: string[];
     signal?: AbortSignal;
+    onSpawn?: () => void;
   }): Promise<string> {
     return this.execInWorkspace(
       input.workspaceRoot,
       ['env', 'run', '--profile', input.profile, '--', ...input.command],
       input.signal,
       true,
+      input.onSpawn,
     );
   }
 
@@ -379,8 +398,12 @@ export class CliClient {
       'json',
     ];
 
-    for (const tag of input.tags ?? []) {
-      args.push('--tag', tag);
+    if (input.clearTags) {
+      args.push('--clear-tags');
+    } else {
+      for (const tag of input.tags ?? []) {
+        args.push('--tag', tag);
+      }
     }
 
     if (input.expectedUpdatedAt) {
@@ -591,6 +614,7 @@ export class CliClient {
     args: string[],
     signal?: AbortSignal,
     suppressOutput = false,
+    onSpawn?: () => void,
   ): Promise<string> {
     const resolution = this.resolveCli();
 
@@ -609,6 +633,15 @@ export class CliClient {
     this.logResolution(resolvedCli, commandArgs);
 
     try {
+      if (suppressOutput && args[0] === 'env' && args[1] === 'run') {
+        await this.dependencies.runCommand(resolvedCli.cliPath, commandArgs, {
+          cwd: workspaceRoot,
+          signal,
+          onSpawn,
+        });
+        return '';
+      }
+
       const result = await this.dependencies.execFile(resolvedCli.cliPath, commandArgs, {
         cwd: workspaceRoot,
         signal,
@@ -864,6 +897,27 @@ const spawnWithInput: SpawnWithInputLike = (file, args, options) =>
       reject(error);
     });
     child.stdin?.end(options.input);
+  });
+
+const runCommandWithoutBuffer: RunCommandLike = (file, args, options) =>
+  new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      cwd: options.cwd,
+      signal: options.signal,
+      stdio: 'ignore',
+    });
+    child.once('spawn', () => options.onSpawn?.());
+    child.once('error', reject);
+    child.once('close', (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(new Error(
+        signal ? `Environment child terminated by ${signal}.` : `Environment child exited with code ${code}.`,
+      ));
+    });
   });
 
 function isSpawnFailure(error: unknown): boolean {

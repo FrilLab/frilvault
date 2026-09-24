@@ -129,6 +129,15 @@ pub enum FrilVaultError {
         rollback: TagOperationRollback,
     },
 
+    /// Returned when a single-note mutation fails and its filesystem rollback
+    /// either succeeds or requires further inspection.
+    #[error("note operation failed: {source}; rollback {rollback}")]
+    NoteOperationFailed {
+        #[source]
+        source: Box<FrilVaultError>,
+        rollback: TagOperationRollback,
+    },
+
     /// Returned when an environment profile name cannot safely map to one file.
     #[error("invalid environment profile name: {0}")]
     InvalidEnvProfileName(String),
