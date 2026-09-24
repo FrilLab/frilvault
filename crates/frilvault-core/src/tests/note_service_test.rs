@@ -779,6 +779,54 @@ fn add_note_updates_persisted_index() {
 }
 
 #[test]
+fn update_rolls_back_note_when_index_write_fails() {
+    let workspace = create_test_workspace();
+    let workspace_root = workspace.root();
+    fs::create_dir_all(workspace_root.join("src")).unwrap();
+    fs::write(workspace_root.join("src/main.rs"), "").unwrap();
+    let mut service = create_test_note_service(workspace_root);
+    let original = service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "original".to_string(),
+            tags: None,
+        })
+        .unwrap();
+    let note_path = workspace_root.join(".vault/notes/src/main.rs.json");
+    let index_path = workspace_root.join(".vault/index/workspace.json");
+    let original_note = fs::read(&note_path).unwrap();
+    let original_index = fs::read(&index_path).unwrap();
+
+    service.fail_index_writes_after(0);
+    let error = service
+        .update_note(
+            "src/main.rs",
+            original.id,
+            UpdateNoteRequest {
+                content: "must roll back".to_string(),
+                tags: None,
+                expected_updated_at: None,
+            },
+        )
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        FrilVaultError::NoteOperationFailed {
+            rollback: crate::TagOperationRollback::Succeeded,
+            ..
+        }
+    ));
+    assert_eq!(fs::read(note_path).unwrap(), original_note);
+    assert_eq!(fs::read(index_path).unwrap(), original_index);
+    assert_eq!(
+        service.list_notes("src/main.rs").unwrap()[0].note.content,
+        "original"
+    );
+}
+
+#[test]
 fn delete_note_updates_persisted_index_count() {
     let workspace = create_test_workspace();
     let workspace_root = workspace.root();

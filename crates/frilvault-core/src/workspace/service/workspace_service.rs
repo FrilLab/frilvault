@@ -6,6 +6,7 @@
 //! 워크스페이스 전체를 대상으로 하는 통계, 상태 점검, 동기화, 복구
 //! 워크플로를 제공합니다.
 
+use crate::runtime::VaultMutationLock;
 use crate::{
     FrilVaultResult, NoteAnchor, RepairSuggestion, SyncResult, WorkspaceExplorer, WorkspaceHealth,
     WorkspaceStats,
@@ -28,16 +29,19 @@ pub struct WorkspaceService {
     pub vault_context: VaultContext,
     pub index_repository: WorkspaceIndexRepository,
     notes_watcher: WorkspaceWatcher,
+    mutation_lock: VaultMutationLock,
 }
 
 impl WorkspaceService {
     pub fn new(vault_context: VaultContext, index_repository: WorkspaceIndexRepository) -> Self {
         let notes_watcher = WorkspaceWatcher::new(index_repository.clone());
+        let mutation_lock = VaultMutationLock::new(index_repository.vault_root());
 
         Self {
             vault_context,
             index_repository,
             notes_watcher,
+            mutation_lock,
         }
     }
 
@@ -53,6 +57,11 @@ impl WorkspaceService {
     /// Editor integrations should invoke this from a file watcher callback when
     /// `.vault/notes` is created, modified, moved, or deleted outside FrilVault.
     pub fn sync_notes_directory_changes(&mut self) -> FrilVaultResult<()> {
+        let _lock = self.mutation_lock.acquire()?;
+        self.sync_notes_directory_changes_unlocked()
+    }
+
+    fn sync_notes_directory_changes_unlocked(&mut self) -> FrilVaultResult<()> {
         self.notes_watcher.sync(&mut self.vault_context)
     }
 
@@ -61,8 +70,13 @@ impl WorkspaceService {
     /// Editor integrations should invoke this from a file rename/move callback when
     /// a tracked source file changes path outside FrilVault.
     pub fn sync_source_file_changes(&mut self) -> FrilVaultResult<usize> {
+        let _lock = self.mutation_lock.acquire()?;
+        self.sync_source_file_changes_unlocked()
+    }
+
+    fn sync_source_file_changes_unlocked(&mut self) -> FrilVaultResult<usize> {
         let _ = self.index_repository.load_and_refresh_exists()?;
-        let repaired = self.apply_repairs()?;
+        let repaired = self.apply_repairs_unlocked()?;
 
         if repaired > 0 {
             let index = self.index_repository.load()?;
@@ -77,15 +91,16 @@ impl WorkspaceService {
         sync_notes: bool,
         sync_sources: bool,
     ) -> FrilVaultResult<SyncResult> {
+        let _lock = self.mutation_lock.acquire()?;
         let mut notes_synced = false;
 
         if sync_notes {
-            self.sync_notes_directory_changes()?;
+            self.sync_notes_directory_changes_unlocked()?;
             notes_synced = true;
         }
 
         let repairs_applied = if sync_sources {
-            self.sync_source_file_changes()?
+            self.sync_source_file_changes_unlocked()?
         } else {
             0
         };
@@ -256,6 +271,11 @@ impl WorkspaceService {
     }
 
     pub fn apply_repair_moves(&mut self, moves: Vec<FileMove>) -> FrilVaultResult<usize> {
+        let _lock = self.mutation_lock.acquire()?;
+        self.apply_repair_moves_unlocked(moves)
+    }
+
+    fn apply_repair_moves_unlocked(&mut self, moves: Vec<FileMove>) -> FrilVaultResult<usize> {
         let applied = RepairEngine::apply_moves_with_min_confidence(
             &mut self.vault_context,
             moves,
@@ -270,6 +290,11 @@ impl WorkspaceService {
     }
 
     pub fn apply_repairs(&mut self) -> FrilVaultResult<usize> {
+        let _lock = self.mutation_lock.acquire()?;
+        self.apply_repairs_unlocked()
+    }
+
+    fn apply_repairs_unlocked(&mut self) -> FrilVaultResult<usize> {
         let suggestions = self.repair_suggestions()?;
 
         let moves = suggestions
@@ -287,6 +312,6 @@ impl WorkspaceService {
             })
             .collect();
 
-        self.apply_repair_moves(moves)
+        self.apply_repair_moves_unlocked(moves)
     }
 }

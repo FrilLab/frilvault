@@ -35,6 +35,9 @@ export interface EnablementCommandDependencies {
     ...items: string[]
   ) => Thenable<string | undefined>;
   showErrorMessage?: (message: string) => Thenable<string | undefined>;
+  showOpenDialog?: typeof vscode.window.showOpenDialog;
+  getWorkspaceVaultPath?: () => string | undefined;
+  updateWorkspaceVaultPath?: (path: string | undefined) => Promise<void>;
 }
 
 export function createEnableCommand(
@@ -98,11 +101,35 @@ export function createEnableCommand(
           return;
         }
       } else if (choice === 'Choose Existing/External Vault') {
+        const configuration = vscode.workspace.getConfiguration('frilvault');
+        const getWorkspaceVaultPath =
+          dependencies.getWorkspaceVaultPath ??
+          (() => configuration.inspect<string>('vaultPath')?.workspaceValue);
+        const updateWorkspaceVaultPath = dependencies.updateWorkspaceVaultPath ??
+          ((path: string | undefined) =>
+            configuration.update('vaultPath', path, vscode.ConfigurationTarget.Workspace));
+        const previousWorkspaceVaultPath = getWorkspaceVaultPath();
+        let changedVaultPath = false;
         try {
-          // CliClient forwards the configured frilvault.vaultPath. A status
-          // request validates that exact path without creating any files.
+          const showOpenDialog = dependencies.showOpenDialog ?? vscode.window.showOpenDialog;
+          const selected = await showOpenDialog({
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            openLabel: 'Use FrilVault Vault',
+            title: 'Choose an existing FrilVault vault directory',
+          });
+          if (!selected?.[0]) {
+            return;
+          }
+
+          await updateWorkspaceVaultPath(selected[0].fsPath);
+          changedVaultPath = true;
           status = await dependencies.cliClient.workspaceStatus(workspaceRoot);
         } catch (validationError) {
+          if (changedVaultPath) {
+            await updateWorkspaceVaultPath(previousWorkspaceVaultPath);
+          }
           await showError(dependencies, validationError);
           return;
         }

@@ -95,13 +95,17 @@ export function createImportEnvironmentCommand(
         return;
       }
 
-      if (profile.profile.toLowerCase() === 'production') {
+      const replace = profile.variables.some((variable) => variable.status === 'configured');
+      if (replace || profile.profile.toLowerCase() === 'production') {
+        const production = profile.profile.toLowerCase() === 'production';
         const confirmation = await dependencies.showWarningMessage(
-          `Import into production profile '${profile.profile}'? Values remain masked and the source file is preserved.`,
-          'Import',
+          production
+            ? `Replace every value in production profile '${profile.profile}' with keys from the selected dotenv file? Missing keys will be removed.`
+            : `Replace every configured value in '${profile.profile}' with keys from the selected dotenv file? Missing keys will be removed.`,
+          'Replace Profile',
           'Cancel',
         );
-        if (confirmation !== 'Import') {
+        if (confirmation !== 'Replace Profile') {
           return;
         }
       }
@@ -110,6 +114,7 @@ export function createImportEnvironmentCommand(
         workspaceRoot: dependencies.getWorkspaceRoot(),
         source,
         profile: profile.profile,
+        replace,
       });
       dependencies.refresh();
       await dependencies.showInformationMessage(
@@ -154,13 +159,16 @@ export function createRunEnvironmentCommand(
       return;
     }
 
-    dependencies.setRuntimeState({ status: 'confirmed', profile: selected.profile });
-    dependencies.refresh();
+    dependencies.setRuntimeState({ status: 'unknown' });
     try {
       await dependencies.cliClient.runEnvironment({
         workspaceRoot: dependencies.getWorkspaceRoot(),
         profile: selected.profile,
         command,
+        onSpawn: () => {
+          dependencies.setRuntimeState({ status: 'confirmed', profile: selected.profile });
+          dependencies.refresh();
+        },
       });
       await dependencies.showInformationMessage(
         `FrilVault run completed for '${selected.profile}'.`,

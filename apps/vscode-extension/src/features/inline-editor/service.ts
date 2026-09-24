@@ -61,6 +61,7 @@ export class InlineNoteEditorService {
       noteId: draft.noteId,
       content: draft.content.trim(),
       tags,
+      clearTags: tags.length === 0,
       expectedUpdatedAt: draft.expectedUpdatedAt,
     });
   }

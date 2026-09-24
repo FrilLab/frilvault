@@ -30,7 +30,7 @@ suite('Note viewer CodeLens provider', () => {
     }
   });
 
-  test('renders multiline line and symbol notes, toggles, refreshes, and clears safely', async function () {
+  test('renders a compact preview for multiline notes, toggles, refreshes, and clears safely', async function () {
     this.timeout(10_000);
 
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'frilvault-note-viewer-test-'));
@@ -87,6 +87,8 @@ suite('Note viewer CodeLens provider', () => {
 
       assert.ok(toggle);
       assert.ok(actions);
+      assert.ok((toggle.command?.title?.length ?? 0) <= 144);
+      assert.ok(!collapsed.some((lens) => lens.command?.title === 'Note Edit'));
       assert.deepStrictEqual(toggle.command?.arguments?.[0], ['line-note', 'line-note-2']);
       assert.deepStrictEqual(actions.command?.arguments?.[0], ['line-note', 'line-note-2']);
       assert.ok(collapsed.some((lens) => lens.command?.arguments?.[0]?.includes?.('symbol-note')));
@@ -94,11 +96,10 @@ suite('Note viewer CodeLens provider', () => {
       controller.toggleNotes(['line-note', 'line-note-2'], source.document.uri.toString());
       const expanded = await getViewerLenses(source.document.uri);
       const expandedTitles = expanded.map((lens) => lens.command?.title ?? '');
-      assert.ok(expandedTitles.includes('▼ Notes (2)'));
-      assert.ok(expandedTitles.includes('first line'));
-      assert.ok(expandedTitles.includes('second line'));
-      assert.ok(expandedTitles.includes('third line'));
-      assert.ok(expandedTitles.includes('second note'));
+      const preview = expanded.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerToggle);
+      assert.ok(preview?.command?.title?.startsWith('▼ Notes (2)'));
+      assert.ok(preview?.command?.title?.includes('first line second line third line'));
+      assert.ok((preview?.command?.title?.length ?? 0) <= 144);
       assert.strictEqual(fs.readFileSync(sourcePath, 'utf8'), originalSource);
 
       activeUri = other.uri.toString();
