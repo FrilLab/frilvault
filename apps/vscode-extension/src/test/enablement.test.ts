@@ -125,6 +125,7 @@ suite('Enablement initialization flow', () => {
   test('configured existing vault is validated before enabling', async () => {
     let localCalls = 0;
     let refreshCalls = 0;
+    let selectedVaultPath: string | undefined;
     const state = createWorkspaceState();
     let choiceCalls = 0;
     const command = createEnableCommand({
@@ -144,6 +145,11 @@ suite('Enablement initialization flow', () => {
         refreshCalls += 1;
       },
       clearUi: () => undefined,
+      showOpenDialog: async () => [vscode.Uri.file('/external/project/.vault')],
+      getWorkspaceVaultPath: () => selectedVaultPath,
+      updateWorkspaceVaultPath: async (path) => {
+        selectedVaultPath = path;
+      },
       showInformationMessage: async (_message, ...items) => {
         if (items.length > 0) {
           choiceCalls += 1;
@@ -158,7 +164,43 @@ suite('Enablement initialization flow', () => {
     assert.strictEqual(choiceCalls, 1);
     assert.strictEqual(localCalls, 0);
     assert.strictEqual(refreshCalls, 1);
+    assert.strictEqual(selectedVaultPath, '/external/project/.vault');
     assert.strictEqual(isFrilVaultEnabled(state, '/workspace'), true);
+  });
+
+  test('restores the prior vault path when a selected directory is invalid', async () => {
+    const state = createWorkspaceState();
+    const updates: Array<string | undefined> = [];
+    let shownError = '';
+    const command = createEnableCommand({
+      getWorkspaceRoot: () => '/workspace',
+      workspaceState: state,
+      cliClient: fakeCli({
+        statuses: [
+          new CliCommandError('missing', 'workspace_not_found'),
+          new CliCommandError('invalid vault', 'invalid_workspace_metadata'),
+        ],
+      }),
+      refreshUi: async () => undefined,
+      clearUi: () => undefined,
+      showInformationMessage: async (_message, ...items) =>
+        items.length > 0 ? 'Choose Existing/External Vault' : undefined,
+      showOpenDialog: async () => [vscode.Uri.file('/external/invalid')],
+      getWorkspaceVaultPath: () => '/prior/vault',
+      updateWorkspaceVaultPath: async (path) => {
+        updates.push(path);
+      },
+      showErrorMessage: async (message) => {
+        shownError = message;
+        return undefined;
+      },
+    });
+
+    await command();
+
+    assert.deepStrictEqual(updates, ['/external/invalid', '/prior/vault']);
+    assert.strictEqual(shownError, 'invalid vault');
+    assert.strictEqual(isFrilVaultEnabled(state, '/workspace'), false);
   });
 
   test('cancelled local Git repair does not enable the workspace', async () => {

@@ -62,7 +62,7 @@ fn create_if_missing_creates_index_directory() {
 }
 
 #[test]
-fn load_or_rebuild_scans_when_index_file_is_missing() {
+fn load_or_rebuild_scans_without_writing_a_missing_index() {
     let workspace = create_test_workspace();
     let workspace_root = workspace.root();
     fs::create_dir_all(workspace_root.join("src")).unwrap();
@@ -91,6 +91,9 @@ fn load_or_rebuild_scans_when_index_file_is_missing() {
 
     assert_eq!(index.files.len(), 1);
     assert_eq!(index.files[0].source_file, "src/main.rs");
+    assert!(!resolver.workspace_index_path().exists());
+
+    repository.rebuild().unwrap();
     assert!(resolver.workspace_index_path().exists());
 }
 

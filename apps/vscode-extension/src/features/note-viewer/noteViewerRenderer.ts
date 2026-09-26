@@ -2,9 +2,9 @@
  * Renders note viewer items as CodeLens rows.
  *
  * VS Code's supported editor APIs do not provide an extension-owned block
- * widget in a text editor. CodeLens does provide dedicated horizontal rows
- * between source lines, so the viewer uses one CodeLens per displayed line.
- * This keeps the source document untouched and makes the collapse control a
+ * widget in a text editor. CodeLens provides compact rows between source
+ * lines, so the viewer uses one summary or preview row per anchor. This keeps
+ * the source document untouched and makes the collapse control a
  * real VS Code command rather than relying on decoration pseudo-elements.
  */
 import * as vscode from 'vscode';
@@ -18,11 +18,11 @@ import {
   type NoteViewerItem,
 } from './noteViewerModel';
 
-const MAX_CODE_LENS_LINE_LENGTH = 240;
+const MAX_CODE_LENS_LINE_LENGTH = 144;
 
 export class NoteViewerRenderer implements vscode.Disposable {
   /**
-   * Build CodeLens rows for a document. Every command carries the stable note
+   * Build CodeLens previews for a document. Every command carries the stable note
    * id(s) and document URI needed when an editor is split or changes focus.
    */
   public render(document: vscode.TextDocument, items: NoteViewerItem[]): vscode.CodeLens[] {
@@ -40,63 +40,18 @@ export class NoteViewerRenderer implements vscode.Disposable {
       const noteIds = group.items.map((item) => item.noteId);
       const allCollapsed = group.items.every((item) => item.collapsed);
 
-      if (allCollapsed) {
-        lenses.push(
-          this.commandLens(
-            range,
-            formatCollapsedSummary(group),
-            COMMAND_IDS.noteViewerToggle,
-            [noteIds, documentUri],
-            'Expand FrilVault note',
-          ),
-        );
-      } else {
-        lenses.push(
-          this.commandLens(
-            range,
-            formatExpandedHeading(group),
-            COMMAND_IDS.noteViewerToggle,
-            [noteIds, documentUri],
-            'Collapse FrilVault note',
-          ),
-        );
+      const title = allCollapsed ? formatCollapsedSummary(group) : formatExpandedPreview(group);
+      lenses.push(
+        this.commandLens(
+          range,
+          title,
+          COMMAND_IDS.noteViewerToggle,
+          [noteIds, documentUri],
+          allCollapsed ? 'Show a short FrilVault note preview' : 'Hide the FrilVault note preview',
+        ),
+      );
 
-        for (const [index, item] of group.items.entries()) {
-          if (group.items.length > 1) {
-            lenses.push(this.textLens(range, `[${index + 1}] ${item.title || 'Note'}`));
-          }
-
-          if (item.collapsed) {
-            lenses.push(
-              this.commandLens(
-                range,
-                formatCollapsedSummary({
-                  anchorLine: group.anchorLine,
-                  items: [item],
-                  totalCount: 1,
-                }),
-                COMMAND_IDS.noteViewerToggle,
-                [[item.noteId], documentUri],
-                'Expand FrilVault note',
-              ),
-            );
-            continue;
-          }
-
-          for (const contentLine of splitContent(item.content)) {
-            lenses.push(this.textLens(range, contentLine));
-          }
-
-          const tags = normalizeTags(item.tags);
-          if (tags.length > 0) {
-            lenses.push(this.textLens(range, tags.slice(0, 5).map((tag) => `#${tag}`).join(' ')));
-          }
-        }
-      }
-
-      // The existing hover and gutter action surfaces remain the primary action
-      // UI. This compact action entry point makes all actions reachable from
-      // the block itself without repeating a toolbar for every note.
+      // Keep actions available without rendering the full note above source.
       lenses.push(
         this.commandLens(
           range,
@@ -130,25 +85,15 @@ export class NoteViewerRenderer implements vscode.Disposable {
       tooltip,
     });
   }
-
-  private textLens(range: vscode.Range, text: string): vscode.CodeLens {
-    return new vscode.CodeLens(range, {
-      title: truncateLine(text) || ' ',
-      command: COMMAND_IDS.noteViewerNoop,
-      arguments: [],
-      tooltip: 'FrilVault note content',
-    });
-  }
 }
 
-function formatExpandedHeading(group: NoteViewerGroup): string {
-  return group.totalCount === 1 ? '▼ Note' : `▼ Notes (${group.totalCount})`;
-}
-
-function splitContent(content: string): string[] {
-  // An empty note still gets one visible row, while CRLF is normalized only
-  // for presentation and never written back to the source document.
-  return content.replace(/\r\n/g, '\n').split('\n');
+function formatExpandedPreview(group: NoteViewerGroup): string {
+  const preview = group.items
+    .map((item) => item.content.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join(' · ');
+  const summary = group.totalCount === 1 ? '▼ Note' : `▼ Notes (${group.totalCount})`;
+  return preview ? `${summary} · ${preview}` : `${summary} · empty`;
 }
 
 function truncateLine(value: string): string {

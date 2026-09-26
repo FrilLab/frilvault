@@ -477,6 +477,103 @@ suite('CliClient', () => {
     assert.ok(!logs.some((line) => line.includes('child-secret-value')));
   });
 
+  test('clears note tags explicitly while preserving ordinary tag updates', async () => {
+    const calls: string[][] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\\n', stderr: '' };
+        }
+        calls.push(args);
+        return { stdout: '{}', stderr: '' };
+      },
+    });
+
+    await cliClient.updateNote({
+      workspaceRoot: '/workspace', sourceFile: 'src/main.rs', noteId: 'n1', content: 'updated', clearTags: true,
+    });
+    await cliClient.updateNote({
+      workspaceRoot: '/workspace', sourceFile: 'src/main.rs', noteId: 'n2', content: 'updated', tags: ['todo'],
+    });
+
+    assert.ok(calls[0].includes('--clear-tags'));
+    assert.deepStrictEqual(calls[0].filter((arg) => arg === '--tag'), []);
+    assert.ok(calls[1].includes('--tag'));
+    assert.strictEqual(calls[1][calls[1].indexOf('--tag') + 1], 'todo');
+    assert.ok(calls[1].includes('--format'));
+  });
+
+  test('imports dotenv values without replacement unless explicitly requested', async () => {
+    const calls: string[][] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        if (args[0] === '--version') {
+          return { stdout: 'flvt 0.1.0\\n', stderr: '' };
+        }
+        calls.push(args);
+        return { stdout: '{}', stderr: '' };
+      },
+    });
+
+    await cliClient.importEnvironment({ workspaceRoot: '/workspace', source: '.env', profile: 'development' });
+    await cliClient.importEnvironment({ workspaceRoot: '/workspace', source: '.env', profile: 'development', replace: true });
+
+    assert.deepStrictEqual(calls, [
+      ['env', 'import', '.env', '--profile', 'development', '--format', 'json'],
+      ['env', 'import', '.env', '--profile', 'development', '--replace', '--yes', '--format', 'json'],
+    ]);
+  });
+
+  test('runs environment children through the non-buffering command path', async () => {
+    const calls: Array<{ file: string; args: string[]; cwd: string; spawned: boolean }> = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) =>
+        args[0] === '--version'
+          ? { stdout: 'flvt 0.1.0\\n', stderr: '' }
+          : { stdout: 'unexpected buffered output', stderr: '' },
+      runCommand: async (file, args, options) => {
+        let spawned = false;
+        options.onSpawn?.();
+        spawned = true;
+        calls.push({ file, args, cwd: options.cwd, spawned });
+      },
+    });
+    let confirmed = false;
+
+    await cliClient.runEnvironment({
+      workspaceRoot: '/workspace',
+      profile: 'development',
+      command: ['npm', 'run', 'dev'],
+      onSpawn: () => { confirmed = true; },
+    });
+
+    assert.strictEqual(confirmed, true);
+    assert.deepStrictEqual(calls, [{
+      file: '/extension/bin/darwin-arm64/flvt',
+      args: ['env', 'run', '--profile', 'development', '--', 'npm', 'run', 'dev'],
+      cwd: '/workspace',
+      spawned: true,
+    }]);
+  });
+
   test('searches notes by tag through the CLI JSON boundary', async () => {
     const calls: string[] = [];
     const cliClient = new CliClient({
