@@ -28,10 +28,14 @@ pub(crate) fn open_vault(vault_path: Option<&Path>) -> Result<FrilVault> {
     Ok(match vault_path {
         Some(vault_path) => FrilVault::open_with_vault_path(&workspace_root, vault_path)?,
         None => {
-            let discovered = PathResolver::discover(&workspace_root);
+            let discovered = PathResolver::discover(&workspace_root)?;
             let vault_root = discovered.vault_root();
-            let discovered_workspace_root = vault_root.parent().unwrap_or(&workspace_root);
-            FrilVault::open_with_vault_path(discovered_workspace_root, &vault_root)?
+            let discovered_workspace_root = if discovered.vault_is_in_git_metadata() {
+                &workspace_root
+            } else {
+                vault_root.parent().unwrap_or(&workspace_root)
+            };
+            FrilVault::open_with_vault_root(discovered_workspace_root, &vault_root)?
         }
     })
 }
