@@ -87,7 +87,12 @@ export interface WorkspaceStats {
 export interface WorkspaceStatus {
   vault_path: string;
   mode: 'local' | 'shared';
-  git_tracking: 'excluded' | 'trackable' | 'tracked' | 'not_git_repository';
+  git_tracking:
+    | 'excluded'
+    | 'trackable'
+    | 'tracked'
+    | 'not_git_repository'
+    | 'outside_work_tree';
   note_count: number;
 }
 

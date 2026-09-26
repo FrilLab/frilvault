@@ -11,7 +11,7 @@ notes to source code without modifying the source file.
 - Navigate between code and notes
 - Search notes across the current workspace
 - Store all note data locally as JSON
-- Keep project knowledge inside `.vault`
+- Keep note data in the selected Local or Shared vault
 
 ## Environment Manager
 
@@ -61,7 +61,7 @@ CodeLens is the closest stable supported editor API for this UI. VS Code does no
 | `frilvault.hoverPreviewLength` | `number` | `800` | Maximum character length for rich hover previews |
 | `frilvault.inlineEditor.autoSaveDebounceMs` | `number` | `900` | Delay in milliseconds before auto-saving note edits |
 | `frilvault.workspaceRoot` | `string` | `""` | Workspace root used by FrilVault; empty uses the first VS Code workspace folder |
-| `frilvault.vaultPath` | `string` | `""` | Optional vault directory; relative paths are resolved from `frilvault.workspaceRoot`, and empty uses automatic `.vault` discovery |
+| `frilvault.vaultPath` | `string` | `""` | Optional explicit vault directory; relative paths are resolved from `frilvault.workspaceRoot`, and empty discovers an existing vault or uses the selected initialization policy |
 
 > **Note**: The legacy after-line inline preview settings (`frilvault.inlineNotes.*` and `frilvault.inlineLineNotes.*`) were removed. The plain-text preview helpers remain only where they are reused by supported hover/sidebar presentation paths.
 
@@ -110,11 +110,18 @@ Supported packaged targets:
 
 `frilvault.cliPath` is now an advanced override for custom builds.
 
-When `frilvault.vaultPath` is empty, the extension and `flvt` use the same
-nearest-existing `.vault` discovery from the workspace root through its
-ancestors, falling back to the workspace-root `.vault`. An explicit vault path
-is authoritative and is passed to every CLI operation; it is never replaced by
-automatic discovery.
+When `frilvault.vaultPath` is empty, the extension asks Core through `flvt`
+for the selected vault. A new Local vault in a Git checkout lives under that
+checkout's Git metadata directory; a new Shared vault uses project-root
+`.vault/`. Non-Git Local projects keep project-root `.vault/`. Existing
+workspace-root `.vault/` data stays in place with its stored mode, and if it
+coexists with another valid vault the extension asks you to choose a path.
+
+Local/Shared selects the storage policy. `frilvault.vaultPath` or CLI
+`--vault PATH` selects only the storage location; an explicit path does not
+infer a mode. The extension passes it to each CLI operation. Opening a project,
+activating the extension, and refreshing views do not create a vault. Select
+`Enable` and then an initialization option to create one.
 
 ## Install
 
@@ -141,8 +148,9 @@ Release automation is split into two stages:
 1. Install the FrilVault extension.
 2. Open a project in VS Code.
 3. Open `FrilVault Notes` in the Explorer and select `Enable`.
-4. Select `Add` or use `Note Add` at the current editor line.
-5. Enter a note in the inline editor.
+4. Choose `Initialize Local Vault` or `Initialize Shared Vault` when prompted.
+5. Select `Add` or use `Note Add` at the current editor line.
+6. Enter a note in the inline editor.
 
 ## Commands
 
@@ -159,8 +167,14 @@ Release automation is split into two stages:
 
 ## Data Storage
 
-FrilVault stores project data locally under the selected vault. With the default
-configuration, that is:
+FrilVault stores project data locally under the selected vault. A new Local
+vault in a Git checkout is stored in that checkout's Git metadata at
+`frilvault/vaults/<workspace-relative-path>/`. A new Shared vault is stored in
+the project-root `.vault/`. Non-Git Local projects keep the `.vault/` layout.
+An existing project-root `.vault/` remains in place and is never moved based on
+its mode. An explicit path can select an external vault for either mode.
+
+The Shared vault's project-root layout is:
 
 ```text
 .vault/

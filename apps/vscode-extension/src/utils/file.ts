@@ -37,6 +37,17 @@ export function tryGetVaultPath(): string | undefined {
   return configured.length > 0 ? configured : undefined;
 }
 
+const resolvedVaultRoots = new Map<string, string>();
+
+export function rememberResolvedVaultRoot(
+  workspaceRoot: string,
+  configuredVaultPath: string | undefined,
+  reportedVaultPath: string,
+): void {
+  const key = vaultRootCacheKey(workspaceRoot, configuredVaultPath);
+  resolvedVaultRoots.set(key, path.resolve(workspaceRoot, reportedVaultPath));
+}
+
 export function getVaultRoot(workspaceRoot: string): string {
   const configured = tryGetVaultPath();
 
@@ -45,6 +56,13 @@ export function getVaultRoot(workspaceRoot: string): string {
   }
 
   const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+  const resolvedVaultRoot = resolvedVaultRoots.get(
+    vaultRootCacheKey(resolvedWorkspaceRoot, configured),
+  );
+  if (resolvedVaultRoot) {
+    return resolvedVaultRoot;
+  }
+
   let directory = resolvedWorkspaceRoot;
 
   while (true) {
@@ -61,6 +79,10 @@ export function getVaultRoot(workspaceRoot: string): string {
   }
 
   return path.join(resolvedWorkspaceRoot, '.vault');
+}
+
+function vaultRootCacheKey(workspaceRoot: string, configuredVaultPath: string | undefined): string {
+  return `${path.resolve(workspaceRoot)}\0${configuredVaultPath ?? ''}`;
 }
 
 export function getActiveEditorOrThrow(): vscode.TextEditor {

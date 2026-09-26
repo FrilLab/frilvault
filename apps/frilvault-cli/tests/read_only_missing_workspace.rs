@@ -195,14 +195,27 @@ fn explicit_init_preserves_local_shared_and_external_vault_contracts() {
     assert!(local_init.status.success());
     let local_result: Value = serde_json::from_slice(&local_init.stdout).unwrap();
     assert_eq!(local_result["mode"], "local");
-    assert_eq!(local_result["git_exclude"], "added");
-    assert_ne!(fs::read(&local_exclude).unwrap(), local_exclude_before);
+    assert!(local_result["git_exclude"].is_null());
+    let local_git_dir = PathBuf::from(git_stdout(
+        local.root(),
+        &["rev-parse", "--absolute-git-dir"],
+    ));
+    assert!(
+        local_git_dir
+            .join("frilvault/vaults/root/workspace.json")
+            .is_file()
+    );
+    assert!(!local.root().join(".vault").exists());
+    assert_eq!(fs::read(&local_exclude).unwrap(), local_exclude_before);
     assert_eq!(
         fs::read(local.root().join(".gitignore")).unwrap(),
         local_gitignore_before
     );
     assert_eq!(workspace_status(&local, None)["mode"], "local");
-    assert_eq!(workspace_status(&local, None)["git_tracking"], "excluded");
+    assert_eq!(
+        workspace_status(&local, None)["git_tracking"],
+        "outside_work_tree"
+    );
 
     let shared = TestWorkspace::new();
     let shared_exclude = git_path(shared.root(), "info/exclude");
@@ -329,5 +342,5 @@ fn git_stdout(root: &Path, args: &[&str]) -> String {
         .output()
         .unwrap();
     assert!(output.status.success());
-    String::from_utf8(output.stdout).unwrap()
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
 }

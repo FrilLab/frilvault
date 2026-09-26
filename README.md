@@ -109,8 +109,19 @@ FrilVault does not rewrite or annotate source files.
 
 The workspace root and vault root are independent. Source files and anchors
 remain relative to the workspace root; note JSON, indexes, attachments, and
-metadata are stored under the vault root. The existing project-root `.vault/`
-layout remains the default when no other vault is selected.
+metadata are stored under the vault root. In a Git checkout, a new Local Vault
+is stored under that checkout's Git metadata at
+`<git-dir>/frilvault/vaults/<workspace-relative-path>/`. Linked worktrees use
+their own Git metadata directories, and separate workspaces in one checkout
+use separate paths. A new Shared Vault uses the project-root `.vault/`.
+
+Without `--vault`, FrilVault first finds an existing `.vault/` in the current
+workspace or its ancestors, then an existing checkout-local FrilVault Vault.
+An existing Vault keeps its path and stored mode. If both locations contain
+Vaults, FrilVault reports the ambiguity and asks you to select one explicitly.
+If neither exists, `flvt init` selects the destination from the requested mode.
+In a non-Git project, Local mode keeps the existing project-root `.vault/`
+behavior and reports that Git metadata storage is unavailable.
 
 To create or connect to a vault outside the project root, pass its directory
 explicitly:
@@ -120,15 +131,13 @@ flvt --vault ../frilvault-data init
 flvt --vault /path/to/frilvault-data status
 ```
 
-An explicit `--vault` path is authoritative: if it is missing or invalid,
-FrilVault reports the error and does not silently use another `.vault`. Without
-an explicit path, FrilVault chooses the nearest existing `.vault` from the
-current directory through its ancestors; if none exists, it creates the
-workspace-root `.vault` as the default initialization target. Opening,
-refreshing, or reading an uninitialized workspace does not create that
-directory; run `flvt init` to create it. VS Code uses the same CLI-backed rule; set
-`frilvault.vaultPath` to the same path when an explicit external vault is
-needed. Relative VS Code paths are resolved from `frilvault.workspaceRoot`.
+An explicit `--vault` path selects the storage location only; it does not
+choose Local or Shared mode. If it is missing or invalid, FrilVault reports the
+error and does not silently use another Vault. VS Code's
+`frilvault.vaultPath` has the same meaning and is passed to the CLI. Relative
+VS Code paths are resolved from `frilvault.workspaceRoot`. Opening, refreshing,
+enabling, or reading an uninitialized workspace does not create a Vault; choose
+an initialization option to create one.
 
 ## Vault Modes
 
@@ -143,15 +152,19 @@ The command prints:
 ```text
 Initialized FrilVault workspace
 
-Vault: .vault
+Vault: <git-dir>/frilvault/vaults/root
 Mode: local
 ```
 
-Local mode is intended for private, checkout-local knowledge. When the
-workspace is inside a Git repository, initialization adds `.vault/` to that
-repository's `.git/info/exclude`. This is a repository-local exclusion: it
-does not change the shared `.gitignore` file. If `.vault` is already tracked,
-the exclusion cannot untrack it and initialization reports a warning.
+Local mode is intended for private, checkout-local knowledge. In a Git
+checkout, new Local data lives under the checkout's Git metadata directory and
+does not appear as a project file or require an exclude rule. In a non-Git
+project, Local initialization uses the project-root `.vault/` and reports that
+fallback. An existing project-root Local `.vault/` remains in place; FrilVault
+does not move its data. If that existing Vault is inside a Git worktree,
+initialization preserves the repository-local exclusion behavior. If the Vault
+is already tracked, an exclude rule cannot untrack it and initialization
+reports a warning.
 
 To create a Local vault at an external path, use:
 
@@ -175,16 +188,19 @@ Vault: .vault
 Mode: shared
 ```
 
-Shared mode does not add `.vault/` to `.git/info/exclude` and does not modify
-`.gitignore`, so the vault remains trackable by Git. It is still up to the
-user to review and commit the files they want to share. Pre-existing Git
-ignore rules can still affect whether Git reports the vault as ignored.
+Shared mode creates a new Vault at project-root `.vault/`. It does not add the
+Vault to `.git/info/exclude` or modify `.gitignore`, so Git can track it. It is
+still up to the user to review and commit the files they want to share.
+Pre-existing Git ignore rules can still affect whether Git reports the Vault
+as ignored.
 See [Workspace status](#workspace-status) for the mode and Git tracking values
 reported after initialization.
 
-Vault location, Local/Shared mode, and Git tracking are independent: an
-external path can use either mode, and Git tracking is determined by repository
-rules and the selected mode's initialization policy.
+Local/Shared is the storage policy; `--vault PATH` is the explicit storage
+location. Either mode can use an explicit external path. Existing project-root
+`.vault/` data stays in place and retains its stored mode; initialization does
+not migrate or switch it. Git tracking follows the selected path and applicable
+repository rules.
 
 ### AI integration and existing `AGENTS.md` files
 
@@ -199,7 +215,7 @@ validated and atomic persistence, preservation of unrelated data, and redacted
 output. It does not depend on an AI tool discovering or following a generated
 Markdown instruction file.
 
-The `mode` is stored in `.vault/workspace.json` as a top-level field. A newly
+The `mode` is stored in `<vault-root>/workspace.json` as a top-level field. A newly
 initialized workspace has this shape (the timestamps vary):
 
 ```json
@@ -452,9 +468,10 @@ Git tracking: excluded
 Notes: 42
 ```
 
-`Mode` is `local` or `shared`. `Git tracking` is one of `excluded`, `trackable`,
-`tracked`, or `not a Git repository`. A Local vault that is already tracked
-also prints this warning after the four fields:
+`Mode` is `local` or `shared`. `Git tracking` is `excluded`, `trackable`,
+`tracked`, `not a Git repository`, or `outside Git worktree`. The last value is
+used for a Git-metadata Local Vault because it is outside the worktree. A Local
+vault that is already tracked also prints this warning after the four fields:
 
 ```text
 Warning: Local vault is currently tracked by Git.
@@ -464,21 +481,22 @@ Use `--format json` for the stable machine-readable object:
 
 ```json
 {
-  "vault_path": ".vault",
+  "vault_path": "<git-dir>/frilvault/vaults/root",
   "mode": "local",
-  "git_tracking": "excluded",
+  "git_tracking": "outside_work_tree",
   "note_count": 42
 }
 ```
 
-JSON uses `not_git_repository` for the non-Git state. JSON contains only these
-four fields; the Local/tracked warning is represented by the `mode` and
-`git_tracking` values.
+JSON uses `not_git_repository` for the non-Git state and `outside_work_tree`
+for a Git-metadata Local Vault. JSON contains only these four fields; the
+Local/tracked warning is represented by the `mode` and `git_tracking` values.
 
 When no workspace exists, status exits non-zero and reports
-`No FrilVault workspace found.` on stderr without creating `.vault`. Invalid
-`.vault/workspace.json` metadata likewise exits non-zero with a message naming
-the invalid file. Legacy metadata without a `mode` uses the Local default.
+`No FrilVault workspace found.` on stderr without creating a Vault. Invalid
+`<vault-root>/workspace.json` metadata likewise exits non-zero with a message
+naming the invalid file. Legacy metadata without a `mode` uses the Local
+default.
 
 ## Documentation
 

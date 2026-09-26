@@ -24,6 +24,7 @@ export interface EnablementCommandDependencies {
   getWorkspaceRoot: () => string;
   workspaceState: vscode.Memento;
   cliClient: CliClient;
+  onVaultResolved?: () => Promise<void>;
   refreshUi: () => Promise<void>;
   clearUi: () => void;
   showInformationMessage?: (
@@ -73,7 +74,7 @@ export function createEnableCommand(
       const showInformationMessage =
         dependencies.showInformationMessage ?? vscode.window.showInformationMessage;
       const choice = await showInformationMessage(
-        'No initialized FrilVault vault was found. Choose how to continue.',
+        'No initialized FrilVault vault was found. Local stores data in this Git checkout; Shared stores it in the project-root .vault/.',
         ...INITIALIZATION_CHOICES,
       );
 
@@ -154,6 +155,7 @@ export function createEnableCommand(
       return;
     }
 
+    await dependencies.onVaultResolved?.();
     await setFrilVaultEnabled(dependencies.workspaceState, workspaceRoot, true);
     await syncEnabledContext(true);
     await dependencies.refreshUi();

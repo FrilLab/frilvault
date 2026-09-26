@@ -48,7 +48,7 @@ use update::UpdateCommand;
 #[derive(Parser)]
 #[command(name = "flvt", version, about = "Personal note vault for source code")]
 pub struct Cli {
-    /// Use this vault directory instead of automatic `.vault` discovery.
+    /// Use this vault directory instead of automatic existing-vault discovery.
     #[arg(long, global = true, value_name = "PATH")]
     pub vault: Option<PathBuf>,
 

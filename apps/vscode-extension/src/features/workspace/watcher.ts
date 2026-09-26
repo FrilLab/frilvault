@@ -48,7 +48,7 @@ export function registerWorkspaceWatcher(
   isEnabled: () => boolean,
   invalidateViews: () => Promise<void>,
   dependencies: WorkspaceWatcherDependencies = {},
-): void {
+): () => Promise<void> {
   let debounceTimer: NodeJS.Timeout | undefined;
   let watchers: vscode.FileSystemWatcher[] = [];
   const createFileSystemWatcher =
@@ -93,11 +93,17 @@ export function registerWorkspaceWatcher(
     watchers = [];
   };
 
-  const rebindWatchers = () => {
+  const rebindWatchers = async () => {
     disposeWatchers();
 
     const workspaceRoot = tryGetWorkspaceRoot();
     if (!workspaceRoot) {
+      return;
+    }
+
+    try {
+      await cliClient.workspaceStatus(workspaceRoot);
+    } catch {
       return;
     }
 
@@ -140,14 +146,14 @@ export function registerWorkspaceWatcher(
     watchers = [notesWatcher, imagesWatcher, sourceWatcher];
   };
 
-  rebindWatchers();
+  void rebindWatchers();
 
   const configurationListener = onDidChangeConfiguration((event) => {
     if (
       event.affectsConfiguration('frilvault.vaultPath') ||
       event.affectsConfiguration('frilvault.workspaceRoot')
     ) {
-      rebindWatchers();
+      void rebindWatchers();
     }
   });
 
@@ -160,4 +166,6 @@ export function registerWorkspaceWatcher(
       }
     }),
   );
+
+  return rebindWatchers;
 }
