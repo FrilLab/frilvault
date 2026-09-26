@@ -407,8 +407,8 @@ fn cli_status_help_documents_text_and_json_contract() {
     assert!(output.status.success());
     assert!(help.contains("--format <FORMAT>"));
     assert!(help.contains("external note changes are reflected"));
-    assert!(help.contains("Git tracking: excluded"));
-    assert!(help.contains("\"vault_path\": \".vault\""));
+    assert!(help.contains("Git tracking: outside Git worktree"));
+    assert!(help.contains("\"git_tracking\": \"outside_work_tree\""));
     assert!(help.contains("vault_path, mode, git_tracking, note_count"));
 }
 

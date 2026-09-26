@@ -305,10 +305,12 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showWarningMessage(message, ...items),
   };
 
+  let refreshVaultWatchers: () => Promise<void> = async () => undefined;
   const enableCommand = createEnableCommand({
     getWorkspaceRoot,
     workspaceState: context.workspaceState,
     cliClient,
+    onVaultResolved: () => refreshVaultWatchers(),
     refreshUi: refreshAfterMutation,
     clearUi,
     showWarningMessage: (message, ...items) =>
@@ -476,7 +478,12 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   registerSourceRenameHandler(context, cliClient, isEnabled, refreshAfterMutation);
-  registerWorkspaceWatcher(context, cliClient, isEnabled, refreshAfterMutation);
+  refreshVaultWatchers = registerWorkspaceWatcher(
+    context,
+    cliClient,
+    isEnabled,
+    refreshAfterMutation,
+  );
   registerNoteUriHandler(context, { cliClient, isEnabled });
   registerExplorerNoteCountDecorations(context, noteCountStore, getWorkspaceRoot, isEnabled);
   noteViewer.register(context);

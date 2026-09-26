@@ -1,6 +1,9 @@
 use std::{fs, path::Path, process::Command};
 
-use crate::{FrilVault, GitExcludeStatus, GitTrackingStatus, VaultMode};
+use crate::{
+    FrilVault, GitExcludeStatus, GitTrackingStatus, PathResolver, VaultMode,
+    workspace::WorkspaceRepository,
+};
 
 use super::helper::create_test_workspace;
 
@@ -11,7 +14,7 @@ fn local_init_adds_vault_to_repository_exclude_without_touching_gitignore() {
     fs::write(workspace.root().join(".gitignore"), "target/\n").unwrap();
     let original_exclude = read_exclude(workspace.root());
 
-    let result = FrilVault::open(workspace.root())
+    let result = FrilVault::open_with_vault_path(workspace.root(), workspace.root().join(".vault"))
         .unwrap()
         .initialize_with_status(VaultMode::Local)
         .unwrap();
@@ -33,7 +36,8 @@ fn local_init_preserves_existing_exclude_contents_and_is_idempotent() {
     init_git_repository(workspace.root());
     let exclude_path = git_path(workspace.root(), "info/exclude");
     fs::write(&exclude_path, "# local excludes\ntarget\n").unwrap();
-    let vault = FrilVault::open(workspace.root()).unwrap();
+    let vault =
+        FrilVault::open_with_vault_path(workspace.root(), workspace.root().join(".vault")).unwrap();
 
     let first = vault.initialize_with_status(VaultMode::Local).unwrap();
     let second = vault.initialize_with_status(VaultMode::Local).unwrap();
@@ -53,7 +57,7 @@ fn local_init_recreates_missing_exclude_file() {
     let exclude_path = git_path(workspace.root(), "info/exclude");
     fs::remove_file(&exclude_path).unwrap();
 
-    FrilVault::open(workspace.root())
+    FrilVault::open_with_vault_path(workspace.root(), workspace.root().join(".vault"))
         .unwrap()
         .initialize(VaultMode::Local)
         .unwrap();
@@ -79,6 +83,7 @@ fn local_init_outside_git_still_creates_vault() {
 fn local_init_detects_tracked_vault_without_changing_index() {
     let workspace = create_test_workspace();
     init_git_repository(workspace.root());
+    initialize_legacy_vault(workspace.root());
     fs::create_dir_all(workspace.root().join(".vault")).unwrap();
     fs::write(workspace.root().join(".vault/tracked.txt"), "tracked").unwrap();
     git(workspace.root(), &["add", ".vault/tracked.txt"]);
@@ -107,6 +112,7 @@ fn local_init_checks_tracked_vault_from_the_git_root() {
     let nested_workspace = workspace.root().join("packages/app");
     fs::create_dir_all(&nested_workspace).unwrap();
     init_git_repository(workspace.root());
+    initialize_legacy_vault(workspace.root());
     fs::create_dir_all(workspace.root().join(".vault")).unwrap();
     fs::write(workspace.root().join(".vault/tracked.txt"), "tracked").unwrap();
     git(workspace.root(), &["add", ".vault/tracked.txt"]);
@@ -191,7 +197,7 @@ fn local_init_resolves_exclude_for_git_worktree() {
         ],
     );
 
-    let result = FrilVault::open(&worktree_root)
+    let result = FrilVault::open_with_vault_path(&worktree_root, worktree_root.join(".vault"))
         .unwrap()
         .initialize_with_status(VaultMode::Local)
         .unwrap();
@@ -203,6 +209,13 @@ fn local_init_resolves_exclude_for_git_worktree() {
             .any(|line| line == ".vault/")
     );
     assert!(worktree_root.join(".git").is_file());
+}
+
+fn initialize_legacy_vault(workspace_root: &Path) {
+    let resolver = PathResolver::with_vault_root(workspace_root, workspace_root.join(".vault"));
+    WorkspaceRepository::new(resolver)
+        .initialize(VaultMode::Local)
+        .unwrap();
 }
 
 fn init_git_repository(root: &Path) {

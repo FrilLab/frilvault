@@ -19,6 +19,7 @@ import type {
   EnvironmentProfileStatus,
 } from '../types';
 import { parseJson } from '../utils/parser';
+import { rememberResolvedVaultRoot } from '../utils/file';
 import {
   getConfiguredCliPath,
   resolveCliPath,
@@ -231,7 +232,13 @@ export class CliClient {
 
   public async workspaceStatus(workspaceRoot: string): Promise<WorkspaceStatus> {
     const stdout = await this.execInWorkspace(workspaceRoot, ['status', '--format', 'json']);
-    return parseJson<WorkspaceStatus>(stdout);
+    const status = parseJson<WorkspaceStatus>(stdout);
+    rememberResolvedVaultRoot(
+      workspaceRoot,
+      this.dependencies.getConfiguredVaultPath?.(),
+      status.vault_path,
+    );
+    return status;
   }
 
   public async environmentProfiles(

@@ -173,12 +173,21 @@ For Local/Shared vault mode documentation, also verify the focused contract:
 - `flvt --help` lists `init`, and `flvt init --help` lists `--shared`.
 - A fresh `flvt init` reports `Mode: local`; a fresh `flvt init --shared`
   reports `Mode: shared`.
-- `.vault/workspace.json` uses the top-level `mode` field with the serialized
+- `<vault-root>/workspace.json` uses the top-level `mode` field with the serialized
   values `local` or `shared`.
 - Removing `mode` from legacy metadata still loads the workspace as Local.
-- Local initialization adds `.vault/` to repository-local
-  `.git/info/exclude` without changing `.gitignore`; Shared initialization does
-  not add that local exclusion.
+- New Git Local initialization stores its Vault under the actual per-checkout
+  Git metadata directory and creates no project-root `.vault/`; Shared
+  initialization creates project-root `.vault/` and does not add an exclude
+  rule.
+- Non-Git Local initialization retains project-root `.vault/` and reports the
+  fallback. Existing project-root Local Vaults retain their location, data,
+  mode, and applicable Git exclusion behavior.
+- When project-root and Git-metadata Vaults both exist, automatic discovery
+  reports ambiguity; an explicit `--vault PATH` selects one without inferring
+  its mode.
+- Linked worktrees use distinct Git metadata paths, and separate workspace
+  roots within one checkout have distinct Local Vault paths.
 - README, architecture, and release documentation describe the same
   default/opt-in behavior and do not promise mode switching or migration.
 
@@ -186,9 +195,12 @@ For Workspace/Vault root separation, also verify the focused contract:
 
 - `flvt --help` lists `--vault <PATH>` and an explicit path is used by `init`,
   note operations, status, index, attachments, and tag commands.
-- Existing workspace-root `.vault` data remains readable without `--vault`.
-- The nearest existing nested/ancestor `.vault` wins when no explicit path is
-  configured; an explicit missing path does not fall back to a discovered one.
+- Existing workspace-root `.vault` data remains readable without `--vault` and
+  is never moved based on its Local/Shared mode.
+- The nearest existing nested/ancestor `.vault` is retained when no explicit
+  path is configured; if it coexists with a valid Git-metadata Vault, discovery
+  asks for an explicit path. An explicit missing path does not fall back to a
+  discovered one.
 - Note `source_file` values and anchors remain relative to the workspace root
   when the vault is external.
 - VS Code's `frilvault.vaultPath` is forwarded to the CLI as `--vault`, and

@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use crate::{
     FrilVaultError, FrilVaultResult,
@@ -6,6 +7,7 @@ use crate::{
         IMAGES_DIR_NAME, INDEX_DIR_NAME, NOTE_FILE_EXTENSION, NOTES_DIR_NAME, VAULT_DIR_NAME,
         WORKSPACE_FILE_NAME,
     },
+    workspace::VaultMode,
 };
 
 /// Converts between workspace source paths and vault storage paths.
@@ -23,6 +25,8 @@ pub struct PathResolver {
 }
 
 impl PathResolver {
+    const GIT_VAULT_DIRECTORY: &'static str = "frilvault/vaults";
+
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         let workspace_root = normalize_path(&workspace_root.into());
         Self {
@@ -62,14 +66,14 @@ impl PathResolver {
         Self::with_vault_root(workspace_root, vault_root)
     }
 
-    /// Finds the nearest existing `.vault` while walking from the workspace
-    /// root toward its ancestors. If none exists, the legacy workspace-root
-    /// location remains the creation target.
+    /// Finds an existing workspace `.vault` or checkout-local FrilVault store.
+    /// New workspaces default to the checkout's Git metadata directory, or to
+    /// the project root for non-Git workspaces.
     ///
     /// The nearest candidate wins, which makes a vault in a nested workspace
     /// take precedence over a project-root vault when the command is run from
     /// that nested workspace.
-    pub fn discover(workspace_root: impl Into<PathBuf>) -> Self {
+    pub fn discover(workspace_root: impl Into<PathBuf>) -> FrilVaultResult<Self> {
         let workspace_root = workspace_root.into();
         Self::discover_from(&workspace_root, &workspace_root)
     }
@@ -79,16 +83,72 @@ impl PathResolver {
     pub fn discover_from(
         workspace_root: impl Into<PathBuf>,
         start_directory: impl Into<PathBuf>,
-    ) -> Self {
+    ) -> FrilVaultResult<Self> {
         let workspace_root = normalize_path(&workspace_root.into());
         let start_directory = normalize_path(&start_directory.into());
-        let vault_root = find_nearest_vault(&start_directory)
-            .unwrap_or_else(|| workspace_root.join(VAULT_DIR_NAME));
+        let existing_project_vault = find_nearest_vault(&start_directory);
+        let git_vault = git_managed_vault_root(&workspace_root);
+        let existing_git_vault = git_vault
+            .clone()
+            .filter(|path| path.exists() && is_existing_vault_candidate(path));
 
-        Self {
+        let vault_root = match (existing_project_vault, existing_git_vault) {
+            (Some(project), Some(git)) if normalize_path(&project) != normalize_path(&git) => {
+                return Err(FrilVaultError::AmbiguousVaultPaths { project, git });
+            }
+            (Some(project), _) => project,
+            (_, Some(git)) => git,
+            (None, None) => git_vault.unwrap_or_else(|| workspace_root.join(VAULT_DIR_NAME)),
+        };
+
+        Ok(Self {
             workspace_root,
             vault_root: normalize_path(&vault_root),
+        })
+    }
+
+    /// Resolves a destination for explicit initialization. Existing vaults
+    /// always win over the requested mode; the mode only chooses a path when
+    /// this workspace has no existing candidate.
+    pub fn for_initialization(
+        workspace_root: impl Into<PathBuf>,
+        explicit_vault_root: Option<&Path>,
+        mode: VaultMode,
+    ) -> FrilVaultResult<Self> {
+        let workspace_root = normalize_path(&workspace_root.into());
+        if let Some(path) = explicit_vault_root {
+            return Ok(Self::with_vault_root(&workspace_root, path));
         }
+
+        let existing_project_vault = find_nearest_vault(&workspace_root);
+        let git_vault = git_managed_vault_root(&workspace_root);
+        let existing_git_vault = git_vault
+            .clone()
+            .filter(|path| path.exists() && is_existing_vault_candidate(path));
+
+        let vault_root = match (existing_project_vault, existing_git_vault) {
+            (Some(project), Some(git)) if normalize_path(&project) != normalize_path(&git) => {
+                return Err(FrilVaultError::AmbiguousVaultPaths { project, git });
+            }
+            (Some(project), _) => project,
+            (_, Some(git)) => git,
+            (None, None) => match mode {
+                VaultMode::Local => {
+                    git_vault.unwrap_or_else(|| workspace_root.join(VAULT_DIR_NAME))
+                }
+                VaultMode::Shared => workspace_root.join(VAULT_DIR_NAME),
+            },
+        };
+
+        Ok(Self {
+            workspace_root,
+            vault_root: normalize_path(&vault_root),
+        })
+    }
+
+    pub fn vault_is_in_git_metadata(&self) -> bool {
+        git_metadata_directory(&self.workspace_root)
+            .is_some_and(|git_dir| self.vault_root.starts_with(git_dir))
     }
 
     pub fn note_file_name(source_file: impl AsRef<Path>) -> String {
@@ -192,17 +252,77 @@ impl PathResolver {
     }
 }
 
+fn git_managed_vault_root(workspace_root: &Path) -> Option<PathBuf> {
+    let git_dir = git_metadata_directory(workspace_root)?;
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(workspace_root)
+        .args(["rev-parse", "--show-prefix"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let prefix = String::from_utf8(output.stdout).ok()?;
+    let prefix = prefix.trim();
+    let workspace_key = if prefix.is_empty() {
+        PathBuf::from("root")
+    } else {
+        PathBuf::from(prefix.trim_end_matches('/'))
+    };
+    Some(
+        git_dir
+            .join(PathResolver::GIT_VAULT_DIRECTORY)
+            .join(workspace_key),
+    )
+}
+
+fn git_metadata_directory(workspace_root: &Path) -> Option<PathBuf> {
+    let work_tree = Command::new("git")
+        .arg("-C")
+        .arg(workspace_root)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .ok()?;
+    if !work_tree.status.success() || String::from_utf8_lossy(&work_tree.stdout).trim() != "true" {
+        return None;
+    }
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(workspace_root)
+        .args(["rev-parse", "--absolute-git-dir"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let git_dir = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    (!git_dir.as_os_str().is_empty()).then_some(normalize_path(&git_dir))
+}
+
 fn find_nearest_vault(start_directory: &Path) -> Option<PathBuf> {
     let mut directory = start_directory;
 
     loop {
         let candidate = directory.join(VAULT_DIR_NAME);
-        if candidate.is_dir() {
+        if candidate.exists() && is_existing_vault_candidate(&candidate) {
             return Some(candidate);
         }
 
         let parent = directory.parent()?;
         directory = parent;
+    }
+}
+
+fn is_existing_vault_candidate(path: &Path) -> bool {
+    if !path.is_dir() {
+        return true;
+    }
+
+    match std::fs::read_dir(path).and_then(|mut entries| entries.next().transpose()) {
+        Ok(None) => false,
+        Ok(Some(_)) | Err(_) => true,
     }
 }
 

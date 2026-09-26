@@ -12,16 +12,16 @@ Examples:
   flvt status --format json
 
 Text output:
-  Vault: .vault
+  Vault: <git-dir>/frilvault/vaults/root
   Mode: local
-  Git tracking: excluded
+  Git tracking: outside Git worktree
   Notes: 42
 
 JSON output:
   {
-    "vault_path": ".vault",
+    "vault_path": "<git-dir>/frilvault/vaults/root",
     "mode": "local",
-    "git_tracking": "excluded",
+    "git_tracking": "outside_work_tree",
     "note_count": 42
   }
 

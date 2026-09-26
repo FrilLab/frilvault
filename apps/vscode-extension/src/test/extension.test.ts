@@ -550,7 +550,16 @@ suite('Extension Test Suite', function () {
 
     registerWorkspaceWatcher(
       context,
-      {} as CliClient,
+      {
+        workspaceStatus: async () => ({
+          vault_path:
+            vscode.workspace.getConfiguration('frilvault').get<string>('vaultPath', '') ||
+            '.vault',
+          mode: 'local',
+          git_tracking: 'excluded',
+          note_count: 0,
+        }),
+      } as unknown as CliClient,
       () => false,
       async () => undefined,
       {
@@ -558,6 +567,8 @@ suite('Extension Test Suite', function () {
         onDidChangeConfiguration: configurationListener,
       },
     );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     assert.deepStrictEqual(
       watcherRoots.map(({ root }) => root),
@@ -570,6 +581,7 @@ suite('Extension Test Suite', function () {
     configurationHandler?.({
       affectsConfiguration: (section) => section === 'frilvault.vaultPath',
     } as vscode.ConfigurationChangeEvent);
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     assert.deepStrictEqual(
       watcherRoots.map(({ root }) => root),

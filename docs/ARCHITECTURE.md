@@ -99,17 +99,21 @@ flag and confirmation before import can replace them.
 
 `frilvault-core` owns the `VaultMode` policy used by workspace initialization:
 
-- `Local` is the default for a new workspace. `flvt init` creates a Local vault
-  and, when the selected vault is in a Git repository, adds its relative path to the
-  repository-local `.git/info/exclude`.
-- `Shared` is opt-in for a new workspace. `flvt init --shared` creates a Shared
-  vault and does not add a local exclude rule, leaving the vault trackable by
-  Git.
+- `Local` is the default policy for a new workspace. In a Git checkout,
+  `flvt init` stores it under the checkout-specific Git metadata directory at
+  `frilvault/vaults/<workspace-relative-path>`. Linked worktrees therefore
+  keep separate Local data, and separate workspaces in one checkout have
+  separate paths. Non-Git projects retain the project-root `.vault/` fallback.
+- `Shared` is opt-in for a new workspace. `flvt init --shared` stores it in the
+  project-root `.vault/` so users can track it with Git.
 
-Neither initialization path modifies the shared `.gitignore` file. Local mode
-uses `.git/info/exclude` specifically so a private vault does not require a
-project-wide ignore-file change. A pre-existing Git rule or an already tracked
-vault can still affect the resulting Git state.
+Local/Shared is the storage policy; `--vault PATH` selects a location and does
+not choose a mode. Neither new Git Local nor Shared initialization modifies
+`.gitignore`. Existing project-root `.vault/` data and its metadata take
+precedence and remain in place without migration. Existing Local `.vault/`
+initialization retains the repository-local `.git/info/exclude` behavior. If
+an existing project vault and checkout-local vault coexist, Core returns an
+ambiguity error and asks the user to select a path rather than merging data.
 
 The selected mode is serialized as the top-level `mode` field in
 `<vault-root>/workspace.json`, using the lowercase values `"local"` and `"shared"`.
@@ -120,7 +124,9 @@ provide a mode-switch or migration operation.
 
 The CLI presents this core policy in its text output (`Mode: local` or
 `Mode: shared`) and `flvt status` reports the persisted mode alongside the
-current Git tracking state.
+current Git tracking state. Opening a workspace, reading it, activating the
+VS Code extension, and refreshing its views do not create a Vault. VS Code
+initialization delegates to the same CLI/Core path selection.
 
 ## Runtime Shape
 

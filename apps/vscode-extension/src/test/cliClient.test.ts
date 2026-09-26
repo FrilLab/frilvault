@@ -7,6 +7,7 @@ import {
   CliCommandError,
   isWorkspaceNotFoundError,
 } from '../core/cliClient';
+import { getVaultRoot } from '../utils/file';
 
 suite('CliClient', () => {
   test('uses the bundled CLI by default when cliPath is empty', async () => {
@@ -237,6 +238,7 @@ suite('CliClient', () => {
 
   test('reads workspace mode and Git tracking through the CLI status command', async () => {
     const calls: string[][] = [];
+    const reportedVaultPath = '/workspace/.git/frilvault/vaults/root';
     const cliClient = new CliClient({
       extensionPath: '/extension',
       extensionVersion: '0.1.0',
@@ -251,9 +253,9 @@ suite('CliClient', () => {
         }
         return {
           stdout: JSON.stringify({
-            vault_path: '.vault',
+            vault_path: reportedVaultPath,
             mode: 'local',
-            git_tracking: 'excluded',
+            git_tracking: 'outside_work_tree',
             note_count: 0,
           }),
           stderr: '',
@@ -264,11 +266,12 @@ suite('CliClient', () => {
     const status = await cliClient.workspaceStatus('/workspace');
 
     assert.deepStrictEqual(status, {
-      vault_path: '.vault',
+      vault_path: reportedVaultPath,
       mode: 'local',
-      git_tracking: 'excluded',
+      git_tracking: 'outside_work_tree',
       note_count: 0,
     });
+    assert.strictEqual(getVaultRoot('/workspace'), reportedVaultPath);
     assert.deepStrictEqual(calls[1], ['status', '--format', 'json']);
   });
 
