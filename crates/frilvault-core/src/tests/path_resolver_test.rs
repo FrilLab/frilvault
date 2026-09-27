@@ -142,6 +142,23 @@ fn empty_project_dot_vault_does_not_redirect_new_git_local_storage() {
 }
 
 #[test]
+fn unrelated_project_dot_vault_files_do_not_redirect_new_git_local_storage() {
+    let workspace = create_test_workspace();
+    git(workspace.root(), &["init"]);
+    let unrelated = workspace.root().join(".vault/AGENTS.md");
+    fs::create_dir_all(unrelated.parent().unwrap()).unwrap();
+    fs::write(&unrelated, "user-owned file").unwrap();
+
+    let vault =
+        FrilVault::open_for_initialization(workspace.root(), None, VaultMode::Local).unwrap();
+    vault.initialize(VaultMode::Local).unwrap();
+
+    assert!(vault.vault_is_in_git_metadata());
+    assert!(!workspace.root().join(".vault/workspace.json").exists());
+    assert_eq!(fs::read_to_string(unrelated).unwrap(), "user-owned file");
+}
+
+#[test]
 fn fresh_git_shared_vault_uses_project_root_dot_vault() {
     let workspace = create_test_workspace();
     git(workspace.root(), &["init"]);
@@ -324,6 +341,57 @@ fn distinct_workspaces_in_one_checkout_have_distinct_local_vaults() {
         nested_vault.vault_root()
     );
     assert!(!workspace.root().join(".vault").exists());
+}
+
+#[test]
+fn workspace_path_keys_never_alias_or_overlap_nested_workspace_paths() {
+    let workspace = create_test_workspace();
+    git(workspace.root(), &["init"]);
+    let nested_root_name = workspace.root().join("root");
+    let nested_notes_name = workspace.root().join("packages/app/notes");
+    fs::create_dir_all(&nested_root_name).unwrap();
+    fs::create_dir_all(&nested_notes_name).unwrap();
+
+    let roots = [workspace.root(), &nested_root_name, &nested_notes_name]
+        .into_iter()
+        .map(|root| {
+            PathResolver::for_initialization(root, None, VaultMode::Local)
+                .unwrap()
+                .vault_root()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        roots.iter().collect::<std::collections::HashSet<_>>().len(),
+        3
+    );
+    for (index, root) in roots.iter().enumerate() {
+        for (other_index, other) in roots.iter().enumerate() {
+            if index != other_index {
+                assert!(!root.starts_with(other));
+            }
+        }
+    }
+}
+
+#[test]
+fn unrelated_git_metadata_does_not_make_a_valid_project_vault_ambiguous() {
+    let workspace = create_test_workspace();
+    git(workspace.root(), &["init"]);
+    let project_vault = workspace.root().join(".vault");
+    let legacy = FrilVault::open_with_vault_path(workspace.root(), &project_vault).unwrap();
+    legacy.initialize(VaultMode::Shared).unwrap();
+    let git_data = git_dir_for(workspace.root()).join("frilvault/vaults/root");
+    fs::create_dir_all(&git_data).unwrap();
+    fs::write(git_data.join("other-tool-data"), "preserve me").unwrap();
+
+    let reopened = FrilVault::open(workspace.root()).unwrap();
+    assert_eq!(reopened.vault_root(), project_vault);
+    assert_eq!(reopened.status().unwrap().mode, VaultMode::Shared);
+    assert_eq!(
+        fs::read_to_string(git_data.join("other-tool-data")).unwrap(),
+        "preserve me"
+    );
 }
 
 #[test]

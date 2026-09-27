@@ -185,6 +185,24 @@ fn write_commands_do_not_choose_a_mode_or_create_an_uninitialized_vault() {
 }
 
 #[test]
+fn missing_git_executable_does_not_fall_back_to_project_root_vault() {
+    let workspace = TestWorkspace::new();
+    let empty_path = workspace.root().join("empty-bin");
+    fs::create_dir(&empty_path).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_flvt"))
+        .arg("init")
+        .current_dir(workspace.root())
+        .env("PATH", &empty_path)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(!workspace.root().join(".vault").exists());
+    assert!(!workspace.root().join(".git/frilvault/vaults/root").exists());
+}
+
+#[test]
 fn explicit_init_preserves_local_shared_and_external_vault_contracts() {
     let local = TestWorkspace::new();
     let local_exclude = git_path(local.root(), "info/exclude");

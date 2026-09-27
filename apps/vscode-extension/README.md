@@ -173,8 +173,10 @@ Release automation is split into two stages:
 
 FrilVault stores project data locally under the selected vault. A new Local
 vault in a Git checkout is stored in that checkout's Git metadata at
-`frilvault/vaults/<workspace-relative-path>/`. A new Shared vault is stored in
-the project-root `.vault/`. Non-Git Local projects keep the `.vault/` layout.
+`frilvault/vaults/<workspace-key>/`. The checkout root uses `root`; each other
+workspace path gets its own collision-free encoded directory. A new Shared
+vault is stored in the project-root `.vault/`. Non-Git Local projects keep the
+`.vault/` layout.
 An existing project-root `.vault/` remains in place and is never moved based on
 its mode. An explicit path can select an external vault for either mode.
 

@@ -45,7 +45,12 @@ export function rememberResolvedVaultRoot(
   reportedVaultPath: string,
 ): void {
   const key = vaultRootCacheKey(workspaceRoot, configuredVaultPath);
-  resolvedVaultRoots.set(key, path.resolve(workspaceRoot, reportedVaultPath));
+  if (!path.isAbsolute(reportedVaultPath)) {
+    resolvedVaultRoots.delete(key);
+    return;
+  }
+
+  resolvedVaultRoots.set(key, path.resolve(reportedVaultPath));
 }
 
 export function getVaultRoot(workspaceRoot: string): string {

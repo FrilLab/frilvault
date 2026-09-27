@@ -51,6 +51,8 @@ export function registerWorkspaceWatcher(
 ): () => Promise<void> {
   let debounceTimer: NodeJS.Timeout | undefined;
   let watchers: vscode.FileSystemWatcher[] = [];
+  let bindGeneration = 0;
+  let disposed = false;
   const createFileSystemWatcher =
     dependencies.createFileSystemWatcher ??
     vscode.workspace.createFileSystemWatcher.bind(vscode.workspace);
@@ -94,6 +96,7 @@ export function registerWorkspaceWatcher(
   };
 
   const rebindWatchers = async () => {
+    const generation = ++bindGeneration;
     disposeWatchers();
 
     const workspaceRoot = tryGetWorkspaceRoot();
@@ -104,6 +107,10 @@ export function registerWorkspaceWatcher(
     try {
       await cliClient.workspaceStatus(workspaceRoot);
     } catch {
+      return;
+    }
+
+    if (disposed || generation !== bindGeneration) {
       return;
     }
 
@@ -160,6 +167,8 @@ export function registerWorkspaceWatcher(
   context.subscriptions.push(
     configurationListener,
     new vscode.Disposable(() => {
+      disposed = true;
+      bindGeneration += 1;
       disposeWatchers();
       if (debounceTimer) {
         clearTimeout(debounceTimer);

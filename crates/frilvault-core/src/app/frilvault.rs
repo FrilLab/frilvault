@@ -81,6 +81,12 @@ impl FrilVault {
         })
     }
 
+    /// Opens the path selected by Core discovery while preserving its Git
+    /// metadata identity and workspace anchor.
+    pub fn open_with_path_resolver(path_resolver: PathResolver) -> FrilVaultResult<Self> {
+        Self::from_resolver(path_resolver, false)
+    }
+
     fn resolver(&self) -> &PathResolver {
         self.initialized_resolver
             .get()

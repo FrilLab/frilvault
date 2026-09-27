@@ -231,11 +231,12 @@ export class CliClient {
   }
 
   public async workspaceStatus(workspaceRoot: string): Promise<WorkspaceStatus> {
+    const configuredVaultPath = this.dependencies.getConfiguredVaultPath?.();
     const stdout = await this.execInWorkspace(workspaceRoot, ['status', '--format', 'json']);
     const status = parseJson<WorkspaceStatus>(stdout);
     rememberResolvedVaultRoot(
       workspaceRoot,
-      this.dependencies.getConfiguredVaultPath?.(),
+      configuredVaultPath,
       status.vault_path,
     );
     return status;

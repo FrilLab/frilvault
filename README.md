@@ -111,7 +111,9 @@ The workspace root and vault root are independent. Source files and anchors
 remain relative to the workspace root; note JSON, indexes, attachments, and
 metadata are stored under the vault root. In a Git checkout, a new Local Vault
 is stored under that checkout's Git metadata at
-`<git-dir>/frilvault/vaults/<workspace-relative-path>/`. Linked worktrees use
+`<git-dir>/frilvault/vaults/<workspace-key>/`. The checkout root uses `root`;
+other workspace paths use a collision-free, encoded single directory name.
+Linked worktrees use
 their own Git metadata directories, and separate workspaces in one checkout
 use separate paths. A new Shared Vault uses the project-root `.vault/`.
 

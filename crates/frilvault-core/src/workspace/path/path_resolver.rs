@@ -4,8 +4,8 @@ use std::process::Command;
 use crate::{
     FrilVaultError, FrilVaultResult,
     constants::{
-        IMAGES_DIR_NAME, INDEX_DIR_NAME, NOTE_FILE_EXTENSION, NOTES_DIR_NAME, VAULT_DIR_NAME,
-        WORKSPACE_FILE_NAME,
+        CACHE_DIR_NAME, IMAGES_DIR_NAME, INDEX_DIR_NAME, NOTE_FILE_EXTENSION, NOTES_DIR_NAME,
+        VAULT_DIR_NAME, WORKSPACE_FILE_NAME,
     },
     workspace::VaultMode,
 };
@@ -22,6 +22,7 @@ use crate::{
 pub struct PathResolver {
     workspace_root: PathBuf,
     vault_root: PathBuf,
+    git_metadata_root: Option<PathBuf>,
 }
 
 impl PathResolver {
@@ -32,6 +33,7 @@ impl PathResolver {
         Self {
             vault_root: normalize_path(&workspace_root.join(VAULT_DIR_NAME)),
             workspace_root,
+            git_metadata_root: None,
         }
     }
 
@@ -55,6 +57,7 @@ impl PathResolver {
         Self {
             workspace_root,
             vault_root: normalize_path(&vault_root),
+            git_metadata_root: None,
         }
     }
 
@@ -87,7 +90,8 @@ impl PathResolver {
         let workspace_root = normalize_path(&workspace_root.into());
         let start_directory = normalize_path(&start_directory.into());
         let existing_project_vault = find_nearest_vault(&start_directory);
-        let git_vault = git_managed_vault_root(&workspace_root);
+        let git_location = git_managed_vault_root(&workspace_root)?;
+        let git_vault = git_location.as_ref().map(|(_, path)| path.clone());
         let existing_git_vault = git_vault
             .clone()
             .filter(|path| path.exists() && is_existing_vault_candidate(path));
@@ -104,6 +108,7 @@ impl PathResolver {
         Ok(Self {
             workspace_root,
             vault_root: normalize_path(&vault_root),
+            git_metadata_root: git_location.map(|(root, _)| root),
         })
     }
 
@@ -121,7 +126,8 @@ impl PathResolver {
         }
 
         let existing_project_vault = find_nearest_vault(&workspace_root);
-        let git_vault = git_managed_vault_root(&workspace_root);
+        let git_location = git_managed_vault_root(&workspace_root)?;
+        let git_vault = git_location.as_ref().map(|(_, path)| path.clone());
         let existing_git_vault = git_vault
             .clone()
             .filter(|path| path.exists() && is_existing_vault_candidate(path));
@@ -143,12 +149,24 @@ impl PathResolver {
         Ok(Self {
             workspace_root,
             vault_root: normalize_path(&vault_root),
+            git_metadata_root: git_location.map(|(root, _)| root),
         })
     }
 
     pub fn vault_is_in_git_metadata(&self) -> bool {
-        git_metadata_directory(&self.workspace_root)
+        self.git_metadata_root
+            .as_ref()
             .is_some_and(|git_dir| self.vault_root.starts_with(git_dir))
+    }
+
+    /// Preserves the selected Vault and Git metadata while changing only the
+    /// source workspace root used for note anchors.
+    pub fn with_workspace_root(&self, workspace_root: impl Into<PathBuf>) -> Self {
+        Self {
+            workspace_root: normalize_path(&workspace_root.into()),
+            vault_root: self.vault_root.clone(),
+            git_metadata_root: self.git_metadata_root.clone(),
+        }
     }
 
     pub fn note_file_name(source_file: impl AsRef<Path>) -> String {
@@ -252,53 +270,90 @@ impl PathResolver {
     }
 }
 
-fn git_managed_vault_root(workspace_root: &Path) -> Option<PathBuf> {
-    let git_dir = git_metadata_directory(workspace_root)?;
+fn git_managed_vault_root(workspace_root: &Path) -> FrilVaultResult<Option<(PathBuf, PathBuf)>> {
+    let Some(git_dir) = git_metadata_directory(workspace_root)? else {
+        return Ok(None);
+    };
     let output = Command::new("git")
         .arg("-C")
         .arg(workspace_root)
         .args(["rev-parse", "--show-prefix"])
-        .output()
-        .ok()?;
+        .output()?;
     if !output.status.success() {
-        return None;
+        return Err(git_command_error(output.stderr));
     }
-    let prefix = String::from_utf8(output.stdout).ok()?;
-    let prefix = prefix.trim();
+    let prefix = output.stdout.strip_suffix(b"\n").unwrap_or(&output.stdout);
+    let prefix = prefix.strip_suffix(b"/").unwrap_or(prefix);
     let workspace_key = if prefix.is_empty() {
-        PathBuf::from("root")
+        "root".to_string()
     } else {
-        PathBuf::from(prefix.trim_end_matches('/'))
+        let mut key = String::from("workspace-");
+        for byte in prefix {
+            use std::fmt::Write as _;
+            write!(&mut key, "{byte:02x}").expect("writing to a String cannot fail");
+        }
+        key
     };
-    Some(
+    Ok(Some((
+        git_dir.clone(),
         git_dir
             .join(PathResolver::GIT_VAULT_DIRECTORY)
             .join(workspace_key),
-    )
+    )))
 }
 
-fn git_metadata_directory(workspace_root: &Path) -> Option<PathBuf> {
+fn git_metadata_directory(workspace_root: &Path) -> FrilVaultResult<Option<PathBuf>> {
     let work_tree = Command::new("git")
         .arg("-C")
         .arg(workspace_root)
         .args(["rev-parse", "--is-inside-work-tree"])
-        .output()
-        .ok()?;
-    if !work_tree.status.success() || String::from_utf8_lossy(&work_tree.stdout).trim() != "true" {
-        return None;
+        .output()?;
+    if !work_tree.status.success() {
+        let stderr = String::from_utf8_lossy(&work_tree.stderr);
+        if stderr.to_ascii_lowercase().contains("not a git repository") {
+            return Ok(None);
+        }
+        return Err(git_command_error(work_tree.stderr));
+    }
+    if String::from_utf8_lossy(&work_tree.stdout).trim() != "true" {
+        return Ok(None);
     }
 
     let output = Command::new("git")
         .arg("-C")
         .arg(workspace_root)
         .args(["rev-parse", "--absolute-git-dir"])
-        .output()
-        .ok()?;
+        .output()?;
     if !output.status.success() {
-        return None;
+        return Err(git_command_error(output.stderr));
     }
-    let git_dir = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-    (!git_dir.as_os_str().is_empty()).then_some(normalize_path(&git_dir))
+    let git_dir = output_path(output.stdout)?;
+    if git_dir.as_os_str().is_empty() {
+        return Err(std::io::Error::other("Git returned an empty Git metadata path").into());
+    }
+    Ok(Some(normalize_path(&git_dir)))
+}
+
+fn output_path(mut bytes: Vec<u8>) -> FrilVaultResult<PathBuf> {
+    if bytes.last() == Some(&b'\n') {
+        bytes.pop();
+    }
+    if bytes.last() == Some(&b'\r') {
+        bytes.pop();
+    }
+    let path = String::from_utf8(bytes)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    Ok(PathBuf::from(path))
+}
+
+fn git_command_error(stderr: Vec<u8>) -> crate::FrilVaultError {
+    let message = String::from_utf8_lossy(&stderr).trim().to_string();
+    std::io::Error::other(if message.is_empty() {
+        "Git could not resolve the current checkout".to_string()
+    } else {
+        message
+    })
+    .into()
 }
 
 fn find_nearest_vault(start_directory: &Path) -> Option<PathBuf> {
@@ -320,10 +375,19 @@ fn is_existing_vault_candidate(path: &Path) -> bool {
         return true;
     }
 
-    match std::fs::read_dir(path).and_then(|mut entries| entries.next().transpose()) {
-        Ok(None) => false,
-        Ok(Some(_)) | Err(_) => true,
+    if path.join(WORKSPACE_FILE_NAME).exists() {
+        return true;
     }
+
+    [
+        NOTES_DIR_NAME,
+        IMAGES_DIR_NAME,
+        INDEX_DIR_NAME,
+        CACHE_DIR_NAME,
+    ]
+    .iter()
+    .any(|name| path.join(name).exists())
+        || std::fs::read_dir(path).is_err()
 }
 
 fn normalize_path(path: &Path) -> PathBuf {

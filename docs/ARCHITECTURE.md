@@ -101,9 +101,11 @@ flag and confirmation before import can replace them.
 
 - `Local` is the default policy for a new workspace. In a Git checkout,
   `flvt init` stores it under the checkout-specific Git metadata directory at
-  `frilvault/vaults/<workspace-relative-path>`. Linked worktrees therefore
-  keep separate Local data, and separate workspaces in one checkout have
-  separate paths. Non-Git projects retain the project-root `.vault/` fallback.
+  `frilvault/vaults/<workspace-key>`. The checkout root uses `root`; other
+  workspace-relative paths map to a collision-free encoded single path
+  component. Linked worktrees therefore keep separate Local data, and
+  separate workspaces in one checkout have separate paths. Non-Git projects
+  retain the project-root `.vault/` fallback.
 - `Shared` is opt-in for a new workspace. `flvt init --shared` stores it in the
   project-root `.vault/` so users can track it with Git.
 
