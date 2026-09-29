@@ -48,9 +48,11 @@ export function registerWorkspaceWatcher(
   isEnabled: () => boolean,
   invalidateViews: () => Promise<void>,
   dependencies: WorkspaceWatcherDependencies = {},
-): void {
+): () => Promise<void> {
   let debounceTimer: NodeJS.Timeout | undefined;
   let watchers: vscode.FileSystemWatcher[] = [];
+  let bindGeneration = 0;
+  let disposed = false;
   const createFileSystemWatcher =
     dependencies.createFileSystemWatcher ??
     vscode.workspace.createFileSystemWatcher.bind(vscode.workspace);
@@ -93,11 +95,22 @@ export function registerWorkspaceWatcher(
     watchers = [];
   };
 
-  const rebindWatchers = () => {
+  const rebindWatchers = async () => {
+    const generation = ++bindGeneration;
     disposeWatchers();
 
     const workspaceRoot = tryGetWorkspaceRoot();
     if (!workspaceRoot) {
+      return;
+    }
+
+    try {
+      await cliClient.workspaceStatus(workspaceRoot);
+    } catch {
+      return;
+    }
+
+    if (disposed || generation !== bindGeneration) {
       return;
     }
 
@@ -140,24 +153,28 @@ export function registerWorkspaceWatcher(
     watchers = [notesWatcher, imagesWatcher, sourceWatcher];
   };
 
-  rebindWatchers();
+  void rebindWatchers();
 
   const configurationListener = onDidChangeConfiguration((event) => {
     if (
       event.affectsConfiguration('frilvault.vaultPath') ||
       event.affectsConfiguration('frilvault.workspaceRoot')
     ) {
-      rebindWatchers();
+      void rebindWatchers();
     }
   });
 
   context.subscriptions.push(
     configurationListener,
     new vscode.Disposable(() => {
+      disposed = true;
+      bindGeneration += 1;
       disposeWatchers();
       if (debounceTimer) {
         clearTimeout(debounceTimer);
       }
     }),
   );
+
+  return rebindWatchers;
 }

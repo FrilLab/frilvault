@@ -77,6 +77,16 @@ impl WorkspaceRepository {
             None
         };
 
+        if existing_metadata.is_none()
+            && self.path_resolver.vault_is_in_git_metadata()
+            && vault_root.is_dir()
+        {
+            let mut entries = fs::read_dir(&vault_root)?;
+            if entries.next().transpose()?.is_some() {
+                return Err(FrilVaultError::IncompleteWorkspace(path));
+            }
+        }
+
         for directory in [
             NOTES_DIR_NAME,
             CACHE_DIR_NAME,

@@ -11,6 +11,7 @@ pub enum GitTrackingStatus {
     Trackable,
     Tracked,
     NotGitRepository,
+    OutsideWorkTree,
 }
 
 impl GitTrackingStatus {
@@ -20,6 +21,7 @@ impl GitTrackingStatus {
             Self::Trackable => "trackable",
             Self::Tracked => "tracked",
             Self::NotGitRepository => "not a Git repository",
+            Self::OutsideWorkTree => "outside Git worktree",
         }
     }
 }

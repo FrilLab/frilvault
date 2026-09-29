@@ -24,7 +24,11 @@ pub fn execute_with_vault(command: InitCommand, vault_path: Option<&Path>) -> Re
     } else {
         VaultMode::Local
     };
-    let vault = super::open_vault(vault_path)?;
+    let vault = frilvault_core::FrilVault::open_for_initialization(
+        std::env::current_dir()?,
+        vault_path,
+        requested_mode,
+    )?;
     let result = vault.initialize_with_status(requested_mode)?;
 
     if matches!(resolve_format(command.format), OutputFormat::Json) {
@@ -39,6 +43,11 @@ pub fn execute_with_vault(command: InitCommand, vault_path: Option<&Path>) -> Re
     println!();
     println!("Vault: {}", vault.vault_path().display());
     println!("Mode: {}", result.mode.as_str());
+    if vault.vault_is_in_git_metadata() {
+        println!("Storage: this checkout's Git metadata");
+    } else if result.git_exclude == Some(GitExcludeStatus::NotGitRepository) {
+        println!("Git: no worktree found; Local Vault remains at the selected path");
+    }
 
     if result.git_exclude == Some(GitExcludeStatus::VaultTracked) {
         eprintln!();

@@ -41,6 +41,11 @@ pub enum FrilVaultError {
     #[error("vault path is not a directory: {0}")]
     InvalidVaultPath(PathBuf),
 
+    #[error(
+        "multiple FrilVault workspaces were found at {project} and {git}; choose one with `--vault <PATH>`"
+    )]
+    AmbiguousVaultPaths { project: PathBuf, git: PathBuf },
+
     #[error("cannot manage Git ignore rules for vault outside a Git repository: {0}")]
     VaultGitignoreUnavailable(PathBuf),
 
@@ -242,6 +247,7 @@ impl FrilVaultError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::WorkspaceNotFound => "workspace_not_found",
+            Self::AmbiguousVaultPaths { .. } => "ambiguous_vault_paths",
             Self::IncompleteWorkspace(_) => "incomplete_workspace",
             Self::InvalidWorkspaceMetadata { .. } => "invalid_workspace_metadata",
             _ => "operation_failed",

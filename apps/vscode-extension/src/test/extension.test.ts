@@ -26,7 +26,7 @@ import { FrilVaultNotesProvider } from '../features/notes-panel/provider';
 import { NotesPanelService } from '../features/notes-panel/service';
 import { NotesPanelItem } from '../features/notes-panel/view';
 import type { NoteView } from '../types';
-import { getVaultRoot, revealNote } from '../utils/file';
+import { getVaultRoot, rememberResolvedVaultRoot, revealNote } from '../utils/file';
 
 interface TestWorkspace {
   root: string;
@@ -541,7 +541,7 @@ suite('Extension Test Suite', function () {
           record.disposed = true;
         },
       } as unknown as vscode.FileSystemWatcher;
-    }) as typeof vscode.workspace.createFileSystemWatcher;
+    }) as unknown as typeof vscode.workspace.createFileSystemWatcher;
     const configurationListener = ((listener: (event: vscode.ConfigurationChangeEvent) => unknown) => {
       configurationHandler = listener;
       return new vscode.Disposable(() => undefined);
@@ -550,7 +550,16 @@ suite('Extension Test Suite', function () {
 
     registerWorkspaceWatcher(
       context,
-      {} as CliClient,
+      {
+        workspaceStatus: async () => ({
+          vault_path:
+            vscode.workspace.getConfiguration('frilvault').get<string>('vaultPath', '') ||
+            '.vault',
+          mode: 'local',
+          git_tracking: 'excluded',
+          note_count: 0,
+        }),
+      } as unknown as CliClient,
       () => false,
       async () => undefined,
       {
@@ -558,6 +567,8 @@ suite('Extension Test Suite', function () {
         onDidChangeConfiguration: configurationListener,
       },
     );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     assert.deepStrictEqual(
       watcherRoots.map(({ root }) => root),
@@ -570,6 +581,7 @@ suite('Extension Test Suite', function () {
     configurationHandler?.({
       affectsConfiguration: (section) => section === 'frilvault.vaultPath',
     } as vscode.ConfigurationChangeEvent);
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     assert.deepStrictEqual(
       watcherRoots.map(({ root }) => root),
@@ -601,6 +613,9 @@ suite('Extension Test Suite', function () {
 
     assert.strictEqual(getVaultRoot(nestedRoot), nestedVault);
 
+    rememberResolvedVaultRoot(nestedRoot, undefined, '.vault');
+    assert.strictEqual(getVaultRoot(nestedRoot), nestedVault);
+
     await vscode.workspace
       .getConfiguration('frilvault')
       .update('vaultPath', '../external-vault', vscode.ConfigurationTarget.Global);
@@ -608,6 +623,82 @@ suite('Extension Test Suite', function () {
       getVaultRoot(workspace.root),
       path.join(path.dirname(workspace.root), 'external-vault'),
     );
+  });
+
+  test('workspace watcher ignores stale asynchronous rebinds and disposes current watchers', async () => {
+    const workspace = createTestWorkspace();
+    await vscode.workspace
+      .getConfiguration('frilvault')
+      .update('workspaceRoot', workspace.root, vscode.ConfigurationTarget.Global);
+    await vscode.workspace
+      .getConfiguration('frilvault')
+      .update('vaultPath', '', vscode.ConfigurationTarget.Global);
+
+    type TestWorkspaceStatus = {
+      vault_path: string;
+      mode: 'local';
+      git_tracking: 'outside_work_tree';
+      note_count: number;
+    };
+    const pendingStatuses: Array<(status: TestWorkspaceStatus) => void> = [];
+    const createdWatchers: Array<{ disposed: boolean }> = [];
+    const subscriptions: vscode.Disposable[] = [];
+    const context = { subscriptions } as unknown as vscode.ExtensionContext;
+    const watcherFactory = (() => {
+      const watcher = {
+        disposed: false,
+        onDidCreate: () => new vscode.Disposable(() => undefined),
+        onDidChange: () => new vscode.Disposable(() => undefined),
+        onDidDelete: () => new vscode.Disposable(() => undefined),
+        dispose() {
+          this.disposed = true;
+        },
+      };
+      createdWatchers.push(watcher);
+      return watcher;
+    }) as unknown as typeof vscode.workspace.createFileSystemWatcher;
+    const configurationListener = (() => new vscode.Disposable(() => undefined)) as
+      typeof vscode.workspace.onDidChangeConfiguration;
+    const cliClient = {
+      workspaceStatus: () =>
+        new Promise<TestWorkspaceStatus>((resolve) => {
+          pendingStatuses.push(resolve);
+        }),
+    } as unknown as CliClient;
+
+    const rebind = registerWorkspaceWatcher(
+      context,
+      cliClient,
+      () => false,
+      async () => undefined,
+      {
+        createFileSystemWatcher: watcherFactory,
+        onDidChangeConfiguration: configurationListener,
+      },
+    );
+
+    const latestRebind = rebind();
+    assert.strictEqual(pendingStatuses.length, 2);
+    pendingStatuses[1]({
+      vault_path: path.join(workspace.root, '.git/frilvault/vaults/root'),
+      mode: 'local',
+      git_tracking: 'outside_work_tree',
+      note_count: 0,
+    });
+    await latestRebind;
+    pendingStatuses[0]({
+      vault_path: path.join(workspace.root, '.git/frilvault/vaults/root'),
+      mode: 'local',
+      git_tracking: 'outside_work_tree',
+      note_count: 0,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.strictEqual(createdWatchers.length, 3);
+    for (const subscription of subscriptions) {
+      subscription.dispose();
+    }
+    assert.ok(createdWatchers.every(({ disposed }) => disposed));
   });
 });
 

@@ -117,7 +117,8 @@ fn status_reports_excluded_vault() {
     let workspace = create_test_workspace();
     init_git_repository(workspace.root());
     fs::write(workspace.root().join(".gitignore"), ".vault/\n").unwrap();
-    let vault = FrilVault::open(workspace.root()).unwrap();
+    let vault =
+        FrilVault::open_with_vault_path(workspace.root(), workspace.root().join(".vault")).unwrap();
     vault.initialize(VaultMode::Local).unwrap();
 
     let status = vault.status().unwrap();
@@ -129,7 +130,8 @@ fn status_reports_excluded_vault() {
 fn status_reports_tracked_vault() {
     let workspace = create_test_workspace();
     init_git_repository(workspace.root());
-    let vault = FrilVault::open(workspace.root()).unwrap();
+    let vault =
+        FrilVault::open_with_vault_path(workspace.root(), workspace.root().join(".vault")).unwrap();
     vault.initialize(VaultMode::Local).unwrap();
     run_git(workspace.root(), &["add", "-f", ".vault/workspace.json"]);
 
