@@ -17,6 +17,7 @@ import * as path from 'node:path';
 import { CliClient } from './core/cliClient';
 import { COMMAND_IDS, VIEW_IDS } from './constants/ids';
 import { CurrentFileNotesStore } from './features/current-file/store';
+import { isActiveEditorDocumentSave } from './features/current-file/saveRefresh';
 import { createDisableCommand, createEnableCommand } from './features/enablement/command';
 import { isFrilVaultEnabled, syncEnabledContext } from './features/enablement/state';
 import { registerExplorerNoteCountDecorations } from './features/explorer-badges/provider';
@@ -165,7 +166,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   const refreshNoteState = async (editor?: vscode.TextEditor) => {
-    await store.syncActiveEditor(editor ?? vscode.window.activeTextEditor);
+    await store.invalidateAfterMutation(editor ?? vscode.window.activeTextEditor);
   };
 
   const refreshWorkspaceNoteCounts = async () => {
@@ -193,6 +194,30 @@ export function activate(context: vscode.ExtensionContext): void {
     searchRefreshEmitter.fire();
   };
 
+  const refreshCurrentFile = async (editor: vscode.TextEditor | undefined) => {
+    if (!editor) {
+      return;
+    }
+
+    await runBackgroundRefresh(
+      async () => store.syncActiveEditor(editor),
+      (message) => cliOutputChannel.appendLine(`FrilVault: ${message}`),
+    );
+  };
+
+  const refreshCurrentFileAfterDocumentSave = async (document: vscode.TextDocument) => {
+    const editor = vscode.window.activeTextEditor;
+
+    if (!isActiveEditorDocumentSave(document, editor)) {
+      return;
+    }
+
+    await runBackgroundRefresh(
+      async () => store.invalidateAfterMutation(editor),
+      (message) => cliOutputChannel.appendLine(`FrilVault: ${message}`),
+    );
+  };
+
   const inlineNoteEditor = createInlineNoteEditor({
     cliClient,
     getWorkspaceRoot,
@@ -212,6 +237,7 @@ export function activate(context: vscode.ExtensionContext): void {
   let environmentProvider: FrilVaultEnvironmentProvider | undefined;
 
   const clearUi = () => {
+    inlineNoteEditor.suspend();
     store.clear();
     noteCountStore.clear();
     gutterRegistry.clear();
@@ -249,20 +275,6 @@ export function activate(context: vscode.ExtensionContext): void {
     discoverDotenv,
     getRuntimeState: () => environmentRuntimeState,
   });
-
-  const refreshAfterWorkspaceEvent = async (editor?: vscode.TextEditor) => {
-    await runBackgroundRefresh(
-      async () => {
-        if (!isEnabled()) {
-          clearUi();
-          return;
-        }
-
-        await refreshAfterMutation(editor);
-      },
-      (message) => cliOutputChannel.appendLine(`FrilVault: ${message}`),
-    );
-  };
 
   registerGutterCommands(context, gutterActions);
 
@@ -311,7 +323,10 @@ export function activate(context: vscode.ExtensionContext): void {
     workspaceState: context.workspaceState,
     cliClient,
     onVaultResolved: () => refreshVaultWatchers(),
-    refreshUi: refreshAfterMutation,
+    refreshUi: async () => {
+      inlineNoteEditor.resume();
+      await refreshAfterMutation();
+    },
     clearUi,
     showWarningMessage: (message, ...items) =>
       vscode.window.showWarningMessage(message, ...items),
@@ -463,8 +478,8 @@ export function activate(context: vscode.ExtensionContext): void {
       COMMAND_IDS.environmentRefresh,
       createRefreshEnvironmentCommand(() => environmentProvider?.refresh()),
     ),
-    vscode.window.onDidChangeActiveTextEditor(refreshAfterWorkspaceEvent),
-    vscode.workspace.onDidSaveTextDocument(() => refreshAfterWorkspaceEvent()),
+    vscode.window.onDidChangeActiveTextEditor(refreshCurrentFile),
+    vscode.workspace.onDidSaveTextDocument(refreshCurrentFileAfterDocumentSave),
   );
 
   registerNotesTreeDataProvider(context, notesProvider);

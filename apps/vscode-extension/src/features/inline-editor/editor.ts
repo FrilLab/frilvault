@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { randomUUID } from 'node:crypto';
 
 import type { CliClient } from '../../core/cliClient';
 import type { NoteView } from '../../types';
@@ -21,6 +22,7 @@ import {
 import {
   applyFormInput,
   createEditDraft,
+  formatTagsText,
   revisionFromDraft,
   validateInlineNoteForm,
   type InlineNoteDraft,
@@ -32,6 +34,10 @@ import {
   type InlineNotePanelMessage,
 } from './panel';
 import { InlineNoteEditorService } from './service';
+import {
+  InlineNoteDraftRecoveryStore,
+  recoveryId,
+} from './draftRecovery';
 
 export interface InlineNoteEditorDependencies {
   cliClient: CliClient;
@@ -52,7 +58,7 @@ export interface InlineNoteEditorDependencies {
  *
  * webview 기반 inline note editor이며 debounced auto-save를 사용합니다.
  */
-export class InlineNoteEditor {
+export class InlineNoteEditor implements vscode.Disposable {
   private readonly panel: InlineNotePanelLike;
   private readonly service: InlineNoteEditorService;
   private readonly autoSave: AutoSaveController;
@@ -63,6 +69,13 @@ export class InlineNoteEditor {
   private draftRevision = 0;
   private lastPersistedRevision = 0;
   private readonly draftSnapshots = new Map<number, InlineNoteDraft>();
+  private recoveryStore: InlineNoteDraftRecoveryStore | undefined;
+  private recoveryId: string | undefined;
+  private recoverySessionId: string | undefined;
+  private nativeClosePromise: Promise<void> | undefined;
+  private deferredOpen: InlineNoteDraft | undefined;
+  private disposed = false;
+  private suspended = false;
 
   public constructor(private readonly dependencies: InlineNoteEditorDependencies) {
     this.panel = dependencies.panel ?? new InlineNotePanel();
@@ -85,6 +98,8 @@ export class InlineNoteEditor {
 
   public register(context: vscode.ExtensionContext): void {
     this.context = context;
+    this.recoveryStore = new InlineNoteDraftRecoveryStore(context.workspaceState);
+    context.subscriptions.push(this);
   }
 
   public async openCreateHere(): Promise<void> {
@@ -135,31 +150,83 @@ export class InlineNoteEditor {
   }
 
   private openDraft(draft: InlineNoteDraft): void {
+    if (this.disposed) {
+      return;
+    }
+
     if (!this.context) {
       throw new Error('Inline note editor is not registered.');
     }
 
-    this.draft = draft;
-    this.draftRevision = 0;
+    if (this.nativeClosePromise) {
+      this.deferredOpen = draft;
+      return;
+    }
+
+    this.openDraftNow(draft);
+  }
+
+  private openDraftNow(draft: InlineNoteDraft): void {
+    const context = this.context;
+
+    if (!context) {
+      throw new Error('Inline note editor is not registered.');
+    }
+
+    const id = recoveryId(draft);
+    const recovered = this.recoveryStore?.get(draft);
+    const recoveredMatchesPersisted = recovered?.draft.expectedUpdatedAt === draft.expectedUpdatedAt;
+    const recoveredMatchesContent = recovered &&
+      draftFingerprint(recovered.draft.content, recovered.draft.tagsText) !==
+        draftFingerprint(draft.content, draft.tagsText);
+    const shouldRestore = Boolean(recovered && recoveredMatchesContent);
+    const initialDraft = shouldRestore && recovered ? recovered.draft : draft;
+    const isConflictingRecovery = Boolean(shouldRestore && !recoveredMatchesPersisted);
+
+    this.draft = initialDraft;
+    this.draftRevision = shouldRestore && recovered ? recovered.revision : 0;
     this.lastPersistedRevision = 0;
     this.draftSnapshots.clear();
-    this.draftSnapshots.set(0, draft);
-    this.conflictDraft = undefined;
-    this.autoSave.reset(draftFingerprint(draft.content, draft.tagsText));
-    this.handleSaveStatus('saved');
+    this.draftSnapshots.set(this.draftRevision, initialDraft);
+    this.conflictDraft = isConflictingRecovery ? initialDraft : undefined;
+    this.recoveryId = id;
+    this.recoverySessionId = recovered?.sessionId ?? randomUUID();
+    this.autoSave.reset(draftFingerprint(
+      shouldRestore && recoveredMatchesPersisted ? draft.content : initialDraft.content,
+      shouldRestore && recoveredMatchesPersisted ? draft.tagsText : initialDraft.tagsText,
+    ));
+    this.handleSaveStatus(isConflictingRecovery ? 'conflict' : 'saved');
+
+    if (recovered && !shouldRestore) {
+      void this.recoveryStore?.clear(id, recovered.sessionId, recovered.revision)
+        .catch(() => undefined);
+    }
 
     this.panel.open(
-      this.context,
-      draft,
+      context,
+      initialDraft,
       async (message) => {
         await this.handlePanelMessage(message);
       },
       async () => {
-        await this.handlePanelClose();
+        await this.handleNativePanelClose();
       },
     );
 
-    void this.refreshTagSuggestions(draft.workspaceRoot);
+    if (isConflictingRecovery && recovered) {
+      this.panel.updateDraft(initialDraft, {
+        errorMessage: 'This recovered draft is based on an earlier version of the note.',
+        status: 'conflict',
+      });
+    } else if (shouldRestore && recovered) {
+      this.autoSave.schedule(
+        draftFingerprint(initialDraft.content, initialDraft.tagsText),
+        this.draftRevision,
+      );
+      void this.dependencies.showInformationMessage?.('Recovered unsaved changes for this note.');
+    }
+
+    void this.refreshTagSuggestions(initialDraft.workspaceRoot);
   }
 
   private async handlePanelMessage(message: InlineNotePanelMessage): Promise<void> {
@@ -182,7 +249,7 @@ export class InlineNoteEditor {
         await this.refreshTagSuggestions(this.draft.workspaceRoot);
         break;
       case 'close':
-        await this.handlePanelClose(true);
+        await this.handlePanelClose(false);
         break;
       case 'delete':
         await this.handleDelete();
@@ -207,29 +274,133 @@ export class InlineNoteEditor {
     this.draft = applyFormInput(this.draft, { content, tagsText });
     this.draftRevision += 1;
     this.draftSnapshots.set(this.draftRevision, this.draft);
-    this.autoSave.schedule(draftFingerprint(content, tagsText), this.draftRevision);
+
+    if (this.suspended) {
+      this.panel.updateDraft(this.draft, {
+        errorMessage: 'FrilVault is disabled. This draft will save when FrilVault is enabled.',
+        status: 'editing',
+      });
+    } else {
+      this.autoSave.schedule(draftFingerprint(content, tagsText), this.draftRevision);
+    }
+
+    await this.persistRecoveryDraft(this.draftRevision, this.draft);
   }
 
-  private async handlePanelClose(forceClose = false): Promise<void> {
+  private async handlePanelClose(nativeClose: boolean): Promise<void> {
     if (!this.draft) {
-      this.panel.close();
+      if (!nativeClose) {
+        this.panel.close();
+      }
       return;
     }
 
     await this.autoSave.flush();
 
-    if (this.saveStatus === 'failed' && !forceClose) {
-      this.panel.updateDraft(this.draft, {
-        errorMessage: 'Save failed. Retry or keep editing before closing.',
-        status: this.saveStatus,
-      });
+    if (this.saveStatus === 'failed' || this.saveStatus === 'conflict') {
+      if (!nativeClose) {
+        this.panel.updateDraft(this.draft, {
+          errorMessage: this.saveStatus === 'conflict'
+            ? 'Resolve the external change before closing this note.'
+            : 'Save failed. Retry or keep editing before closing.',
+          status: this.saveStatus,
+        });
+      }
       return;
     }
 
     this.autoSave.cancel();
+    if (!nativeClose) {
+      this.panel.close();
+    }
+    this.draft = undefined;
+    this.conflictDraft = undefined;
+  }
+
+  private async handleNativePanelClose(): Promise<void> {
+    const closing = this.handlePanelClose(true);
+    this.nativeClosePromise = closing;
+
+    try {
+      await closing;
+    } finally {
+      if (this.nativeClosePromise === closing) {
+        this.nativeClosePromise = undefined;
+      }
+
+      const deferred = this.deferredOpen;
+      this.deferredOpen = undefined;
+
+      if (deferred) {
+        const latest = await this.latestPersistedDraft(deferred);
+        this.openDraftNow(latest);
+      }
+    }
+  }
+
+  private async latestPersistedDraft(draft: InlineNoteDraft): Promise<InlineNoteDraft> {
+    if (draft.mode !== 'edit' || !draft.noteId) {
+      return draft;
+    }
+
+    try {
+      const notes = await this.dependencies.cliClient.listNotes(draft.workspaceRoot, draft.sourceFile);
+      const latest = notes.find((note) => note.note.id === draft.noteId);
+      return latest ? createEditDraft(latest, draft.workspaceRoot) : draft;
+    } catch {
+      return draft;
+    }
+  }
+
+  public dispose(): void {
+    this.disposed = true;
+    this.autoSave.cancel();
     this.panel.close();
     this.draft = undefined;
     this.conflictDraft = undefined;
+    this.deferredOpen = undefined;
+  }
+
+  public suspend(): void {
+    if (this.disposed || this.suspended) {
+      return;
+    }
+
+    this.suspended = true;
+    this.autoSave.cancel();
+
+    if (this.draft) {
+      this.panel.updateDraft(this.draft, {
+        errorMessage: 'FrilVault is disabled. This draft will save when FrilVault is enabled.',
+        status: 'editing',
+      });
+    }
+  }
+
+  public resume(): void {
+    if (this.disposed || !this.suspended) {
+      return;
+    }
+
+    this.suspended = false;
+    if (!this.draft) {
+      return;
+    }
+
+    const persistedDraft = this.draftSnapshots.get(this.lastPersistedRevision) ?? this.draft;
+    const persistedFingerprint = draftFingerprint(
+      persistedDraft.content,
+      persistedDraft.tagsText,
+    );
+    this.autoSave.reset(persistedFingerprint);
+
+    const currentFingerprint = draftFingerprint(this.draft.content, this.draft.tagsText);
+    if (currentFingerprint === persistedFingerprint) {
+      this.handleSaveStatus('saved');
+      return;
+    }
+
+    this.autoSave.schedule(currentFingerprint, this.draftRevision);
   }
 
   private async handleDelete(): Promise<void> {
@@ -259,7 +430,24 @@ export class InlineNoteEditor {
         draft.sourceFile,
         noteId,
       );
-      await this.dependencies.refreshNoteState();
+      if (this.recoveryStore && this.recoveryId && this.recoverySessionId) {
+        try {
+          await this.recoveryStore.clear(
+            this.recoveryId,
+            this.recoverySessionId,
+            Number.MAX_SAFE_INTEGER,
+          );
+        } catch (error) {
+          await this.reportOptionalFailure('clearing the deleted note recovery copy', error, 'deleted');
+        }
+      }
+
+      try {
+        await this.dependencies.refreshNoteState();
+      } catch (error) {
+        await this.reportOptionalFailure('refreshing note views', error, 'deleted');
+      }
+
       this.autoSave.cancel();
       this.panel.close();
       this.draft = undefined;
@@ -291,28 +479,10 @@ export class InlineNoteEditor {
       throw new Error(validationError);
     }
 
+    let saved: NoteView;
+
     try {
-      const undoSnapshot = draftAtSaveStart.undoSnapshot ?? revisionFromDraft(draftAtSaveStart);
-      const saved = await this.service.saveDraft(draftAtSaveStart);
-
-      if (!this.draft || revision < this.lastPersistedRevision) {
-        return;
-      }
-
-      this.lastPersistedRevision = revision;
-      const savedSnapshot = this.service.snapshotAfterSave(draftAtSaveStart, saved);
-      this.syncPersistedMetadata(revision, saved, undoSnapshot, savedSnapshot);
-
-      this.panel.updateDraft(this.draft, { status: 'saved', canDelete: true });
-
-      try {
-        await this.dependencies.refreshNoteState();
-      } catch (error) {
-        await this.reportOptionalFailure('refreshing note views', error);
-      }
-
-      await this.refreshTagSuggestions(draftAtSaveStart.workspaceRoot);
-
+      saved = await this.service.saveDraft(draftAtSaveStart);
     } catch (error) {
       if (!this.draft || revision < this.lastPersistedRevision) {
         return;
@@ -334,6 +504,47 @@ export class InlineNoteEditor {
       });
       throw error;
     }
+
+    if (revision < this.lastPersistedRevision) {
+      return;
+    }
+
+    this.lastPersistedRevision = revision;
+
+    if (!this.disposed && this.draft) {
+      const undoSnapshot = draftAtSaveStart.undoSnapshot ?? revisionFromDraft(draftAtSaveStart);
+      const savedSnapshot = this.service.snapshotAfterSave(draftAtSaveStart, saved);
+      this.syncPersistedMetadata(revision, saved, undoSnapshot, savedSnapshot);
+    }
+
+    if (this.disposed || this.suspended || !this.draft) {
+      if (this.recoveryStore && this.recoveryId && this.recoverySessionId) {
+        try {
+          await this.recoveryStore.clear(this.recoveryId, this.recoverySessionId, revision);
+        } catch {
+          // A later open can compare the recovery draft with the persisted Note.
+        }
+      }
+      return;
+    }
+
+    if (this.recoveryStore && this.recoveryId && this.recoverySessionId) {
+      try {
+        await this.recoveryStore.clear(this.recoveryId, this.recoverySessionId, revision);
+      } catch (error) {
+        await this.reportOptionalFailure('clearing the saved draft recovery copy', error, 'saved');
+      }
+    }
+
+    this.panel.updateDraft(this.draft, { status: 'saved', canDelete: true });
+
+    try {
+      await this.dependencies.refreshNoteState();
+    } catch (error) {
+      await this.reportOptionalFailure('refreshing note views', error, 'saved');
+    }
+
+    await this.refreshTagSuggestions(draftAtSaveStart.workspaceRoot, 'saved');
   }
 
   private async handleKeepLocalVersion(): Promise<void> {
@@ -341,8 +552,49 @@ export class InlineNoteEditor {
       return;
     }
 
-    this.draft = this.conflictDraft;
+    const localDraft = this.conflictDraft;
+    let latest: NoteView | undefined;
+
+    try {
+      const latestNotes = await this.dependencies.cliClient.listNotes(
+        localDraft.workspaceRoot,
+        localDraft.sourceFile,
+      );
+      latest = latestNotes.find((note) => note.note.id === localDraft.noteId);
+    } catch (error) {
+      this.panel.updateDraft(localDraft, {
+        errorMessage: formatError(error, 'Failed to load the current note version.'),
+        status: 'conflict',
+      });
+      return;
+    }
+
+    if (!latest) {
+      this.panel.updateDraft(localDraft, {
+        errorMessage: 'This note no longer exists. The recovered draft is still available.',
+        status: 'conflict',
+      });
+      return;
+    }
+
+    this.draft = {
+      ...localDraft,
+      expectedUpdatedAt: latest.note.updated_at,
+      undoSnapshot: {
+        content: latest.note.content,
+        tags: [...(latest.note.tags ?? [])],
+        updatedAt: latest.note.updated_at,
+      },
+    };
     this.conflictDraft = undefined;
+    this.draftRevision += 1;
+    this.draftSnapshots.set(this.draftRevision, this.draft);
+    this.autoSave.reset(draftFingerprint(latest.note.content, formatTagsText(latest.note.tags)));
+    await this.persistRecoveryDraft(this.draftRevision, this.draft);
+    this.autoSave.schedule(
+      draftFingerprint(this.draft.content, this.draft.tagsText),
+      this.draftRevision,
+    );
     this.handleSaveStatus('editing');
     await this.autoSave.flush();
   }
@@ -377,6 +629,15 @@ export class InlineNoteEditor {
         errorMessage: formatError(error, 'Failed to load the external version.'),
         status: 'conflict',
       });
+      return;
+    }
+
+    if (this.recoveryStore && this.recoveryId && this.recoverySessionId) {
+      try {
+        await this.recoveryStore.clear(this.recoveryId, this.recoverySessionId, Number.MAX_SAFE_INTEGER);
+      } catch (error) {
+        await this.reportOptionalFailure('clearing the resolved recovery copy', error);
+      }
     }
   }
 
@@ -420,15 +681,49 @@ export class InlineNoteEditor {
       ?? synchronized.get(persistedRevision);
   }
 
-  private async reportOptionalFailure(action: string, error: unknown): Promise<void> {
+  private async reportOptionalFailure(
+    action: string,
+    error: unknown,
+    result?: 'saved' | 'deleted',
+  ): Promise<void> {
     const showWarningMessage =
       this.dependencies.showWarningMessage ?? vscode.window.showWarningMessage;
     const detail = error instanceof Error ? error.message : 'Unknown error';
+    const message = result
+      ? `FrilVault note ${result}, but ${action} failed: ${detail}`
+      : `FrilVault could not complete ${action}: ${detail}`;
 
-    await showWarningMessage(`FrilVault note saved, but ${action} failed: ${detail}`);
+    try {
+      await showWarningMessage(message);
+    } catch {
+      // UI reporting is optional after the persisted Note is already safe.
+    }
   }
 
-  private async refreshTagSuggestions(workspaceRoot: string): Promise<void> {
+  private async persistRecoveryDraft(revision: number, draft: InlineNoteDraft): Promise<void> {
+    if (!this.recoveryStore || !this.recoveryId || !this.recoverySessionId) {
+      return;
+    }
+
+    try {
+      await this.recoveryStore.write(
+        this.recoveryId,
+        this.recoverySessionId,
+        revision,
+        draft,
+      );
+    } catch (error) {
+      this.panel.updateDraft(draft, {
+        errorMessage: formatError(error, 'Could not store a recovery copy of this draft.'),
+        status: this.saveStatus,
+      });
+    }
+  }
+
+  private async refreshTagSuggestions(
+    workspaceRoot: string,
+    noteResult?: 'saved' | 'deleted',
+  ): Promise<void> {
     try {
       const tags = await this.dependencies.cliClient.tagList(workspaceRoot);
       if (this.draft?.workspaceRoot !== workspaceRoot) {
@@ -437,7 +732,7 @@ export class InlineNoteEditor {
       this.panel.updateTagSuggestions?.(tags.map((item) => item.tag));
       this.panel.updateTagMetadata?.(tags);
     } catch (error) {
-      await this.reportOptionalFailure('refreshing tag suggestions', error);
+      await this.reportOptionalFailure('refreshing tag suggestions', error, noteResult);
     }
   }
 }

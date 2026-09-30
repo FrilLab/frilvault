@@ -122,11 +122,12 @@ export class InlineNotePanel implements InlineNotePanelLike {
   }
 
   public close(): void {
-    this.panel?.dispose();
+    const panel = this.panel;
     this.panel = undefined;
     this.draft = undefined;
     this.onMessage = undefined;
     this.onDispose = undefined;
+    panel?.dispose();
   }
 
   public updateTagSuggestions(tags: string[]): void {
@@ -267,7 +268,6 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
     const keepLocalButton = document.getElementById('keep-local-button');
     const loadExternalButton = document.getElementById('load-external-button');
 
-    let changeTimer;
     let isComposing = false;
     let tagSuggestions = [];
     let filteredTagSuggestions = [];
@@ -375,19 +375,17 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
     }
 
     function scheduleChange() {
-      clearTimeout(changeTimer);
       statusEl.textContent = 'Editing';
 
       if (isComposing) {
         return;
       }
 
-      changeTimer = setTimeout(postChange, 150);
+      postChange();
     }
 
     function handleCompositionStart() {
       isComposing = true;
-      clearTimeout(changeTimer);
       vscode.postMessage({ type: 'compositionStart' });
     }
 
@@ -448,6 +446,14 @@ function renderPanelHtml(draft: InlineNoteDraft): string {
     tagsInput.addEventListener('compositionstart', handleCompositionStart);
     contentInput.addEventListener('compositionend', handleCompositionEnd);
     tagsInput.addEventListener('compositionend', handleCompositionEnd);
+
+    window.addEventListener('pagehide', () => {
+      if (isComposing) {
+        handleCompositionEnd();
+      } else {
+        postChange();
+      }
+    });
 
     closeButton.addEventListener('click', () => {
       flushCompositionIfNeeded();
