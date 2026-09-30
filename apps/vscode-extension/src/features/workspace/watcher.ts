@@ -10,6 +10,8 @@ const SYNC_DEBOUNCE_MS = 300;
 export interface WorkspaceWatcherDependencies {
   createFileSystemWatcher?: typeof vscode.workspace.createFileSystemWatcher;
   onDidChangeConfiguration?: typeof vscode.workspace.onDidChangeConfiguration;
+  setTimeout?: typeof setTimeout;
+  clearTimeout?: typeof clearTimeout;
 }
 
 export function isTrackedVaultPath(workspaceRoot: string, uri: vscode.Uri): boolean {
@@ -49,7 +51,7 @@ export function registerWorkspaceWatcher(
   invalidateViews: () => Promise<void>,
   dependencies: WorkspaceWatcherDependencies = {},
 ): () => Promise<void> {
-  let debounceTimer: NodeJS.Timeout | undefined;
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let watchers: vscode.FileSystemWatcher[] = [];
   let bindGeneration = 0;
   let disposed = false;
@@ -59,17 +61,25 @@ export function registerWorkspaceWatcher(
   const onDidChangeConfiguration =
     dependencies.onDidChangeConfiguration ??
     vscode.workspace.onDidChangeConfiguration.bind(vscode.workspace);
+  const scheduleTimeout = dependencies.setTimeout ?? setTimeout;
+  const cancelTimeout = dependencies.clearTimeout ?? clearTimeout;
 
   const scheduleSync = () => {
-    if (!isEnabled()) {
+    if (disposed || !isEnabled()) {
       return;
     }
 
     if (debounceTimer) {
-      clearTimeout(debounceTimer);
+      cancelTimeout(debounceTimer);
     }
 
-    debounceTimer = setTimeout(async () => {
+    debounceTimer = scheduleTimeout(async () => {
+      debounceTimer = undefined;
+
+      if (disposed || !isEnabled()) {
+        return;
+      }
+
       const root = tryGetWorkspaceRoot();
 
       if (!root) {
@@ -78,7 +88,9 @@ export function registerWorkspaceWatcher(
 
       try {
         await cliClient.sync(root);
-        await invalidateViews();
+        if (!disposed) {
+          await invalidateViews();
+        }
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'Failed to sync workspace changes.';
@@ -153,6 +165,14 @@ export function registerWorkspaceWatcher(
     watchers = [notesWatcher, imagesWatcher, sourceWatcher];
   };
 
+  const rebindAndRefresh = async () => {
+    await rebindWatchers();
+
+    if (!disposed && isEnabled()) {
+      await invalidateViews();
+    }
+  };
+
   void rebindWatchers();
 
   const configurationListener = onDidChangeConfiguration((event) => {
@@ -160,7 +180,11 @@ export function registerWorkspaceWatcher(
       event.affectsConfiguration('frilvault.vaultPath') ||
       event.affectsConfiguration('frilvault.workspaceRoot')
     ) {
-      void rebindWatchers();
+      void rebindAndRefresh().catch((error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : 'Failed to refresh after Vault configuration changed.';
+        void vscode.window.showWarningMessage(message);
+      });
     }
   });
 
@@ -171,7 +195,8 @@ export function registerWorkspaceWatcher(
       bindGeneration += 1;
       disposeWatchers();
       if (debounceTimer) {
-        clearTimeout(debounceTimer);
+        cancelTimeout(debounceTimer);
+        debounceTimer = undefined;
       }
     }),
   );

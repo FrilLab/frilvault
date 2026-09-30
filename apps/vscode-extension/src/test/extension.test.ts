@@ -519,6 +519,95 @@ suite('Extension Test Suite', function () {
     );
   });
 
+  test('note watcher bursts settle once and disposed watchers cannot refresh again', async () => {
+    const workspace = createTestWorkspace();
+    await configureExtension(workspace);
+
+    let noteCreate: ((uri: vscode.Uri) => void) | undefined;
+    let noteChange: ((uri: vscode.Uri) => void) | undefined;
+    let activeTimer: (() => Promise<void>) | undefined;
+    let watcherIndex = 0;
+    let syncCount = 0;
+    let invalidateCount = 0;
+    let timerId = 0;
+    const subscriptions: vscode.Disposable[] = [];
+    const context = { subscriptions } as unknown as vscode.ExtensionContext;
+    const createWatcher = (() => {
+      const index = watcherIndex;
+      watcherIndex += 1;
+
+      return {
+        onDidCreate: (listener: (uri: vscode.Uri) => void) => {
+          if (index === 0) {
+            noteCreate = listener;
+          }
+          return new vscode.Disposable(() => undefined);
+        },
+        onDidChange: (listener: (uri: vscode.Uri) => void) => {
+          if (index === 0) {
+            noteChange = listener;
+          }
+          return new vscode.Disposable(() => undefined);
+        },
+        onDidDelete: () => new vscode.Disposable(() => undefined),
+        dispose: () => undefined,
+      } as unknown as vscode.FileSystemWatcher;
+    }) as typeof vscode.workspace.createFileSystemWatcher;
+    const setTimer = ((callback: () => void) => {
+      activeTimer = callback as () => Promise<void>;
+      timerId += 1;
+      return timerId as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    const clearTimer = (() => undefined) as typeof clearTimeout;
+
+    registerWorkspaceWatcher(
+      context,
+      {
+        workspaceStatus: async () => ({
+          vault_path: '.vault',
+          mode: 'local',
+          git_tracking: 'excluded',
+          note_count: 0,
+        }),
+        sync: async () => {
+          syncCount += 1;
+          return { notes_synced: true, repairs_applied: 0 };
+        },
+      } as unknown as CliClient,
+      () => true,
+      async () => {
+        invalidateCount += 1;
+      },
+      {
+        createFileSystemWatcher: createWatcher,
+        onDidChangeConfiguration: (() =>
+          new vscode.Disposable(() => undefined)) as typeof vscode.workspace.onDidChangeConfiguration,
+        setTimeout: setTimer,
+        clearTimeout: clearTimer,
+      },
+    );
+
+    await flushMicrotasks();
+    const noteUri = vscode.Uri.file(path.join(workspace.root, '.vault/notes/src/sample.ts.json'));
+    noteCreate?.(noteUri);
+    noteChange?.(noteUri);
+    noteChange?.(noteUri);
+    await activeTimer?.();
+
+    assert.strictEqual(syncCount, 1);
+    assert.strictEqual(invalidateCount, 1);
+
+    noteChange?.(noteUri);
+    const pendingAfterDispose = activeTimer;
+    for (const subscription of subscriptions) {
+      subscription.dispose();
+    }
+    await pendingAfterDispose?.();
+
+    assert.strictEqual(syncCount, 1);
+    assert.strictEqual(invalidateCount, 1);
+  });
+
   test('Workspace watcher rebinds when the configured vault changes', async () => {
     const workspace = createTestWorkspace();
     await configureExtension(workspace);
