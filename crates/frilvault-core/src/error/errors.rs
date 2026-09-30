@@ -71,6 +71,9 @@ pub enum FrilVaultError {
     #[error("duplicate note id: {0}")]
     DuplicateNoteId(Uuid),
 
+    #[error("a note already exists at this anchor in {0}")]
+    DuplicateNoteAnchor(PathBuf),
+
     #[error("invalid note anchor: {0}")]
     InvalidAnchor(String),
 

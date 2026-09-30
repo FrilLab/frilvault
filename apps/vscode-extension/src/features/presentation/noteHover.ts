@@ -94,6 +94,32 @@ export function buildEditorNotesHoverParts(
   return { contents: [contentMarkdown, actionMarkdown] };
 }
 
+/** Builds a source-position hover containing the complete, untrusted Markdown body. */
+export function formatFullMarkdownNoteHover(notes: NoteView[]): vscode.MarkdownString | undefined {
+  const uniqueNotes = deduplicateNotesById(notes);
+  if (uniqueNotes.length === 0) {
+    return undefined;
+  }
+
+  const markdown = new vscode.MarkdownString(undefined, false);
+  markdown.supportHtml = false;
+  markdown.isTrusted = false;
+
+  for (const [index, view] of uniqueNotes.entries()) {
+    if (index > 0) {
+      markdown.appendMarkdown('\n\n---\n\n');
+    }
+
+    markdown.appendMarkdown(view.note.content);
+    const tags = presentTags(view.note.tags ?? [], Number.MAX_SAFE_INTEGER).tags;
+    if (tags.length > 0) {
+      markdown.appendMarkdown(`\n\n**Tags:** ${tags.map(escapeMarkdownInline).map((tag) => `#${tag}`).join('  ')}`);
+    }
+  }
+
+  return markdown;
+}
+
 /** Combined hover string retained for callers that need one markdown block. */
 export function formatEditorNotesHover(
   notes: NoteView[],

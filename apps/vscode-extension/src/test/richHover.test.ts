@@ -4,6 +4,7 @@ import { suite, test } from 'mocha';
 import * as vscode from 'vscode';
 
 import { sortNotesForHover, resolveNotesFromCache } from '../features/hover/resolveNotes';
+import { resolveNotesAtPosition } from '../features/hover/resolveNotes';
 import {
   formatRichNoteHover,
   formatRichNotesHoverParts,
@@ -13,16 +14,22 @@ import {
 import type { NoteView } from '../types';
 
 suite('Rich hover preview', () => {
-  test('resolveNotesFromCache prefers symbol name matches over line notes', () => {
+  test('resolveNotesFromCache includes a resolved declaration note and line note together', () => {
     const notes = [
       createLineNoteView('line note', '2026-01-01T00:00:00Z'),
       createSymbolNoteView('symbol note', '2026-01-02T00:00:00Z'),
     ];
 
-    const matched = resolveNotesFromCache(notes, new vscode.Position(0, 0), 'myFn');
+    const matched = resolveNotesFromCache(notes, new vscode.Position(0, 0), {
+      name: 'myFn',
+      kind: 'function',
+      line: 1,
+      range: new vscode.Range(0, 0, 0, 4),
+    });
 
-    assert.strictEqual(matched.length, 1);
+    assert.strictEqual(matched.length, 2);
     assert.strictEqual(matched[0]?.note.content, 'symbol note');
+    assert.strictEqual(matched[1]?.note.content, 'line note');
   });
 
   test('resolveNotesFromCache falls back to line notes', () => {
@@ -32,6 +39,103 @@ suite('Rich hover preview', () => {
 
     assert.strictEqual(matched.length, 1);
     assert.strictEqual(matched[0]?.note.content, 'line note');
+  });
+
+  test('does not attach a symbol note without its resolved declaration match', () => {
+    const notes = [createSymbolNoteView('symbol note', '2026-01-02T00:00:00Z')];
+
+    assert.deepStrictEqual(
+      resolveNotesFromCache(notes, new vscode.Position(2, 4), undefined, false),
+      [],
+    );
+    assert.deepStrictEqual(
+      resolveNotesFromCache(notes, new vscode.Position(0, 4), {
+        name: 'otherFn',
+        kind: 'function',
+        line: 1,
+        range: new vscode.Range(0, 0, 0, 8),
+      }, false),
+      [],
+    );
+  });
+
+  test('symbol hover is limited to the declaration name and can include line notes', async () => {
+    const document = await vscode.workspace.openTextDocument({
+      language: 'typescript',
+      content: 'function parse() {\n  return 1;\n}\n',
+    });
+    const symbol = new vscode.DocumentSymbol(
+      'parse',
+      '',
+      vscode.SymbolKind.Function,
+      new vscode.Range(0, 0, 2, 1),
+      new vscode.Range(0, 9, 0, 14),
+    );
+    const originalExecuteCommand = vscode.commands.executeCommand;
+    vscode.commands.executeCommand = (async <T>(command: string) =>
+      command === 'vscode.executeDocumentSymbolProvider' ? [symbol] as T : undefined
+    ) as typeof vscode.commands.executeCommand;
+
+    const cancellation = new vscode.CancellationTokenSource();
+    try {
+      const notes: NoteView[] = [
+        {
+          source_file: 'src/a.ts',
+          note: {
+            id: 'symbol-note',
+            content: 'symbol body',
+            anchor: {
+              type: 'Symbol',
+              name: 'parse',
+              kind: 'Function',
+              signature: 'function parse() {',
+              line_hint: 1,
+            },
+          },
+          resolved: { line: 1, column: 1 },
+        },
+        {
+          source_file: 'src/a.ts',
+          note: {
+            id: 'declaration-line-note',
+            content: 'line body',
+            anchor: { type: 'Line', line: 1, column: 1 },
+          },
+        },
+        {
+          source_file: 'src/a.ts',
+          note: {
+            id: 'body-line-note',
+            content: 'body line body',
+            anchor: { type: 'Line', line: 2, column: 1 },
+          },
+        },
+      ];
+
+      const declarationHover = await resolveNotesAtPosition(
+        notes,
+        document,
+        new vscode.Position(0, 10),
+        cancellation.token,
+      );
+      assert.deepStrictEqual(
+        declarationHover?.notes.map((note) => note.note.id),
+        ['symbol-note', 'declaration-line-note'],
+      );
+      assert.ok(declarationHover?.range.isEqual(new vscode.Range(0, 0, 0, 18)));
+
+      const bodyHover = await resolveNotesAtPosition(
+        notes,
+        document,
+        new vscode.Position(1, 4),
+        cancellation.token,
+      );
+      assert.deepStrictEqual(bodyHover?.notes.map((note) => note.note.id), ['body-line-note']);
+      assert.ok(bodyHover?.range.isEqual(new vscode.Range(1, 2, 1, 11)));
+    } finally {
+      cancellation.dispose();
+      vscode.commands.executeCommand = originalExecuteCommand;
+    }
   });
 
   test('sortNotesForHover prefers symbol notes and newest updates', () => {
@@ -193,5 +297,6 @@ function createSymbolNoteView(content: string, updatedAt: string): NoteView {
       created_at: updatedAt,
       updated_at: updatedAt,
     },
+    resolved: { line: 1, column: 1 },
   };
 }

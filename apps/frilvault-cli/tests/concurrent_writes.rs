@@ -30,6 +30,7 @@ fn concurrent_processes_preserve_every_successful_note_add() {
     let mut children: Vec<Child> = (0..32)
         .map(|index| {
             let content = format!("parallel note {index}");
+            let column = (index + 1).to_string();
             Command::new(env!("CARGO_BIN_EXE_flvt"))
                 .args([
                     "add",
@@ -37,6 +38,8 @@ fn concurrent_processes_preserve_every_successful_note_add() {
                     "main.rs",
                     "--line",
                     "1",
+                    "--column",
+                    &column,
                     "--content",
                     &content,
                 ])
@@ -58,6 +61,67 @@ fn concurrent_processes_preserve_every_successful_note_add() {
     assert!(listed.status.success());
     let notes: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
     assert_eq!(notes.as_array().unwrap().len(), 32);
+}
+
+#[test]
+fn concurrent_adds_at_one_anchor_create_only_one_note() {
+    let root = std::env::temp_dir().join(format!("frilvault-duplicate-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("main.rs"), "fn main() {}\n").unwrap();
+    let _workspace = Workspace(root.clone());
+
+    let init = Command::new(env!("CARGO_BIN_EXE_flvt"))
+        .arg("init")
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(init.status.success());
+
+    let children: Vec<Child> = (0..16)
+        .map(|index| {
+            let content = format!("competing note {index}");
+            Command::new(env!("CARGO_BIN_EXE_flvt"))
+                .args([
+                    "add",
+                    "--file",
+                    "main.rs",
+                    "--line",
+                    "1",
+                    "--content",
+                    &content,
+                ])
+                .current_dir(&root)
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+
+    let outputs: Vec<_> = children
+        .into_iter()
+        .map(|child| child.wait_with_output().unwrap())
+        .collect();
+    assert_eq!(
+        outputs
+            .iter()
+            .filter(|output| output.status.success())
+            .count(),
+        1
+    );
+
+    let listed = Command::new(env!("CARGO_BIN_EXE_flvt"))
+        .args(["list", "--file", "main.rs", "--format", "json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    let notes: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(notes.as_array().unwrap().len(), 1);
+    assert!(
+        notes[0]["note"]["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("competing note ")
+    );
 }
 
 #[test]

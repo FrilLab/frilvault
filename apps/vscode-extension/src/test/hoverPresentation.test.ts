@@ -10,7 +10,10 @@ import {
   buildNoteContentForClipboard,
   buildNoteMarkdownForClipboard,
 } from '../features/presentation/noteClipboard';
-import { buildEditorNotesHoverParts } from '../features/presentation/noteHover';
+import {
+  buildEditorNotesHoverParts,
+  formatFullMarkdownNoteHover,
+} from '../features/presentation/noteHover';
 import { resolveNotesFromCache } from '../features/hover/resolveNotes';
 import { RICH_HOVER_COMMANDS, formatRichNotesHoverParts } from '../features/hover/richHover';
 import type { NoteView } from '../types';
@@ -39,7 +42,12 @@ suite('Hover presentation', () => {
     const note = createSymbolNoteView('ConfigKey', 'test context', { line: 1, column: 1 });
     const notes = [note, { ...note }];
 
-    const matched = resolveNotesFromCache(notes, new vscode.Position(0, 0), 'ConfigKey');
+    const matched = resolveNotesFromCache(notes, new vscode.Position(0, 0), {
+      name: 'ConfigKey',
+      kind: 'function',
+      line: 1,
+      range: new vscode.Range(0, 0, 0, 9),
+    }, false);
 
     assert.strictEqual(matched.length, 1);
   });
@@ -155,7 +163,13 @@ suite('Hover presentation', () => {
     const matched = resolveNotesFromCache(
       [note, { ...note }, note],
       new vscode.Position(0, 0),
-      'ConfigKey',
+      {
+        name: 'ConfigKey',
+        kind: 'function',
+        line: 1,
+        range: new vscode.Range(0, 0, 0, 9),
+      },
+      false,
     );
 
     assert.strictEqual(matched.length, 1);
@@ -172,6 +186,29 @@ suite('Hover presentation', () => {
     assert.strictEqual(countOccurrences(content, '**FrilVault**'), 1);
     assert.strictEqual(countOccurrences(content, 'test context'), 1);
     assert.strictEqual(countOccurrences(content, 'Symbol: ConfigKey'), 1);
+  });
+
+  test('source hover preserves complete Markdown and tags without trusted commands or product headings', () => {
+    const markdown = formatFullMarkdownNoteHover([
+      {
+        source_file: 'src/a.ts',
+        note: {
+          id: 'full-markdown',
+          content: '## Context\n\nParagraph one.\n\n- first\n- second\n\n```ts\nconst value = 1;\n```',
+          anchor: { type: 'Line', line: 1, column: 1 },
+          tags: ['parser', 'review'],
+        },
+      },
+    ]);
+
+    assert.ok(markdown);
+    assert.match(markdown.value, /## Context/);
+    assert.match(markdown.value, /Paragraph one\.\n\n- first\n- second/);
+    assert.match(markdown.value, /```ts\nconst value = 1;\n```/);
+    assert.match(markdown.value, /Tags:\*\* #parser  #review/);
+    assert.doesNotMatch(markdown.value, /FrilVault/);
+    assert.strictEqual(markdown.supportHtml, false);
+    assert.strictEqual(markdown.isTrusted, false);
   });
 
   test('copy note content excludes hover action labels', () => {

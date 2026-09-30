@@ -24,6 +24,22 @@ export async function findSymbolAtPosition(
   return findInnermostSymbol(symbols, position);
 }
 
+/** Finds a symbol only when the position is within its declaration name. */
+export async function findSymbolDeclarationAtPosition(
+  document: vscode.TextDocument,
+  position: vscode.Position,
+): Promise<vscode.DocumentSymbol | undefined> {
+  const symbols = await vscode.commands.executeCommand<
+    vscode.DocumentSymbol[] | undefined
+  >('vscode.executeDocumentSymbolProvider', document.uri);
+
+  if (!symbols || symbols.length === 0) {
+    return undefined;
+  }
+
+  return findInnermostSymbolDeclaration(symbols, position);
+}
+
 /**
  * Resolves a symbol anchor for note creation at a cursor position.
  *
@@ -65,6 +81,24 @@ function findInnermostSymbol(
 
     const nested = findInnermostSymbol(symbol.children, position);
     return nested ?? symbol;
+  }
+
+  return undefined;
+}
+
+function findInnermostSymbolDeclaration(
+  symbols: readonly vscode.DocumentSymbol[],
+  position: vscode.Position,
+): vscode.DocumentSymbol | undefined {
+  for (const symbol of symbols) {
+    const nested = findInnermostSymbolDeclaration(symbol.children, position);
+    if (nested) {
+      return nested;
+    }
+
+    if (symbol.selectionRange.contains(position)) {
+      return symbol;
+    }
   }
 
   return undefined;

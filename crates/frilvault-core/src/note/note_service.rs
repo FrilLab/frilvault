@@ -120,9 +120,17 @@ impl NoteService {
             .vault_context
             .normalize_source_file(&input.source_file)?;
         input.source_file = source_file.clone();
-        let note = Note::new(input);
+        let anchor = input.anchor.clone();
 
         let mut notes = self.load_notes(&source_file)?;
+        if notes
+            .iter()
+            .any(|existing| same_canonical_anchor(&existing.anchor, &anchor))
+        {
+            return Err(FrilVaultError::DuplicateNoteAnchor(source_file));
+        }
+
+        let note = Note::new(input);
         notes.push(note.clone());
         self.save_notes(&source_file, notes)?;
 
@@ -956,6 +964,19 @@ impl NoteService {
     /// 현재 workspace root 기준 versioned note URI를 직렬화합니다.
     pub fn note_uri(&self, note_id: Uuid) -> FrilVaultResult<String> {
         crate::uri::NoteUriResolver::serialize(note_id, &self.workspace_root())
+    }
+}
+
+fn same_canonical_anchor(left: &NoteAnchor, right: &NoteAnchor) -> bool {
+    match (left, right) {
+        (NoteAnchor::Line(left), NoteAnchor::Line(right)) => {
+            left.line == right.line && left.column == right.column
+        }
+        (NoteAnchor::Symbol(left), NoteAnchor::Symbol(right)) => {
+            left.name == right.name && left.kind == right.kind && left.signature == right.signature
+        }
+        (NoteAnchor::Line(_), NoteAnchor::Symbol(_))
+        | (NoteAnchor::Symbol(_), NoteAnchor::Line(_)) => false,
     }
 }
 
