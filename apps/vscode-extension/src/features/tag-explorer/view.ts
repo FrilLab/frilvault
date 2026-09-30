@@ -14,7 +14,10 @@ export class TagExplorerStatusItem extends vscode.TreeItem {
 }
 
 export class TagExplorerTagItem extends vscode.TreeItem {
-  public constructor(public readonly summary: TagSummary) {
+  public constructor(
+    public readonly summary: TagSummary,
+    public readonly contextKey?: string,
+  ) {
     super(formatTag(summary.tag), vscode.TreeItemCollapsibleState.Collapsed);
     this.description = `(${summary.note_count})`;
     this.iconPath = new vscode.ThemeIcon('tag', tagThemeColor(summary.color));
