@@ -48,14 +48,14 @@ suite('Tag explorer', () => {
       },
     );
 
-    const tags = await provider.getChildren();
+    const tags = await getLoadedChildren(provider);
 
     assert.strictEqual(tags.length, 1);
     assert.ok(tags[0] instanceof TagExplorerTagItem);
     assert.strictEqual(tags[0].label, '#todo');
     assert.strictEqual(tags[0].description, '(2)');
 
-    const children = await provider.getChildren(tags[0]);
+    const children = await getLoadedChildren(provider, tags[0]);
 
     assert.deepStrictEqual(children.map((item) => item.label), [
       'Replace temporary initialization',
@@ -65,13 +65,233 @@ suite('Tag explorer', () => {
     assert.strictEqual(children[1]?.description, 'src/parser.rs · Symbol parse · Line 12');
     assert.strictEqual(children[0]?.command?.command, 'frilvault.notesPanel.openNote');
 
-    await provider.getChildren(tags[0]);
+    await getLoadedChildren(provider, tags[0]);
     assert.strictEqual(tagLoads, 1);
     assert.strictEqual(noteLoads, 1);
 
-    provider.refresh();
-    await provider.getChildren();
+    await provider.refresh();
+    await getLoadedChildren(provider);
     assert.strictEqual(tagLoads, 2);
+  });
+
+  test('coalesces watcher invalidation with a pending same-context refresh', async () => {
+    let tagLoads = 0;
+    let persistedTags = [{ tag: 'existing', note_count: 1 }];
+    let finishFirstLoad: ((tags: Array<{ tag: string; note_count: number }>) => void) | undefined;
+    const provider = new FrilVaultTagExplorerProvider(
+      async () => {
+        tagLoads += 1;
+        if (tagLoads === 1) {
+          return persistedTags;
+        }
+        if (tagLoads === 2) {
+          return new Promise((resolve) => {
+            finishFirstLoad = resolve;
+          });
+        }
+        return persistedTags;
+      },
+      async () => [],
+    );
+
+    await getLoadedChildren(provider);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const mutationRefresh = provider.refresh();
+    await Promise.resolve();
+    persistedTags = [{ tag: 'latest', note_count: 2 }];
+    const watcherRefresh = provider.refresh();
+    await Promise.resolve();
+
+    assert.strictEqual(tagLoads, 2, 'the watcher should join the active Tag read');
+    finishFirstLoad?.([{ tag: 'outdated', note_count: 1 }]);
+    await Promise.all([mutationRefresh, watcherRefresh]);
+    const latestRows = await getLoadedChildren(provider);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepStrictEqual(latestRows.map((row) => row.label), ['#latest']);
+    assert.strictEqual(tagLoads, 3, 'one follow-up reads the newest Tags, then idle work settles');
+  });
+
+  test('keeps same-context rows during refresh and skips notifications for equal results', async () => {
+    let tagLoads = 0;
+    let finishRefresh: ((tags: Array<{ tag: string; note_count: number }>) => void) | undefined;
+    const provider = new FrilVaultTagExplorerProvider(
+      async () => {
+        tagLoads += 1;
+        if (tagLoads === 2) {
+          return new Promise((resolve) => {
+            finishRefresh = resolve;
+          });
+        }
+        return [{ tag: 'stable', note_count: 3 }];
+      },
+      async () => [],
+    );
+    await getLoadedChildren(provider);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    let notifications = 0;
+    provider.onDidChangeTreeData(() => {
+      notifications += 1;
+    });
+
+    const refresh = provider.refresh();
+    await Promise.resolve();
+    const duringRefresh = await provider.getChildren();
+
+    assert.deepStrictEqual(duringRefresh.map((row) => row.label), ['#stable']);
+    assert.strictEqual(notifications, 0, 'background loading should not flicker or invalidate rows');
+    finishRefresh?.([{ tag: 'stable', note_count: 3 }]);
+    await refresh;
+
+    assert.strictEqual(notifications, 0, 'equal summaries should not notify the tree');
+  });
+
+  test('rapid workspace, Vault, and filter switches reject late responses', async () => {
+    let context = { workspaceRoot: '/tmp/workspace', vaultRoot: '/tmp/vault', filter: 'old' };
+    let finishOldLoad: ((tags: Array<{ tag: string; note_count: number }>) => void) | undefined;
+    let finishMiddleLoad: ((tags: Array<{ tag: string; note_count: number }>) => void) | undefined;
+    let tagLoads = 0;
+    let noteLoads = 0;
+    const provider = new FrilVaultTagExplorerProvider(
+      async (tagContext) => {
+        tagLoads += 1;
+        if (tagContext.filter === 'old') {
+          return new Promise((resolve) => {
+            finishOldLoad = resolve;
+          });
+        }
+        if (tagContext.filter === 'middle') {
+          return new Promise((resolve) => {
+            finishMiddleLoad = resolve;
+          });
+        }
+        return [{ tag: 'new-context', note_count: 1 }];
+      },
+      async () => {
+        noteLoads += 1;
+        return [];
+      },
+      () => true,
+      () => context,
+    );
+
+    const firstLoading = await provider.getChildren();
+    assert.match(String(firstLoading[0]?.label), /loading tags/i);
+    await Promise.resolve();
+    context = {
+      workspaceRoot: '/tmp/workspace-two',
+      vaultRoot: '/tmp/vault-two',
+      filter: 'middle',
+    };
+    const middleLoading = await provider.getChildren();
+    assert.match(String(middleLoading[0]?.label), /loading tags/i);
+    await Promise.resolve();
+    context = {
+      workspaceRoot: '/tmp/workspace-three',
+      vaultRoot: '/tmp/vault-three',
+      filter: 'new',
+    };
+    const currentRows = await getLoadedChildren(provider);
+    finishOldLoad?.([{ tag: 'stale', note_count: 1 }]);
+    finishMiddleLoad?.([{ tag: 'also-stale', note_count: 1 }]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const afterLateResponse = await provider.getChildren();
+
+    assert.deepStrictEqual(currentRows.map((row) => row.label), ['#new-context']);
+    assert.deepStrictEqual(afterLateResponse.map((row) => row.label), ['#new-context']);
+    assert.strictEqual(tagLoads, 3);
+    assert.strictEqual(noteLoads, 0);
+  });
+
+  test('disable clears Tags and prevents a late response from restoring them', async () => {
+    let enabled = true;
+    let finishLoad: ((tags: Array<{ tag: string; note_count: number }>) => void) | undefined;
+    let tagLoads = 0;
+    const provider = new FrilVaultTagExplorerProvider(
+      async () => {
+        tagLoads += 1;
+        return new Promise((resolve) => {
+          finishLoad = resolve;
+        });
+      },
+      async () => [],
+      () => enabled,
+    );
+
+    const loading = await provider.getChildren();
+    assert.match(String(loading[0]?.label), /loading tags/i);
+    await Promise.resolve();
+    enabled = false;
+    const disabled = await provider.getChildren();
+    finishLoad?.([{ tag: 'late', note_count: 1 }]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.match(String(disabled[0]?.label), /disabled/i);
+    assert.match(String((await provider.getChildren())[0]?.label), /disabled/i);
+    assert.strictEqual(tagLoads, 1);
+  });
+
+  test('external tag changes appear after refresh and failures settle until explicitly retried', async () => {
+    let summaries = [{ tag: 'first', note_count: 1 }];
+    let tagLoads = 0;
+    const provider = new FrilVaultTagExplorerProvider(
+      async () => {
+        tagLoads += 1;
+        if (tagLoads === 3) {
+          throw new Error('tag read failed');
+        }
+        return summaries;
+      },
+      async () => [],
+    );
+
+    const firstRows = await getLoadedChildren(provider);
+    assert.deepStrictEqual(firstRows.map((row) => row.label), ['#first']);
+    summaries = [{ tag: 'external', note_count: 2 }];
+    await provider.refresh();
+    assert.deepStrictEqual(
+      (await provider.getChildren()).map((row) => row.label),
+      ['#external'],
+    );
+    const staleTag = firstRows[0];
+    assert.ok(staleTag instanceof TagExplorerTagItem);
+    assert.deepStrictEqual(await provider.getChildren(staleTag), []);
+
+    await provider.refresh();
+    const failedRows = await provider.getChildren();
+    assert.match(String(failedRows.at(-1)?.label), /tag read failed/i);
+    await provider.getChildren();
+    assert.strictEqual(tagLoads, 3, 'a settled failure must not retry on every tree read');
+
+    await provider.refresh();
+    assert.deepStrictEqual(
+      (await provider.getChildren()).map((row) => row.label),
+      ['#external'],
+    );
+    assert.strictEqual(tagLoads, 4);
+  });
+
+  test('dispose cancels pending Tag work and rejects late UI updates', async () => {
+    let finishLoad: ((tags: Array<{ tag: string; note_count: number }>) => void) | undefined;
+    let notifications = 0;
+    const provider = new FrilVaultTagExplorerProvider(
+      async () => new Promise((resolve) => {
+        finishLoad = resolve;
+      }),
+      async () => [],
+    );
+    provider.onDidChangeTreeData(() => {
+      notifications += 1;
+    });
+    await provider.getChildren();
+    await Promise.resolve();
+    provider.dispose();
+    const notificationsAfterDispose = notifications;
+    finishLoad?.([{ tag: 'late', note_count: 1 }]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepStrictEqual(await provider.getChildren(), []);
+    assert.strictEqual(notifications, notificationsAfterDispose);
   });
 
   test('uses a theme color for configured tags and keeps uncolored tags neutral', () => {
@@ -105,7 +325,7 @@ suite('Tag explorer', () => {
       async () => [],
     );
 
-    const children = await provider.getChildren();
+    const children = await getLoadedChildren(provider);
 
     assert.strictEqual(children.length, 1);
     assert.match(String(children[0]?.label), /add tags when creating or editing a note/i);
@@ -149,6 +369,28 @@ function createLineNote(
       anchor: { type: 'Line', line, column },
     },
   };
+}
+
+async function getLoadedChildren(
+  provider: FrilVaultTagExplorerProvider,
+  element?: import('../features/tag-explorer/view').TagExplorerTreeNode,
+): Promise<import('../features/tag-explorer/view').TagExplorerTreeNode[]> {
+  while (true) {
+    let disposeListener = () => undefined;
+    const changed = new Promise<void>((resolve) => {
+      const listener = provider.onDidChangeTreeData(() => {
+        disposeListener();
+        resolve();
+      });
+      disposeListener = () => listener.dispose();
+    });
+    const children = await provider.getChildren(element);
+    if (!children.some((child) => /^Loading /.test(String(child.label)))) {
+      disposeListener();
+      return children;
+    }
+    await changed;
+  }
 }
 
 function createSymbolNote(

@@ -53,7 +53,6 @@ import {
   createRemoveTagColorCommand,
   createSetTagColorCommand,
 } from './features/tag-explorer/commands';
-import { TagColorStore } from './features/presentation/tagColor';
 import { createApplyRepairsCommand, createShowHealthCommand } from './features/workspace/health';
 import { registerSourceRenameHandler } from './features/workspace/rename';
 import { registerNoteUriHandler } from './features/uri/handler';
@@ -73,6 +72,7 @@ import {
 import type { NoteView } from './types';
 import {
   getWorkspaceRoot,
+  getVaultRoot,
   revealNote,
   tryGetVaultPath,
   tryGetWorkspaceRoot,
@@ -144,11 +144,16 @@ export function activate(context: vscode.ExtensionContext): void {
     getWorkspaceRoot,
     isEnabled,
   );
-  const tagColorStore = new TagColorStore(() => cliClient.tagList(getWorkspaceRoot()));
   const tagExplorerProvider = new FrilVaultTagExplorerProvider(
-    () => tagColorStore.load(),
-    (tag) => cliClient.searchNotes({ workspaceRoot: getWorkspaceRoot(), tag }),
+    (tagContext) => cliClient.tagList(tagContext.workspaceRoot),
+    (tag, tagContext) => cliClient.searchNotes({ workspaceRoot: tagContext.workspaceRoot, tag }),
     isEnabled,
+    () => {
+      const workspaceRoot = tryGetWorkspaceRoot();
+      return workspaceRoot
+        ? { workspaceRoot, vaultRoot: getVaultRoot(workspaceRoot) }
+        : undefined;
+    },
   );
   const decorator = new FrilVaultDecorator(
     context.extensionPath,
@@ -186,9 +191,7 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const refreshAfterMutation = async (editor?: vscode.TextEditor) => {
-    tagColorStore.refresh();
-    tagExplorerProvider.refresh();
-    await tagColorStore.load();
+    await tagExplorerProvider.refresh();
     await refreshNoteState(editor);
     await refreshWorkspaceNoteCounts();
     searchRefreshEmitter.fire();
@@ -244,7 +247,7 @@ export function activate(context: vscode.ExtensionContext): void {
     decorator.clear();
     noteViewer.clearAll();
     notesProvider.refresh();
-    tagExplorerProvider.refresh();
+    tagExplorerProvider.clear();
     environmentProvider?.refresh();
   };
 
@@ -336,6 +339,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     cliOutputChannel,
     searchRefreshEmitter,
+    tagExplorerProvider,
     store,
     noteCountStore,
     decorator,

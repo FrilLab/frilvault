@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-import type { TagColor, TagSummary } from '../../types';
+import type { TagColor } from '../../types';
 
 export const TAG_COLOR_MARKERS: Record<TagColor, string> = {
   red: '🔴',
@@ -26,32 +26,4 @@ export function tagColorMarker(color: TagColor | undefined): string {
 
 export function tagThemeColor(color: TagColor | undefined): vscode.ThemeColor | undefined {
   return color ? new vscode.ThemeColor(`charts.${color}`) : undefined;
-}
-
-export class TagColorStore {
-  private colors = new Map<string, TagColor>();
-  private loadPromise: Promise<TagSummary[]> | undefined;
-
-  public constructor(private readonly loadTags: () => Promise<TagSummary[]>) {}
-
-  public load(): Promise<TagSummary[]> {
-    this.loadPromise ??= this.loadTags().then((summaries) => {
-      this.colors = new Map(
-        summaries
-          .filter((summary): summary is TagSummary & { color: TagColor } => Boolean(summary.color))
-          .map((summary) => [summary.tag.trim().toLowerCase(), summary.color]),
-      );
-      return summaries;
-    });
-    return this.loadPromise;
-  }
-
-  public refresh(): void {
-    this.loadPromise = undefined;
-    this.colors.clear();
-  }
-
-  public colorFor(tag: string): TagColor | undefined {
-    return this.colors.get(tag.trim().replace(/^#/, '').trim().toLowerCase());
-  }
 }

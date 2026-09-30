@@ -3,6 +3,7 @@ import * as path from 'node:path';
 
 import type { CliClient } from '../../core/cliClient';
 import type { NoteView } from '../../types';
+import { ContextualRefresh } from '../refresh/contextualRefresh';
 import { getVaultRoot, tryGetRelativeFilePath, tryGetWorkspaceRoot } from '../../utils/file';
 
 export interface CurrentFileNotesSnapshot {
@@ -41,16 +42,8 @@ export class CurrentFileNotesStore implements vscode.Disposable {
 
   public readonly onDidChange = this.onDidChangeEmitter.event;
 
-  private loadGeneration = 0;
-
   private contextKey: string | undefined;
-
-  private activeLoad: {
-    key: string;
-    generation: number;
-    invalidated: boolean;
-    promise: Promise<void>;
-  } | undefined;
+  private readonly refreshScheduler = new ContextualRefresh<NoteView[]>();
 
   public constructor(
     private readonly cliClient: CliClient,
@@ -63,9 +56,8 @@ export class CurrentFileNotesStore implements vscode.Disposable {
   }
 
   public clear(): void {
-    this.loadGeneration += 1;
+    this.refreshScheduler.clear();
     this.contextKey = undefined;
-    this.activeLoad = undefined;
     this.setSnapshot({ ...EMPTY_SNAPSHOT });
   }
 
@@ -89,6 +81,8 @@ export class CurrentFileNotesStore implements vscode.Disposable {
 
     const workspaceRoot = this.getWorkspaceRoot();
     if (!workspaceRoot) {
+      this.contextKey = undefined;
+      this.refreshScheduler.clear();
       this.setSnapshot({
         ...EMPTY_SNAPSHOT,
         editorDocumentUri: editor.document.uri.toString(),
@@ -100,8 +94,7 @@ export class CurrentFileNotesStore implements vscode.Disposable {
     const sourceFile = tryGetRelativeFilePath(workspaceRoot, editor.document.uri.fsPath);
     if (!sourceFile) {
       this.contextKey = undefined;
-      this.activeLoad = undefined;
-      this.loadGeneration += 1;
+      this.refreshScheduler.clear();
       this.setSnapshot({
         workspaceRoot,
         sourceFile: undefined,
@@ -143,8 +136,7 @@ export class CurrentFileNotesStore implements vscode.Disposable {
   }
 
   public dispose(): void {
-    this.activeLoad = undefined;
-    this.loadGeneration += 1;
+    this.refreshScheduler.dispose();
     this.onDidChangeEmitter.dispose();
   }
 
@@ -162,17 +154,8 @@ export class CurrentFileNotesStore implements vscode.Disposable {
       editorDocumentUri,
     ]);
 
-    if (this.activeLoad?.key === key) {
-      if (invalidated) {
-        this.activeLoad.invalidated = true;
-      }
-      await this.activeLoad.promise;
-      return;
-    }
-
     const sameContext = this.contextKey === key;
     this.contextKey = key;
-    const generation = ++this.loadGeneration;
 
     if (!sameContext) {
       this.setSnapshot({
@@ -185,52 +168,10 @@ export class CurrentFileNotesStore implements vscode.Disposable {
       });
     }
 
-    const request = {
+    await this.refreshScheduler.run(
       key,
-      generation,
-      invalidated: false,
-      promise: Promise.resolve(),
-    };
-    this.activeLoad = request;
-    request.promise = Promise.resolve()
-      .then(() => this.loadUntilCurrent(request, workspaceRoot, sourceFile, editorDocumentUri))
-      .finally(() => {
-        if (this.activeLoad === request) {
-          this.activeLoad = undefined;
-        }
-      });
-
-    if (invalidated) {
-      request.invalidated = true;
-    }
-
-    await request.promise;
-  }
-
-  private async loadUntilCurrent(
-    request: {
-      key: string;
-      generation: number;
-      invalidated: boolean;
-    },
-    workspaceRoot: string,
-    sourceFile: string,
-    editorDocumentUri: string,
-  ): Promise<void> {
-    while (this.activeLoad === request && request.generation === this.loadGeneration) {
-      request.invalidated = false;
-
-      try {
-        const notes = await this.cliClient.listNotes(workspaceRoot, sourceFile);
-
-        if (this.activeLoad !== request || request.generation !== this.loadGeneration) {
-          return;
-        }
-
-        if (request.invalidated) {
-          continue;
-        }
-
+      () => this.cliClient.listNotes(workspaceRoot, sourceFile),
+      (notes) => {
         this.setSnapshot({
           workspaceRoot,
           sourceFile,
@@ -239,15 +180,8 @@ export class CurrentFileNotesStore implements vscode.Disposable {
           error: undefined,
           loading: false,
         });
-      } catch (error) {
-        if (this.activeLoad !== request || request.generation !== this.loadGeneration) {
-          return;
-        }
-
-        if (request.invalidated) {
-          continue;
-        }
-
+      },
+      (error) => {
         const message =
           error instanceof Error ? error.message : 'Failed to load notes for the current file.';
 
@@ -255,14 +189,13 @@ export class CurrentFileNotesStore implements vscode.Disposable {
           workspaceRoot,
           sourceFile,
           editorDocumentUri,
-          notes: this.contextKey === request.key ? this.snapshot.notes : [],
+          notes: this.contextKey === key ? this.snapshot.notes : [],
           error: message,
           loading: false,
         });
-      }
-
-      return;
-    }
+      },
+      invalidated,
+    );
   }
 
   private setSnapshot(snapshot: CurrentFileNotesSnapshot): void {

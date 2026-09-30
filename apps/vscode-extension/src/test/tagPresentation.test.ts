@@ -7,7 +7,8 @@ import {
   formatTagList,
   presentTags,
 } from '../features/presentation/tagPresentation';
-import { TagColorStore } from '../features/presentation/tagColor';
+import { prepareTagSummaries } from '../features/tag-explorer/presentation';
+import { TagExplorerTagItem } from '../features/tag-explorer/view';
 
 suite('Tag presentation', () => {
   test('uses the same hash-prefixed format and ignores empty values', () => {
@@ -25,17 +26,16 @@ suite('Tag presentation', () => {
     assert.strictEqual(formatTagList(['one', 'two', 'three'], 2), '#one  #two  +1 more');
   });
 
-  test('resolves configured colors case-insensitively and defaults to uncolored', async () => {
-    const store = new TagColorStore(async () => [
+  test('keeps configured colors attached to the Tag rows', () => {
+    const summaries = prepareTagSummaries([
       { tag: 'Bug', note_count: 1, color: 'red' },
       { tag: 'todo', note_count: 1 },
     ]);
+    const bug = new TagExplorerTagItem(summaries[0]!);
+    const todo = new TagExplorerTagItem(summaries[1]!);
 
-    await store.load();
-    assert.strictEqual(store.colorFor('#BUG'), 'red');
-    assert.strictEqual(store.colorFor('todo'), undefined);
-
-    store.refresh();
-    assert.strictEqual(store.colorFor('bug'), undefined);
+    assert.strictEqual((bug.iconPath as import('vscode').ThemeIcon).color?.id, 'charts.red');
+    assert.strictEqual((todo.iconPath as import('vscode').ThemeIcon).color, undefined);
   });
+
 });
