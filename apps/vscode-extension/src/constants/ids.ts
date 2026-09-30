@@ -35,6 +35,8 @@ export const COMMAND_IDS = {
   gutterCopyNoteMarkdown: 'frilvault.gutter.copyNoteMarkdown',
   noteViewerToggle: 'frilvault.noteViewer.toggle',
   noteViewerActions: 'frilvault.noteViewer.actions',
+  noteViewerAddOrEdit: 'frilvault.noteViewer.addOrEdit',
+  noteViewerDelete: 'frilvault.noteViewer.delete',
   noteViewerNoop: 'frilvault.noteViewer.noop',
   environmentAddVariable: 'frilvault.environment.addVariable',
   environmentReplaceValue: 'frilvault.environment.replaceValue',

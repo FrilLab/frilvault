@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 
 import type { CliClient } from '../../core/cliClient';
-import type { NoteView } from '../../types';
+import type { NoteAnchor, NoteView } from '../../types';
 import {
   getActiveEditorOrThrow,
   getRelativeFilePath,
@@ -46,6 +46,10 @@ export interface InlineNoteEditorDependencies {
   showErrorMessage?: (message: string) => Thenable<string | undefined>;
   showInformationMessage?: (message: string) => Thenable<string | undefined>;
   showWarningMessage?: (message: string) => Thenable<string | undefined>;
+  showQuickPick?: <T extends vscode.QuickPickItem>(
+    items: readonly T[],
+    options?: vscode.QuickPickOptions,
+  ) => Thenable<T | undefined>;
   createAutoSave?: (
     onStatusChange: (status: AutoSaveStatus) => void,
     persist: (revision: number) => Promise<void>,
@@ -126,6 +130,73 @@ export class InlineNoteEditor implements vscode.Disposable {
         : undefined,
     });
 
+    await this.openCreateOrEditAt(
+      sourceFile,
+      draftAnchor(draft),
+      draft.kind === 'Symbol' ? draft.lineHint : line,
+    );
+  }
+
+  public async openCreateOrEditAt(
+    sourceFile: string,
+    anchor: NoteAnchor,
+    resolvedLine?: number,
+    documentUri?: string,
+  ): Promise<void> {
+    const workspaceRoot = this.workspaceRoot();
+
+    if (documentUri) {
+      try {
+        if (getRelativeFilePath(workspaceRoot, vscode.Uri.parse(documentUri).fsPath) !== sourceFile) {
+          return;
+        }
+      } catch {
+        return;
+      }
+    }
+
+    const notes = await this.dependencies.cliClient.listNotes(workspaceRoot, sourceFile);
+    const matchingNotes = notes.filter((note) => sameCanonicalAnchor(note.note.anchor, anchor));
+
+    if (matchingNotes.length === 1) {
+      this.openEdit(matchingNotes[0]);
+      return;
+    }
+
+    if (matchingNotes.length > 1) {
+      const showQuickPick = this.dependencies.showQuickPick ?? vscode.window.showQuickPick;
+      const selected = await showQuickPick(
+        matchingNotes.map((note) => ({
+          label: note.note.anchor.type === 'Symbol'
+            ? `${note.note.anchor.name ?? 'Symbol'} note`
+            : `Line ${note.note.anchor.line ?? 1} note`,
+          description: notePreview(note),
+          note,
+        })),
+        { title: 'Select note to edit', placeHolder: 'Choose a note at this anchor' },
+      );
+
+      if (selected) {
+        this.openEdit(selected.note);
+      }
+      return;
+    }
+
+    const anchorLine = resolvedLine ?? anchor.line ?? anchor.line_hint ?? 1;
+    const draft = this.service.buildCreateDraftForEditor({
+      workspaceRoot,
+      sourceFile,
+      line: anchor.type === 'Line' ? anchor.line ?? anchorLine : anchorLine,
+      column: anchor.type === 'Line' ? anchor.column ?? 1 : 1,
+      symbol: anchor.type === 'Symbol'
+        ? {
+            name: anchor.name ?? '',
+            kind: normalizeSymbolKind(anchor.kind),
+            signature: anchor.signature,
+            lineHint: anchorLine,
+          }
+        : undefined,
+    });
     this.openDraft(draft);
   }
 
@@ -735,6 +806,57 @@ export class InlineNoteEditor implements vscode.Disposable {
       await this.reportOptionalFailure('refreshing tag suggestions', error, noteResult);
     }
   }
+}
+
+function draftAnchor(draft: InlineNoteDraft): NoteAnchor {
+  if (draft.kind === 'Symbol') {
+    return {
+      type: 'Symbol',
+      name: draft.symbolName,
+      kind: draft.symbolKind,
+      signature: draft.symbolSignature,
+      line_hint: draft.lineHint,
+    };
+  }
+
+  return {
+    type: 'Line',
+    line: draft.line,
+    column: draft.column,
+  };
+}
+
+function sameCanonicalAnchor(left: NoteAnchor, right: NoteAnchor): boolean {
+  if (left.type !== right.type) {
+    return false;
+  }
+
+  if (left.type === 'Line' && right.type === 'Line') {
+    return (left.line ?? 1) === (right.line ?? 1) &&
+      (left.column ?? 1) === (right.column ?? 1);
+  }
+
+  return left.type === 'Symbol' && right.type === 'Symbol' &&
+    left.name === right.name &&
+    normalizeSymbolKind(left.kind) === normalizeSymbolKind(right.kind) &&
+    left.signature === right.signature;
+}
+
+function normalizeSymbolKind(kind: string | undefined): string {
+  const value = kind?.toLocaleLowerCase();
+  return ['function', 'struct', 'enum', 'trait', 'impl', 'method'].includes(value ?? '')
+    ? value!
+    : 'unknown';
+}
+
+function notePreview(note: NoteView): string {
+  const firstLine = note.note.content
+    .split(/\r\n|\n|\r/)
+    .map((line) => line.trim())
+    .find(Boolean) ?? '';
+  const content = Array.from(firstLine).slice(0, 64).join('');
+  const tags = (note.note.tags ?? []).map((tag) => `#${tag}`).join(' ');
+  return [content, tags].filter(Boolean).join(' · ') || 'Empty note';
 }
 
 function isConcurrentModificationError(error: unknown): boolean {

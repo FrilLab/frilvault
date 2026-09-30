@@ -5,6 +5,9 @@ import { suite, test } from 'mocha';
 import {
   buildNoteViewerItems,
   formatCollapsedSummary,
+  formatExpandedPreview,
+  formatGroupTags,
+  firstNonEmptyLogicalLine,
   groupNoteViewerItems,
   normalizeTags,
   type NoteViewerGroup,
@@ -47,18 +50,27 @@ suite('Note viewer model', () => {
     assert.strictEqual(groups[0].totalCount, 2);
   });
 
-  test('line and symbol anchors produce correct display location', () => {
+  test('line and symbol anchors on the same line remain separate groups', () => {
     const notes = [
       createLineNote('line note', 4),
-      createSymbolNote('parseFn', { line: 12, column: 3 }),
+      createSymbolNote('parseFn', { line: 4, column: 3 }),
     ];
     const items = buildNoteViewerItems(notes, 'collapsed');
+    const groups = groupNoteViewerItems(items);
 
     assert.strictEqual(items.length, 2);
-    assert.strictEqual(items[0].anchorKind, 'line');
-    assert.strictEqual(items[0].anchorLine, 4);
-    assert.strictEqual(items[1].anchorKind, 'symbol');
-    assert.strictEqual(items[1].anchorLine, 12);
+    assert.strictEqual(groups.length, 2);
+    assert.deepStrictEqual(groups.map((group) => group.items[0].anchorKind).sort(), ['line', 'symbol']);
+    assert.ok(groups.every((group) => group.anchorLine === 4));
+  });
+
+  test('line anchors at distinct columns remain separate groups', () => {
+    const notes = [
+      createLineNote('first column', 4, 'column-one', [], undefined, undefined, 1),
+      createLineNote('second column', 4, 'column-two', [], undefined, undefined, 5),
+    ];
+
+    assert.strictEqual(groupNoteViewerItems(buildNoteViewerItems(notes, 'collapsed')).length, 2);
   });
 
   test('duplicate notes are not rendered twice', () => {
@@ -70,16 +82,17 @@ suite('Note viewer model', () => {
     assert.strictEqual(groups[0].items.length, 1);
   });
 
-  test('tags are normalized and limited in collapsed previews', () => {
+  test('first expanded preview uses one logical line and tags stay separate', () => {
     const notes = [createLineNote('content\nmore content', 1, 'n1', ['a', 'b', 'c', 'd'])];
     const items = buildNoteViewerItems(notes, 'collapsed');
     const groups = groupNoteViewerItems(items);
-    const summary = formatCollapsedSummary(groups[0]);
+    const group = groups[0];
 
-    assert.ok(summary.includes('#a'));
-    assert.ok(summary.includes('#b'));
-    assert.ok(summary.includes('#c'));
-    assert.ok(!summary.includes('#d'));
+    assert.strictEqual(formatExpandedPreview(group), 'content');
+    assert.deepStrictEqual(formatGroupTags(group), ['#a', '#b', '#c', '+1']);
+    assert.strictEqual(firstNonEmptyLogicalLine('\n  \n  first line  \nsecond line'), 'first line');
+    assert.strictEqual(firstNonEmptyLogicalLine('🙂'.repeat(5), 3), '🙂🙂…');
+    assert.strictEqual(firstNonEmptyLogicalLine('x'.repeat(100), 20), `${'x'.repeat(19)}…`);
   });
 
   test('normalizes tag hashes and case-insensitive duplicates', () => {
@@ -131,33 +144,35 @@ suite('Note viewer model', () => {
     assert.strictEqual(groups[2].anchorLine, 10);
   });
 
-  test('formatCollapsedSummary single note with one-line content', () => {
+  test('collapsed presentation contains only a disclosure control', () => {
     const group: NoteViewerGroup = {
       anchorLine: 1,
+      anchor: { type: 'Line', line: 1, column: 1 },
       items: [{
         noteId: 'x', sourceFile: 'f', title: 'X', content: 'Short content',
-        tags: [], anchorLabel: 'Line 1', anchorLine: 1, anchorKind: 'line', collapsed: true,
+        tags: [], anchorLabel: 'Line 1', anchor: { type: 'Line', line: 1, column: 1 },
+        anchorLine: 1, anchorKind: 'line', collapsed: true,
       }],
       totalCount: 1,
     };
 
     const summary = formatCollapsedSummary(group);
-    assert.ok(summary.startsWith('▶ Note'));
-    assert.ok(summary.includes('Short content'));
+    assert.strictEqual(summary, '▶');
   });
 
   test('formatCollapsedSummary multiple notes', () => {
     const group: NoteViewerGroup = {
       anchorLine: 1,
+      anchor: { type: 'Line', line: 1, column: 1 },
       items: [
-        { noteId: 'a', sourceFile: 'f', title: 'A', content: 'a', tags: ['tag1'], anchorLabel: 'Line 1', anchorLine: 1, anchorKind: 'line', collapsed: true },
-        { noteId: 'b', sourceFile: 'f', title: 'B', content: 'b', tags: ['tag2'], anchorLabel: 'Line 1', anchorLine: 1, anchorKind: 'line', collapsed: true },
+        { noteId: 'a', sourceFile: 'f', title: 'A', content: 'a', tags: ['tag1'], anchorLabel: 'Line 1', anchor: { type: 'Line', line: 1, column: 1 }, anchorLine: 1, anchorKind: 'line', collapsed: true },
+        { noteId: 'b', sourceFile: 'f', title: 'B', content: 'b', tags: ['tag2'], anchorLabel: 'Line 1', anchor: { type: 'Line', line: 1, column: 1 }, anchorLine: 1, anchorKind: 'line', collapsed: true },
       ],
       totalCount: 2,
     };
 
     const summary = formatCollapsedSummary(group);
-    assert.ok(summary.includes('Notes (2)'));
+    assert.strictEqual(summary, '▶');
   });
 
   test('items within a group are sorted by priority desc, then updated_at desc', () => {
@@ -182,13 +197,14 @@ function createLineNote(
   tags: string[] = [],
   priority?: number,
   updatedAt?: string,
+  column = 1,
 ): NoteView {
   return {
     source_file: 'src/a.ts',
     note: {
       id: id ?? `note-${line}`,
       content,
-      anchor: { type: 'Line', line, column: 1 },
+      anchor: { type: 'Line', line, column },
       tags,
       priority,
       updated_at: updatedAt ?? '2026-01-01T00:00:00Z',

@@ -40,13 +40,13 @@ impl TestWorkspace {
         output
     }
 
-    fn add_note(&self, source_file: &str, tag: &str) {
+    fn add_note(&self, source_file: &str, line: &str, tag: &str) {
         self.run(&[
             "add",
             "--file",
             source_file,
             "--line",
-            "1",
+            line,
             "--content",
             "tag statistic fixture",
             "--tag",
@@ -64,10 +64,10 @@ impl Drop for TestWorkspace {
 #[test]
 fn tag_stats_prints_most_used_tags_and_directory_breakdown() {
     let workspace = TestWorkspace::new();
-    workspace.add_note("src/core/a.rs", "architecture");
-    workspace.add_note("src/core/b.rs", "architecture");
-    workspace.add_note("src/parser/c.rs", "architecture");
-    workspace.add_note("src/parser/c.rs", "todo");
+    workspace.add_note("src/core/a.rs", "1", "architecture");
+    workspace.add_note("src/core/b.rs", "1", "architecture");
+    workspace.add_note("src/parser/c.rs", "1", "architecture");
+    workspace.add_note("src/parser/c.rs", "2", "todo");
 
     let summary = String::from_utf8(workspace.run(&["tag", "stats"]).stdout).unwrap();
     assert_eq!(summary, "Tag Statistics\n\narchitecture (3)\n\ntodo (1)\n");
@@ -94,7 +94,7 @@ fn tag_stats_prints_most_used_tags_and_directory_breakdown() {
 #[test]
 fn tag_stats_json_is_machine_readable_for_cli_consumers() {
     let workspace = TestWorkspace::new();
-    workspace.add_note("src/core/a.rs", "architecture");
+    workspace.add_note("src/core/a.rs", "1", "architecture");
 
     let output = workspace.run(&["tag", "stats", "--group-by", "file", "--format", "json"]);
     let statistics: Value = serde_json::from_slice(&output.stdout).unwrap();

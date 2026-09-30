@@ -97,5 +97,5 @@ function createHoverProvider(): FrilVaultHoverProvider {
     () => '/tmp/workspace',
   );
 
-  return new FrilVaultHoverProvider(store, () => '/tmp/workspace', () => true);
+  return new FrilVaultHoverProvider(store, () => true);
 }

@@ -49,6 +49,8 @@
     "onCommand:frilvault.gutter.showActions",
     "onCommand:frilvault.noteViewer.toggle",
     "onCommand:frilvault.noteViewer.actions",
+    "onCommand:frilvault.noteViewer.addOrEdit",
+    "onCommand:frilvault.noteViewer.delete",
     "onUri:frilvault"
   ],
   "main": "./dist/extension.js",
@@ -168,6 +170,14 @@
       {
         "command": "frilvault.noteViewer.actions",
         "title": "Note Viewer Actions"
+      },
+      {
+        "command": "frilvault.noteViewer.addOrEdit",
+        "title": "Note Viewer: Add or Edit Note"
+      },
+      {
+        "command": "frilvault.noteViewer.delete",
+        "title": "Note Viewer: Delete Note"
       },
       {
         "command": "frilvault.environment.addVariable",

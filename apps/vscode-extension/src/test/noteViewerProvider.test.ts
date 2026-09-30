@@ -83,23 +83,33 @@ suite('Note viewer CodeLens provider', () => {
     try {
       const collapsed = await getViewerLenses(source.document.uri);
       const toggle = collapsed.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerToggle);
-      const actions = collapsed.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerActions);
+      const addOrEdit = collapsed.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerAddOrEdit);
+      const deleteLens = collapsed.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerDelete);
 
       assert.ok(toggle);
-      assert.ok(actions);
+      assert.ok(addOrEdit);
+      assert.ok(deleteLens);
       assert.ok((toggle.command?.title?.length ?? 0) <= 144);
       assert.ok(!collapsed.some((lens) => lens.command?.title === 'Note Edit'));
       assert.deepStrictEqual(toggle.command?.arguments?.[0], ['line-note', 'line-note-2']);
-      assert.deepStrictEqual(actions.command?.arguments?.[0], ['line-note', 'line-note-2']);
+      assert.deepStrictEqual(deleteLens.command?.arguments?.[0], ['line-note', 'line-note-2']);
+      assert.strictEqual(addOrEdit.command?.title, '+');
+      assert.strictEqual(toggle.command?.title, '▶');
+      assert.strictEqual(deleteLens.command?.title, '−');
+      assert.ok(!collapsed.some((lens) => lens.command?.command === COMMAND_IDS.noteViewerActions));
+      assert.ok(!collapsed.some((lens) => lens.command?.title?.startsWith('#')));
       assert.ok(collapsed.some((lens) => lens.command?.arguments?.[0]?.includes?.('symbol-note')));
 
+      const initialViewerLensCount = collapsed.filter(isViewerLens).length;
       controller.toggleNotes(['line-note', 'line-note-2'], source.document.uri.toString());
       const expanded = await getViewerLenses(source.document.uri);
-      const expandedTitles = expanded.map((lens) => lens.command?.title ?? '');
       const preview = expanded.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerToggle);
-      assert.ok(preview?.command?.title?.startsWith('▼ Notes (2)'));
-      assert.ok(preview?.command?.title?.includes('first line second line third line'));
+      assert.ok(preview?.command?.title?.startsWith('▼ first line'));
+      assert.ok(preview?.command?.title?.includes('second note'));
+      assert.ok(!preview?.command?.title?.includes('second line'));
+      assert.ok(!preview?.command?.title?.includes('third line'));
       assert.ok((preview?.command?.title?.length ?? 0) <= 144);
+      assert.strictEqual(expanded.filter(isViewerLens).length, initialViewerLensCount);
       assert.strictEqual(fs.readFileSync(sourcePath, 'utf8'), originalSource);
 
       activeUri = other.uri.toString();
@@ -117,7 +127,7 @@ suite('Note viewer CodeLens provider', () => {
       await vscode.window.showTextDocument(source.document);
       controller.refresh();
       const refreshed = await getViewerLenses(source.document.uri);
-      assert.ok(refreshed.some((lens) => lens.command?.title === '▶ Note · edited content'));
+      assert.ok(refreshed.some((lens) => lens.command?.title === '▶'));
       assert.ok(!refreshed.some((lens) => lens.command?.arguments?.[0]?.includes?.('line-note')));
 
       notesByUri.set(source.document.uri.toString(), []);
@@ -152,9 +162,14 @@ async function getViewerLenses(uri: vscode.Uri): Promise<vscode.CodeLens[]> {
 }
 
 function isViewerLens(lens: vscode.CodeLens): boolean {
-  return [COMMAND_IDS.noteViewerToggle, COMMAND_IDS.noteViewerActions].includes(
-    lens.command?.command as (typeof COMMAND_IDS.noteViewerToggle | typeof COMMAND_IDS.noteViewerActions),
-  );
+  return [
+    COMMAND_IDS.noteViewerToggle,
+    COMMAND_IDS.noteViewerAddOrEdit,
+    COMMAND_IDS.noteViewerDelete,
+  ].includes(lens.command?.command as
+    | typeof COMMAND_IDS.noteViewerToggle
+    | typeof COMMAND_IDS.noteViewerAddOrEdit
+    | typeof COMMAND_IDS.noteViewerDelete);
 }
 
 function lineNote(id: string, sourceFile: string, line: number, content: string): NoteView {

@@ -100,10 +100,57 @@ export class GutterNoteActions {
       return;
     }
 
+    await this.confirmAndDeleteNote(note, sourceFile);
+  }
+
+  public async deleteNotesForViewer(
+    noteIds: string[],
+    sourceFile: string,
+    documentUri?: string,
+  ): Promise<void> {
+    if (documentUri) {
+      try {
+        const relativePath = getRelativeFilePath(
+          this.dependencies.getWorkspaceRoot(),
+          vscode.Uri.parse(documentUri).fsPath,
+        );
+        if (relativePath !== sourceFile) {
+          return;
+        }
+      } catch {
+        return;
+      }
+    }
+
+    let notes: NoteView[];
+    try {
+      const requestedIds = new Set(noteIds);
+      notes = (await this.dependencies.cliClient.listNotes(
+        this.dependencies.getWorkspaceRoot(),
+        sourceFile,
+      )).filter((note) => requestedIds.has(note.note.id));
+    } catch (error) {
+      await this.showError(formatError(error, 'Failed to load notes for this anchor.'));
+      return;
+    }
+
+    if (notes.length === 0) {
+      await this.showError('The selected note is no longer available.');
+      return;
+    }
+
+    const selected = notes.length === 1 ? notes[0] : await this.pickNote(notes);
+    if (selected) {
+      await this.confirmAndDeleteNote(selected, sourceFile);
+    }
+  }
+
+  private async confirmAndDeleteNote(note: NoteView, sourceFile: string): Promise<void> {
+
     const showWarningMessage =
       this.dependencies.showWarningMessage ?? vscode.window.showWarningMessage;
     const confirmed = await showWarningMessage(
-      'Delete this FrilVault note?',
+      formatDeleteConfirmation(note),
       { modal: true },
       'Delete',
     );
@@ -116,7 +163,7 @@ export class GutterNoteActions {
       await this.dependencies.cliClient.deleteNote(
         this.dependencies.getWorkspaceRoot(),
         sourceFile,
-        noteId,
+        note.note.id,
       );
       await this.dependencies.invalidateViews();
       await this.showInfo('FrilVault note deleted.');
@@ -210,10 +257,10 @@ export class GutterNoteActions {
     return showQuickPick(
       sortNotesDeterministic(notes).map((note) => ({
         label: noteKindLabel(note),
-        description: truncateContent(note.note.content),
+        description: notePreviewDescription(note),
         note,
       })),
-      { title: 'Select FrilVault note', placeHolder: 'Choose a note on this line' },
+      { title: 'Select note', placeHolder: 'Choose the note to edit or delete' },
     ).then((item) => item?.note);
   }
 
@@ -283,7 +330,22 @@ function noteKindLabel(note: NoteView): string {
 }
 
 function truncateContent(content: string): string {
-  return content.length > 60 ? `${content.slice(0, 57)}...` : content;
+  const firstLine = content.split(/\r\n|\n|\r/).map((line) => line.trim()).find(Boolean) ?? '';
+  const characters = Array.from(firstLine);
+  return characters.length > 60 ? `${characters.slice(0, 57).join('')}…` : firstLine;
+}
+
+function notePreviewDescription(note: NoteView): string {
+  const content = truncateContent(note.note.content);
+  const tags = (note.note.tags ?? []).map((tag) => `#${tag}`).join(' ');
+  return [content, tags].filter(Boolean).join(' · ') || 'Empty note';
+}
+
+function formatDeleteConfirmation(note: NoteView): string {
+  const content = truncateContent(note.note.content) || 'Empty note';
+  const tags = (note.note.tags ?? []).map((tag) => `#${tag}`).join(' ');
+  const target = [noteKindLabel(note), content, tags].filter(Boolean).join(' · ');
+  return `Delete this note?\n\n${target}`;
 }
 
 function formatError(error: unknown, fallback: string): string {

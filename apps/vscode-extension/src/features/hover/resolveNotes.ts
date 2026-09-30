@@ -1,8 +1,25 @@
 import * as vscode from 'vscode';
 
 import type { NoteView } from '../../types';
-import { findSymbolAtPosition } from '../../utils/symbols';
+import {
+  findSymbolDeclarationAtPosition,
+  mapDocumentSymbolKind,
+  readSymbolSignature,
+} from '../../utils/symbols';
 import { deduplicateNotesById } from '../presentation/deduplicateNotes';
+
+export interface HoverSymbolDeclaration {
+  name: string;
+  kind: string;
+  signature?: string;
+  line: number;
+  range: vscode.Range;
+}
+
+export interface ResolvedHoverNotes {
+  notes: NoteView[];
+  range: vscode.Range;
+}
 
 export function sortNotesForHover(notes: NoteView[]): NoteView[] {
   return [...notes].sort((left, right) => {
@@ -30,73 +47,87 @@ export async function resolveNotesAtPosition(
   document: vscode.TextDocument,
   position: vscode.Position,
   token: vscode.CancellationToken,
-): Promise<NoteView[]> {
-  const symbol = await findSymbolAtPosition(document, position);
+): Promise<ResolvedHoverNotes | undefined> {
+  const lineRange = codeRangeAtPosition(document, position);
+  const hasSymbolNotes = notes.some((note) => note.note.anchor.type === 'Symbol');
+  const symbol = hasSymbolNotes
+    ? await findSymbolDeclarationAtPosition(document, position)
+    : undefined;
 
   if (token.isCancellationRequested) {
-    return [];
+    return undefined;
   }
 
-  return deduplicateNotesById(
-    resolveNotesFromCache(notes, position, symbol?.name),
-  );
+  const declaration = symbol
+    ? {
+        name: symbol.name,
+        kind: mapDocumentSymbolKind(symbol.kind),
+        signature: readSymbolSignature(document, symbol),
+        line: symbol.range.start.line + 1,
+        range: symbol.selectionRange,
+      }
+    : undefined;
+  const includeLineNotes = lineRange !== undefined;
+  const matched = resolveNotesFromCache(notes, position, declaration, includeLineNotes);
+
+  if (matched.length === 0) {
+    return undefined;
+  }
+
+  const hasLineNote = matched.some((note) => note.note.anchor.type === 'Line');
+  const range = hasLineNote ? lineRange : declaration?.range;
+
+  return range ? { notes: matched, range } : undefined;
 }
 
 export function resolveNotesFromCache(
   notes: NoteView[],
   position: vscode.Position,
-  symbolName?: string,
+  declaration?: HoverSymbolDeclaration,
+  includeLineNotes = true,
 ): NoteView[] {
-  if (symbolName) {
-    const byName = notes.filter(
-      (note) =>
-        note.note.anchor.type === 'Symbol' && note.note.anchor.name === symbolName,
-    );
+  const symbolMatches = declaration
+    ? notes.filter((note) => isResolvedSymbolAtDeclaration(note, declaration))
+    : [];
+  const lineMatches = includeLineNotes
+    ? notes.filter(
+        (note) =>
+          note.note.anchor.type === 'Line' &&
+          (note.note.anchor.line ?? 1) - 1 === position.line,
+      )
+    : [];
 
-    if (byName.length > 0) {
-      return deduplicateNotesById(sortNotesForHover(byName));
-    }
-  }
-
-  const symbolMatches = symbolNotesAtPosition(notes, symbolName, position);
-  if (symbolMatches.length > 0) {
-    return deduplicateNotesById(symbolMatches);
-  }
-
-  return deduplicateNotesById(lineNotesAtPosition(notes, position));
+  return deduplicateNotesById(sortNotesForHover([...symbolMatches, ...lineMatches]));
 }
 
-function symbolNotesAtPosition(
-  notes: NoteView[],
-  symbolName: string | undefined,
-  position: vscode.Position,
-): NoteView[] {
-  if (symbolName) {
-    return [];
-  }
-
-  const symbolNotes = notes.filter(
-    (note) => note.note.anchor.type === 'Symbol' && note.resolved,
-  );
-  const byPosition = symbolNotes.filter((note) => {
-    const line = (note.resolved?.line ?? 1) - 1;
-    return line === position.line;
-  });
-
-  return sortNotesForHover(byPosition);
+function isResolvedSymbolAtDeclaration(
+  note: NoteView,
+  declaration: HoverSymbolDeclaration,
+): boolean {
+  const anchor = note.note.anchor;
+  return anchor.type === 'Symbol' &&
+    note.resolved?.line === declaration.line &&
+    anchor.name === declaration.name &&
+    normalizeSymbolKind(anchor.kind) === normalizeSymbolKind(declaration.kind);
 }
 
-function lineNotesAtPosition(
-  notes: NoteView[],
+function codeRangeAtPosition(
+  document: vscode.TextDocument,
   position: vscode.Position,
-): NoteView[] {
-  const lineNotes = notes.filter(
-    (note) =>
-      note.note.anchor.type === 'Line' &&
-      (note.note.anchor.line ?? 1) - 1 === position.line,
-  );
+): vscode.Range | undefined {
+  const line = document.lineAt(position.line);
+  const start = line.firstNonWhitespaceCharacterIndex;
+  const end = line.text.trimEnd().length;
 
-  return sortNotesForHover(lineNotes);
+  if (start >= end || position.character < start || position.character >= end) {
+    return undefined;
+  }
+
+  return new vscode.Range(position.line, start, position.line, end);
+}
+
+function normalizeSymbolKind(kind: string | undefined): string {
+  return kind?.toLocaleLowerCase() ?? 'unknown';
 }
 
 function anchorKindOrder(note: NoteView): number {

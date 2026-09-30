@@ -77,6 +77,152 @@ fn add_note_rejects_zero_based_anchor_coordinates() {
 }
 
 #[test]
+fn add_note_prevents_new_duplicates_without_conflating_anchor_kinds() {
+    let workspace = create_test_workspace();
+    let mut service = create_test_note_service(workspace.root());
+    let line_anchor = NoteAnchor::Line(LineAnchor { line: 2, column: 4 });
+
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: line_anchor.clone(),
+            content: "existing line note".to_string(),
+            tags: None,
+        })
+        .unwrap();
+
+    let duplicate = service.add_note(AddNoteRequest {
+        source_file: "src/main.rs".into(),
+        anchor: line_anchor,
+        content: "must not replace existing note".to_string(),
+        tags: None,
+    });
+    assert!(matches!(
+        duplicate,
+        Err(FrilVaultError::DuplicateNoteAnchor(_))
+    ));
+
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 2, column: 5 }),
+            content: "separate line position".to_string(),
+            tags: None,
+        })
+        .unwrap();
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Symbol(SymbolAnchor {
+                name: "parse".to_string(),
+                kind: SymbolKind::Function,
+                signature: Some("fn parse()".to_string()),
+                line_hint: Some(2),
+            }),
+            content: "symbol note on the same line".to_string(),
+            tags: None,
+        })
+        .unwrap();
+
+    let duplicate_symbol = service.add_note(AddNoteRequest {
+        source_file: "src/main.rs".into(),
+        anchor: NoteAnchor::Symbol(SymbolAnchor {
+            name: "parse".to_string(),
+            kind: SymbolKind::Function,
+            signature: Some("fn parse()".to_string()),
+            line_hint: Some(20),
+        }),
+        content: "same symbol with a newer location hint".to_string(),
+        tags: None,
+    });
+    assert!(matches!(
+        duplicate_symbol,
+        Err(FrilVaultError::DuplicateNoteAnchor(_))
+    ));
+
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Symbol(SymbolAnchor {
+                name: "parse".to_string(),
+                kind: SymbolKind::Function,
+                signature: Some("fn parse(input: u32)".to_string()),
+                line_hint: Some(20),
+            }),
+            content: "another stable symbol signature".to_string(),
+            tags: None,
+        })
+        .unwrap();
+
+    let notes = service.list_notes("src/main.rs").unwrap();
+    assert_eq!(notes.len(), 4);
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.note.content == "existing line note")
+    );
+    assert!(
+        !notes
+            .iter()
+            .any(|note| note.note.content == "must not replace existing note")
+    );
+}
+
+#[test]
+fn duplicate_guard_keeps_preexisting_multiple_notes_readable() {
+    let workspace = create_test_workspace();
+    let workspace_root = workspace.root();
+    let mut service = create_test_note_service(workspace_root);
+    service
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 4, column: 2 }),
+            content: "original note".to_string(),
+            tags: Some(vec!["original".to_string()]),
+        })
+        .unwrap();
+    drop(service);
+
+    let note_path = workspace_root
+        .join(".vault")
+        .join("notes")
+        .join(format!("src/main.rs.{NOTE_FILE_EXTENSION}"));
+    let mut file: serde_json::Value =
+        serde_json::from_slice(&fs::read(&note_path).unwrap()).unwrap();
+    let mut legacy_duplicate = file["notes"][0].clone();
+    legacy_duplicate["id"] = serde_json::Value::String(uuid::Uuid::new_v4().to_string());
+    legacy_duplicate["content"] = serde_json::Value::String("legacy note to preserve".to_string());
+    legacy_duplicate["tags"] = serde_json::json!(["legacy"]);
+    file["notes"].as_array_mut().unwrap().push(legacy_duplicate);
+    fs::write(&note_path, serde_json::to_vec(&file).unwrap()).unwrap();
+
+    let mut service = create_test_note_service(workspace_root);
+    let duplicate = service.add_note(AddNoteRequest {
+        source_file: "src/main.rs".into(),
+        anchor: NoteAnchor::Line(LineAnchor { line: 4, column: 2 }),
+        content: "must not replace legacy notes".to_string(),
+        tags: None,
+    });
+
+    assert!(matches!(
+        duplicate,
+        Err(FrilVaultError::DuplicateNoteAnchor(_))
+    ));
+    let notes = service.list_notes("src/main.rs").unwrap();
+    assert_eq!(notes.len(), 2);
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.note.content == "original note")
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.note.content == "legacy note to preserve")
+    );
+}
+
+#[test]
 fn add_symbol_type_note_creates_json_file() {
     let workspace = create_test_workspace();
     let workspace_root = workspace.root();

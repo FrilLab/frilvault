@@ -37,6 +37,8 @@ import { createInlineNoteEditor } from './features/inline-editor/editor';
 import { NoteViewerController } from './features/note-viewer/noteViewerController';
 import {
   createNoteViewerActionsCommand,
+  createNoteViewerAddOrEditCommand,
+  createNoteViewerDeleteCommand,
   createToggleNoteViewerCommand,
 } from './features/note-viewer/noteViewerCommands';
 import { createShowNotesForCurrentFileCommand } from './features/notes-panel/command';
@@ -160,9 +162,7 @@ export function activate(context: vscode.ExtensionContext): void {
   activeNoteViewer = noteViewer;
   const hoverProvider = new FrilVaultHoverProvider(
     store,
-    getWorkspaceRoot,
     isEnabled,
-    (tag) => tagColorStore.colorFor(tag),
   );
 
   const refreshNoteState = async (editor?: vscode.TextEditor) => {
@@ -377,6 +377,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       COMMAND_IDS.noteViewerActions,
       runWhenEnabled(createNoteViewerActionsCommand(gutterActions)),
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.noteViewerAddOrEdit,
+      runWhenEnabled(createNoteViewerAddOrEditCommand(inlineNoteEditor)),
+    ),
+    vscode.commands.registerCommand(
+      COMMAND_IDS.noteViewerDelete,
+      runWhenEnabled(createNoteViewerDeleteCommand(gutterActions)),
     ),
     vscode.commands.registerCommand(COMMAND_IDS.noteViewerNoop, () => undefined),
     vscode.commands.registerCommand(

@@ -11,10 +11,9 @@ import * as vscode from 'vscode';
 
 import { COMMAND_IDS } from '../../constants/ids';
 import {
-  formatCollapsedSummary,
+  formatExpandedPreview,
+  formatGroupTags,
   groupNoteViewerItems,
-  normalizeTags,
-  type NoteViewerGroup,
   type NoteViewerItem,
 } from './noteViewerModel';
 
@@ -40,25 +39,45 @@ export class NoteViewerRenderer implements vscode.Disposable {
       const noteIds = group.items.map((item) => item.noteId);
       const allCollapsed = group.items.every((item) => item.collapsed);
 
-      const title = allCollapsed ? formatCollapsedSummary(group) : formatExpandedPreview(group);
       lenses.push(
         this.commandLens(
           range,
-          title,
-          COMMAND_IDS.noteViewerToggle,
-          [noteIds, documentUri],
-          allCollapsed ? 'Show a short FrilVault note preview' : 'Hide the FrilVault note preview',
+          '+',
+          COMMAND_IDS.noteViewerAddOrEdit,
+          [group.items[0].sourceFile, documentUri, group.anchor, group.anchorLine],
+          'Add or edit the note at this anchor',
         ),
       );
 
-      // Keep actions available without rendering the full note above source.
       lenses.push(
         this.commandLens(
           range,
-          '$(kebab-vertical) Actions…',
-          COMMAND_IDS.noteViewerActions,
-          [noteIds, group.items[0].sourceFile],
-          'Open note actions',
+          allCollapsed ? '▶' : `▼ ${formatExpandedPreview(group)}`,
+          COMMAND_IDS.noteViewerToggle,
+          [noteIds, documentUri],
+          allCollapsed ? 'Expand note preview' : 'Collapse note preview',
+        ),
+      );
+
+      for (const tag of formatGroupTags(group)) {
+        lenses.push(
+          this.commandLens(
+            range,
+            tag,
+            COMMAND_IDS.noteViewerNoop,
+            [],
+            `Note tag ${tag}`,
+          ),
+        );
+      }
+
+      lenses.push(
+        this.commandLens(
+          range,
+          '−',
+          COMMAND_IDS.noteViewerDelete,
+          [noteIds, group.items[0].sourceFile, documentUri],
+          'Delete a note at this anchor',
         ),
       );
     }
@@ -87,19 +106,11 @@ export class NoteViewerRenderer implements vscode.Disposable {
   }
 }
 
-function formatExpandedPreview(group: NoteViewerGroup): string {
-  const preview = group.items
-    .map((item) => item.content.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .join(' · ');
-  const summary = group.totalCount === 1 ? '▼ Note' : `▼ Notes (${group.totalCount})`;
-  return preview ? `${summary} · ${preview}` : `${summary} · empty`;
-}
-
 function truncateLine(value: string): string {
-  if (value.length <= MAX_CODE_LENS_LINE_LENGTH) {
+  const characters = Array.from(value);
+  if (characters.length <= MAX_CODE_LENS_LINE_LENGTH) {
     return value;
   }
 
-  return `${value.slice(0, MAX_CODE_LENS_LINE_LENGTH - 1).trimEnd()}…`;
+  return `${characters.slice(0, MAX_CODE_LENS_LINE_LENGTH - 1).join('').trimEnd()}…`;
 }

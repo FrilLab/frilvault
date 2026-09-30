@@ -1,19 +1,15 @@
 import * as vscode from 'vscode';
 
 import type { CurrentFileNotesStore } from '../current-file/store';
-import { buildEditorNotesHoverParts } from '../presentation/noteHover';
-import { getConfiguredPreviewLength } from './richHover';
+import { formatFullMarkdownNoteHover } from '../presentation/noteHover';
 import { resolveNotesAtPosition } from './resolveNotes';
-import type { TagColor } from '../../types';
 
 export class FrilVaultHoverProvider implements vscode.HoverProvider {
   private hoverGeneration = 0;
 
   public constructor(
     private readonly store: CurrentFileNotesStore,
-    private readonly getWorkspaceRoot: () => string,
     private readonly isEnabled: () => boolean = () => true,
-    private readonly colorForTag: (tag: string) => TagColor | undefined = () => undefined,
   ) {}
 
   public async provideHover(
@@ -33,28 +29,17 @@ export class FrilVaultHoverProvider implements vscode.HoverProvider {
     }
 
     const generation = ++this.hoverGeneration;
-    const matched = await resolveNotesAtPosition(notes, document, position, token);
+    const resolved = await resolveNotesAtPosition(notes, document, position, token);
 
     if (
       token.isCancellationRequested ||
       generation !== this.hoverGeneration ||
-      matched.length === 0
+      !resolved
     ) {
       return undefined;
     }
 
-    const parts = buildEditorNotesHoverParts(
-      matched,
-      this.getWorkspaceRoot(),
-      snapshot.sourceFile ?? document.fileName,
-      getConfiguredPreviewLength(),
-      this.colorForTag,
-    );
-
-    if (parts.contents.length === 0) {
-      return undefined;
-    }
-
-    return new vscode.Hover(parts.contents);
+    const markdown = formatFullMarkdownNoteHover(resolved.notes);
+    return markdown ? new vscode.Hover(markdown, resolved.range) : undefined;
   }
 }

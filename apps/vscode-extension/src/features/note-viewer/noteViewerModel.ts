@@ -1,4 +1,4 @@
-import type { NoteView } from '../../types';
+import type { NoteAnchor, NoteView } from '../../types';
 
 export interface NoteViewerItem {
   noteId: string;
@@ -7,6 +7,7 @@ export interface NoteViewerItem {
   content: string;
   tags: string[];
   anchorLabel: string;
+  anchor: NoteAnchor;
   anchorLine: number; // 1-based
   anchorKind: 'line' | 'symbol';
   updatedAt?: string;
@@ -16,6 +17,7 @@ export interface NoteViewerItem {
 
 export interface NoteViewerGroup {
   anchorLine: number; // 1-based
+  anchor: NoteAnchor;
   items: NoteViewerItem[];
   totalCount: number;
 }
@@ -58,6 +60,7 @@ export function buildNoteViewerItems(notes: NoteView[], defaultState: 'collapsed
       content: view.note.content,
       tags: normalizeTags(view.note.tags ?? []),
       anchorLabel,
+      anchor: { ...view.note.anchor },
       anchorLine,
       anchorKind: isSymbol ? 'symbol' : 'line',
       updatedAt: view.note.updated_at,
@@ -70,20 +73,21 @@ export function buildNoteViewerItems(notes: NoteView[], defaultState: 'collapsed
 }
 
 export function groupNoteViewerItems(items: NoteViewerItem[]): NoteViewerGroup[] {
-  const groupsMap = new Map<number, NoteViewerItem[]>();
+  const groupsMap = new Map<string, NoteViewerItem[]>();
 
   for (const item of items) {
-    let group = groupsMap.get(item.anchorLine);
+    const key = noteAnchorKey(item.anchor);
+    let group = groupsMap.get(key);
     if (!group) {
       group = [];
-      groupsMap.set(item.anchorLine, group);
+      groupsMap.set(key, group);
     }
     group.push(item);
   }
 
   const groups: NoteViewerGroup[] = [];
 
-  for (const [anchorLine, groupItems] of groupsMap.entries()) {
+  for (const groupItems of groupsMap.values()) {
     groupItems.sort((a, b) => {
       const priorityA = a.priority ?? 0;
       const priorityB = b.priority ?? 0;
@@ -101,53 +105,67 @@ export function groupNoteViewerItems(items: NoteViewerItem[]): NoteViewerGroup[]
     });
 
     groups.push({
-      anchorLine,
+      anchorLine: groupItems[0].anchorLine,
+      anchor: groupItems[0].anchor,
       items: groupItems,
       totalCount: groupItems.length,
     });
   }
 
-  groups.sort((a, b) => a.anchorLine - b.anchorLine);
+  groups.sort((a, b) => {
+    const lineDifference = a.anchorLine - b.anchorLine;
+    return lineDifference || noteAnchorKey(a.anchor).localeCompare(noteAnchorKey(b.anchor));
+  });
 
   return groups;
 }
 
 export function formatCollapsedSummary(group: NoteViewerGroup): string {
-  if (group.totalCount === 0) {
-    return '▶ Notes (0)';
+  return '▶';
+}
+
+export function formatExpandedPreview(group: NoteViewerGroup, maxLength = 88): string {
+  const previews = group.items
+    .map((item) => firstNonEmptyLogicalLine(item.content, maxLength))
+    .filter(Boolean);
+  const preview = previews.join(' · ');
+  return preview.length > maxLength
+    ? `${Array.from(preview).slice(0, maxLength - 1).join('').trimEnd()}…`
+    : preview;
+}
+
+export function firstNonEmptyLogicalLine(content: string, maxLength = 88): string {
+  const firstLine = content.split(/\r\n|\n|\r/).map((line) => line.trim()).find(Boolean);
+  if (!firstLine) {
+    return '';
   }
 
-  if (group.totalCount === 1) {
-    const note = group.items[0];
-    const lines = note.content.trim().split(/\r?\n/);
-    const content = note.content.trim();
+  const characters = Array.from(firstLine);
+  return characters.length <= maxLength
+    ? firstLine
+    : `${characters.slice(0, Math.max(0, maxLength - 1)).join('').trimEnd()}…`;
+}
 
-    if (content.length === 0) {
-      const tags = note.tags.slice(0, 3).map((tag) => `#${tag}`).join(' ');
-      return `▶ Note · empty${tags ? ` · ${tags}` : ''}`;
-    }
+export function formatGroupTags(group: NoteViewerGroup, maxTags = 3): string[] {
+  const tags = normalizeTags(group.items.flatMap((item) => item.tags));
+  const visible = tags.slice(0, maxTags).map((tag) => `#${tag}`);
+  if (tags.length > maxTags) {
+    visible.push(`+${tags.length - maxTags}`);
+  }
+  return visible;
+}
 
-    if (lines.length === 1) {
-      const truncated = lines[0].length > 40 ? lines[0].substring(0, 40) + '…' : lines[0];
-      return `▶ Note · ${truncated}`;
-    } else {
-      const tags = note.tags.slice(0, 3).map(t => `#${t}`).join(' ');
-      const tagsStr = tags ? ` · ${tags}` : '';
-      return `▶ Note · ${lines.length} lines${tagsStr}`;
-    }
+export function noteAnchorKey(anchor: NoteAnchor): string {
+  if (anchor.type === 'Line') {
+    return JSON.stringify(['Line', anchor.line ?? 1, anchor.column ?? 1]);
   }
 
-  const allTags = new Set<string>();
-  for (const item of group.items) {
-    for (const tag of item.tags) {
-      allTags.add(tag);
-    }
-  }
-
-  const combinedTags = Array.from(allTags).slice(0, 3).map((t) => `#${t}`).join(' ');
-  const tagsStr = combinedTags ? ` · ${combinedTags}` : '';
-
-  return `▶ Notes (${group.totalCount})${tagsStr}`;
+  return JSON.stringify([
+    'Symbol',
+    anchor.name ?? '',
+    (anchor.kind ?? 'unknown').toLocaleLowerCase(),
+    anchor.signature ?? '',
+  ]);
 }
 
 export function normalizeTags(tags: string[]): string[] {
