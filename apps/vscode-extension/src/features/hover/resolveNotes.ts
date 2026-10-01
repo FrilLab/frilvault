@@ -48,7 +48,7 @@ export async function resolveNotesAtPosition(
   position: vscode.Position,
   token: vscode.CancellationToken,
 ): Promise<ResolvedHoverNotes | undefined> {
-  const lineRange = codeRangeAtPosition(document, position);
+  const lineRange = lineHoverRangeAtPosition(document, position);
   const hasSymbolNotes = notes.some((note) => note.note.anchor.type === 'Symbol');
   const symbol = hasSymbolNotes
     ? await findSymbolDeclarationAtPosition(document, position)
@@ -111,18 +111,24 @@ function isResolvedSymbolAtDeclaration(
     normalizeSymbolKind(anchor.kind) === normalizeSymbolKind(declaration.kind);
 }
 
-function codeRangeAtPosition(
+export function lineHoverRangeAtPosition(
   document: vscode.TextDocument,
   position: vscode.Position,
 ): vscode.Range | undefined {
   const line = document.lineAt(position.line);
-  const start = line.firstNonWhitespaceCharacterIndex;
   const end = line.text.trimEnd().length;
+  const start = line.firstNonWhitespaceCharacterIndex;
 
-  if (start >= end || position.character < start || position.character >= end) {
+  if (end === 0 || start < 0 || start >= end) {
+    if (position.character <= line.text.length) {
+      return new vscode.Range(position.line, 0, position.line, line.text.length);
+    }
     return undefined;
   }
 
+  if (position.character < start || position.character >= end) {
+    return undefined;
+  }
   return new vscode.Range(position.line, start, position.line, end);
 }
 

@@ -1,15 +1,20 @@
 import * as assert from 'node:assert';
 
 import { suite, test } from 'mocha';
+import * as vscode from 'vscode';
 
 import {
   aggregateNotesByLine,
   resolveNoteLine,
   sortNotesDeterministic,
+  suppressBreakpointLineGroups,
 } from '../features/decorations/aggregate';
+import { sourceBreakpointLines } from '../features/decorations/decorator';
+import { selectedNoteLine } from '../features/decorations/selectedNote';
 import { buildNoteUri } from '../features/decorations/gutterActions';
 import { formatGutterHoverSummary } from '../features/decorations/gutterHover';
 import type { NoteView } from '../types';
+import { resolveNoteRevealLine } from '../utils/file';
 
 suite('Gutter marker helpers', () => {
   test('aggregateNotesByLine skips unresolved symbol notes', () => {
@@ -67,6 +72,50 @@ suite('Gutter marker helpers', () => {
     assert.strictEqual(resolveNoteLine(note), 8);
   });
 
+  test('source breakpoints suppress note markers and restore them when removed', () => {
+    const uri = vscode.Uri.file('/tmp/frilvault-debug-fixture.ts');
+    const documentUri = uri.toString();
+    const notes = [
+      createLineNoteView('debug-fixture.ts', 3, 'breakpoint line'),
+      createLineNoteView('debug-fixture.ts', 5, 'note line'),
+    ];
+    const groups = aggregateNotesByLine(notes, 10);
+    const breakpoints = [
+      sourceBreakpoint(uri, 2, { enabled: true }),
+      sourceBreakpoint(uri, 2, { enabled: false }),
+      sourceBreakpoint(uri, 4, { condition: 'value > 0' }),
+      sourceBreakpoint(uri, 4, { logMessage: 'value={value}' }),
+    ];
+
+    const breakpointLines = sourceBreakpointLines(documentUri, breakpoints);
+    assert.deepStrictEqual([...breakpointLines].sort(), [2, 4]);
+    assert.deepStrictEqual(
+      suppressBreakpointLineGroups(groups, breakpointLines).map((group) => group.line),
+      [],
+    );
+    assert.deepStrictEqual(
+      suppressBreakpointLineGroups(groups, new Set()).map((group) => group.line),
+      [2, 4],
+      'removing breakpoints makes the note gutter markers eligible again',
+    );
+  });
+
+  test('selected note highlight yields to breakpoints and keeps resolved navigation targets', () => {
+    const uri = 'file:///tmp/source.rs';
+    const selected = { documentUri: uri, line: 4 };
+    assert.strictEqual(selectedNoteLine(selected, uri, 10, new Set()), 4);
+    assert.strictEqual(selectedNoteLine(selected, uri, 10, new Set([4])), undefined);
+    assert.strictEqual(selectedNoteLine(undefined, uri, 10, new Set()), undefined);
+
+    const symbol = createSymbolNoteView('src/lib.rs', 'parse', 91, 'note', undefined, {
+      line: 7,
+      column: 2,
+    });
+    assert.strictEqual(resolveNoteRevealLine(symbol, 20), 6);
+    assert.strictEqual(resolveNoteRevealLine(createSymbolNoteView('src/lib.rs', 'lost', 91, 'note'), 100), undefined);
+    assert.strictEqual(resolveNoteRevealLine(createLineNoteView('src/lib.rs', 22, 'note'), 20), undefined);
+  });
+
   test('formatGutterHoverSummary includes tags and action links', () => {
     const parts = formatGutterHoverSummary(
       [
@@ -100,6 +149,20 @@ suite('Gutter marker helpers', () => {
     );
   });
 });
+
+function sourceBreakpoint(
+  uri: vscode.Uri,
+  line: number,
+  options: Record<string, unknown>,
+): vscode.Breakpoint {
+  return new vscode.SourceBreakpoint(
+    new vscode.Location(uri, new vscode.Position(line, 0)),
+    options.enabled as boolean | undefined,
+    options.condition as string | undefined,
+    options.hitCondition as string | undefined,
+    options.logMessage as string | undefined,
+  );
+}
 
 function createLineNoteView(
   sourceFile: string,

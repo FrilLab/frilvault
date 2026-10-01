@@ -1,5 +1,6 @@
 import type { NoteView, TagSummary } from '../../types';
 import { createInlinePreview } from '../presentation/inlinePreview';
+import * as path from 'node:path';
 
 /** Defensively removes duplicate CLI rows and presents tags alphabetically. */
 export function prepareTagSummaries(summaries: TagSummary[]): TagSummary[] {
@@ -47,10 +48,70 @@ export function tagNoteDescription(noteView: NoteView): string {
     return `${noteView.source_file} · Line ${anchor.line ?? 1}:${anchor.column ?? 1}`;
   }
 
-  const line = noteView.resolved?.line ?? anchor.line_hint;
+  const line = noteView.resolved?.line;
   const location = typeof line === 'number' ? ` · Line ${line}` : ' · Unresolved';
 
   return `${noteView.source_file} · Symbol ${anchor.name ?? 'Unknown'}${location}`;
+}
+
+export function tagNoteLabel(
+  noteView: NoteView,
+  fileIdentity: string,
+  tag: string,
+): string {
+  const anchor = noteView.note.anchor;
+  const line = anchor.type === 'Line'
+    ? anchor.line ?? 1
+    : noteView.resolved?.line;
+  const location = typeof line === 'number' ? `L${line}` : `Unresolved · ${fileIdentity}`;
+  const file = typeof line === 'number' ? fileIdentity : undefined;
+  const preview = tagNotePreview(noteView);
+  const tagSuffix = tag.trim() ? ` · ${tag.trim().replace(/^#+/, '')}` : '';
+  const label = file
+    ? `${location} · ${file}${tagSuffix}`
+    : `${location}${tagSuffix}`;
+
+  return preview ? `${label} — ${preview}` : label;
+}
+
+export function tagFileIdentities(notes: NoteView[]): Map<string, string> {
+  const paths = [...new Set(notes.map((note) => normalizeSourcePath(note.source_file)))];
+  const basenames = new Map<string, string[]>();
+
+  for (const sourceFile of paths) {
+    const basename = path.posix.basename(sourceFile);
+    const values = basenames.get(basename) ?? [];
+    values.push(sourceFile);
+    basenames.set(basename, values);
+  }
+
+  const result = new Map<string, string>();
+  for (const sourceFile of paths) {
+    const segments = sourceFile.split('/');
+    const basename = segments.at(-1) ?? sourceFile;
+    const siblings = basenames.get(basename) ?? [];
+    if (siblings.length <= 1) {
+      result.set(sourceFile, basename);
+      continue;
+    }
+
+    let suffixLength = 2;
+    let suffix = segments.slice(-suffixLength).join('/');
+    while (suffixLength < segments.length && siblings.some((candidate) => {
+      const candidateSuffix = candidate.split('/').slice(-suffixLength).join('/');
+      return candidate !== sourceFile && candidateSuffix === suffix;
+    })) {
+      suffixLength += 1;
+      suffix = segments.slice(-suffixLength).join('/');
+    }
+    result.set(sourceFile, suffix);
+  }
+
+  return result;
+}
+
+function normalizeSourcePath(sourceFile: string): string {
+  return sourceFile.replaceAll('\\', '/').replace(/^\.\//, '');
 }
 
 function noteLine(noteView: NoteView): number {

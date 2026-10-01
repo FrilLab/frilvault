@@ -74,7 +74,8 @@
     "commands": [
       {
         "command": "frilvault.addNote",
-        "title": "Add"
+        "title": "Add Note",
+        "icon": "$(add)"
       },
       {
         "command": "frilvault.editNote",
@@ -98,11 +99,13 @@
       },
       {
         "command": "frilvault.setTagColor",
-        "title": "Set Tag Color"
+        "title": "Set Tag Color",
+        "icon": "$(symbol-color)"
       },
       {
         "command": "frilvault.removeTagColor",
-        "title": "Remove Tag Color"
+        "title": "Remove Tag Color",
+        "icon": "$(clear-all)"
       },
       {
         "command": "frilvault.showNotesForCurrentFile",
@@ -123,7 +126,8 @@
       },
       {
         "command": "frilvault.refresh",
-        "title": "Refresh"
+        "title": "Refresh FrilVault Views",
+        "icon": "$(refresh)"
       },
       {
         "command": "frilvault.enable",
@@ -289,6 +293,11 @@
           "group": "inline"
         },
         {
+          "command": "frilvault.notesPanel.editNote",
+          "when": "view == frilvault.tags && viewItem == frilvault.tagNote && frilvault.enabled",
+          "group": "inline"
+        },
+        {
           "command": "frilvault.notesPanel.openNote",
           "when": "view == frilvault.notes && viewItem == frilvault.note && frilvault.enabled",
           "group": "inline@1"
@@ -429,7 +438,7 @@
             "collapsed",
             "expanded"
           ],
-          "default": "collapsed",
+          "default": "expanded",
           "description": "Default collapse state for note viewers when opening a file."
         },
         "frilvault.inlineEditor.autoSaveDebounceMs": {

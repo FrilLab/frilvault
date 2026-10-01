@@ -176,10 +176,10 @@ export function createSymbolCreateDraft(input: {
 
 function formatSymbolAnchorSummary(noteView: NoteView): string {
   const anchor = noteView.note.anchor;
-  const resolvedLine = noteView.resolved?.line ?? anchor.line_hint ?? 1;
-  const kind = anchor.kind ?? 'Symbol';
-
-  return `Symbol ${anchor.name ?? 'unknown'} (${kind}) at line ${resolvedLine}`;
+  const name = anchor.name ?? 'unknown';
+  return noteView.resolved
+    ? `Symbol ${name} · L${noteView.resolved.line}`
+    : `Symbol ${name} · Unresolved`;
 }
 
 export function applyFormInput(draft: InlineNoteDraft, input: InlineNoteFormInput): InlineNoteDraft {

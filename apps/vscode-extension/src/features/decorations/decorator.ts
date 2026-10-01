@@ -4,7 +4,7 @@ import type { NoteView } from '../../types';
 import {
   resolveNoteRange,
 } from '../presentation/editorNoteView';
-import { aggregateNotesByLine } from './aggregate';
+import { aggregateNotesByLine, suppressBreakpointLineGroups } from './aggregate';
 import { createSymbolNoteDecorationType } from './gutter';
 import {
   createMarkerDecorationType,
@@ -27,6 +27,8 @@ export class FrilVaultDecorator implements vscode.Disposable {
 
   private readonly configListener: vscode.Disposable;
 
+  private readonly breakpointListener: vscode.Disposable;
+
   public constructor(
     private readonly extensionPath: string,
     private readonly store: import('../current-file/store').CurrentFileNotesStore,
@@ -43,6 +45,9 @@ export class FrilVaultDecorator implements vscode.Disposable {
       }
 
       this.recreateGutterDecorationType();
+      void this.refresh();
+    });
+    this.breakpointListener = vscode.debug.onDidChangeBreakpoints(() => {
       void this.refresh();
     });
   }
@@ -86,6 +91,7 @@ export class FrilVaultDecorator implements vscode.Disposable {
 
   public dispose(): void {
     this.configListener.dispose();
+    this.breakpointListener.dispose();
     this.gutterDecorationType.dispose();
     this.symbolDecorationType.dispose();
   }
@@ -101,20 +107,26 @@ export class FrilVaultDecorator implements vscode.Disposable {
 
     const groups = aggregateNotesByLine(notes, editor.document.lineCount);
     const lineNotes = new Map<number, NoteView[]>();
-    const gutterDecorations: vscode.DecorationOptions[] = groups.map((group) => {
+    const breakpointLines = sourceBreakpointLines(editor.document.uri.toString());
+    const gutterDecorations: vscode.DecorationOptions[] = suppressBreakpointLineGroups(
+      groups,
+      breakpointLines,
+    )
+      .map((group) => {
+        return {
+          range: editor.document.lineAt(group.line).range,
+          renderOptions: markerRenderOptions(this.markerStyle, group.notes.length),
+        };
+      });
+
+    for (const group of groups) {
       lineNotes.set(group.line, group.notes);
-
-      return {
-        range: editor.document.lineAt(group.line).range,
-        renderOptions: markerRenderOptions(this.markerStyle, group.notes.length),
-      };
-    });
-
+    }
     this.registry.set(editor.document.uri.toString(), lineNotes);
     editor.setDecorations(this.gutterDecorationType, gutterDecorations);
     editor.setDecorations(
       this.symbolDecorationType,
-      this.buildSymbolGutterDecorations(editor, notes),
+      this.buildSymbolGutterDecorations(editor, notes, breakpointLines),
     );
     this.previousEditor = editor;
     this.pendingEditorUri = undefined;
@@ -123,6 +135,7 @@ export class FrilVaultDecorator implements vscode.Disposable {
   private buildSymbolGutterDecorations(
     editor: vscode.TextEditor,
     notes: NoteView[],
+    breakpointLines: Set<number>,
   ): vscode.DecorationOptions[] {
     const decorations: vscode.DecorationOptions[] = [];
 
@@ -133,7 +146,7 @@ export class FrilVaultDecorator implements vscode.Disposable {
 
       const range = resolveNoteRange(note, editor.document.lineCount);
 
-      if (!range) {
+      if (!range || breakpointLines.has(range.start.line)) {
         continue;
       }
 
@@ -148,4 +161,21 @@ export class FrilVaultDecorator implements vscode.Disposable {
     this.markerStyle = getConfiguredMarkerStyle();
     this.gutterDecorationType = createMarkerDecorationType(this.extensionPath, this.markerStyle);
   }
+}
+
+export function sourceBreakpointLines(
+  documentUri: string,
+  breakpoints: readonly vscode.Breakpoint[] = vscode.debug.breakpoints,
+): Set<number> {
+  const lines = new Set<number>();
+  for (const breakpoint of breakpoints) {
+    if (!(breakpoint instanceof vscode.SourceBreakpoint)) {
+      continue;
+    }
+    const location = breakpoint.location;
+    if (location?.uri.toString() === documentUri) {
+      lines.add(location.range.start.line);
+    }
+  }
+  return lines;
 }

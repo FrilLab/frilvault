@@ -185,11 +185,13 @@ suite('Extension Test Suite', function () {
     );
     const firstChildren = await provider.getChildren();
 
-    assert.strictEqual(firstChildren.length, 2);
+    assert.strictEqual(firstChildren.length, 1);
     assert.strictEqual(firstChildren[0]?.label, path.join('src', 'sample.ts'));
-    assert.strictEqual(firstChildren[1]?.label, 'Line Notes');
-    assert.strictEqual(firstChildren[1]?.description, '1');
-    const firstNotes = await provider.getChildren(firstChildren[1]);
+    const firstGroups = await provider.getChildren(firstChildren[0]);
+    assert.strictEqual(firstGroups.length, 1);
+    assert.strictEqual(firstGroups[0]?.label, 'Line Notes');
+    assert.strictEqual(firstGroups[0]?.description, '1');
+    const firstNotes = await provider.getChildren(firstGroups[0]);
     assert.strictEqual(firstNotes[0]?.label, 'first file note');
     assert.strictEqual(firstNotes[0]?.description, 'L7');
 
@@ -198,9 +200,12 @@ suite('Extension Test Suite', function () {
 
     const secondChildren = await provider.getChildren();
 
-    assert.strictEqual(secondChildren.length, 2);
-    assert.strictEqual(secondChildren[1]?.label, 'Line Notes');
-    const secondNotes = await provider.getChildren(secondChildren[1]);
+    assert.strictEqual(secondChildren.length, 1);
+    assert.strictEqual(secondChildren[0]?.label, path.join('src', 'other.ts'));
+    const secondGroups = await provider.getChildren(secondChildren[0]);
+    assert.strictEqual(secondGroups.length, 1);
+    assert.strictEqual(secondGroups[0]?.label, 'Line Notes');
+    const secondNotes = await provider.getChildren(secondGroups[0]);
     assert.strictEqual(secondNotes[0]?.label, 'second file note');
     assert.strictEqual(secondNotes[0]?.description, 'L2');
   });
@@ -224,45 +229,50 @@ suite('Extension Test Suite', function () {
       () => cliClient.workspaceExplorer(workspace.root),
       () => workspace.root,
     );
-    const groups = await provider.getChildren();
+    const files = await provider.getChildren();
 
-    assert.strictEqual(groups.length, 4);
-    assert.strictEqual(groups[0]?.label, path.join('src', 'sample.ts'));
-    assert.strictEqual(groups[1]?.label, 'Symbol: myFn');
-    assert.strictEqual(groups[2]?.label, 'Line Notes');
-    assert.strictEqual(groups[3]?.label, 'Unresolved Anchors');
+    assert.strictEqual(files.length, 1);
+    assert.strictEqual(files[0]?.label, path.join('src', 'sample.ts'));
+    const groups = await provider.getChildren(files[0]);
 
-    const symbolNotes = await provider.getChildren(groups[1]);
+    assert.strictEqual(groups.length, 3);
+    assert.strictEqual(groups[0]?.label, 'Symbol: myFn');
+    assert.strictEqual(groups[1]?.label, 'Line Notes');
+    assert.strictEqual(groups[2]?.label, 'Unresolved Anchors');
+
+    const symbolNotes = await provider.getChildren(groups[0]);
     assert.strictEqual(symbolNotes.length, 1);
     assert.strictEqual(symbolNotes[0]?.label, 'symbol note');
 
-    const lineNotes = await provider.getChildren(groups[2]);
+    const lineNotes = await provider.getChildren(groups[1]);
     assert.strictEqual(lineNotes.length, 1);
     assert.strictEqual(lineNotes[0]?.label, 'line note');
 
-    const unresolvedNotes = await provider.getChildren(groups[3]);
+    const unresolvedNotes = await provider.getChildren(groups[2]);
     assert.strictEqual(unresolvedNotes.length, 1);
     assert.strictEqual(unresolvedNotes[0]?.label, 'unresolved note');
+    assert.strictEqual(unresolvedNotes[0]?.description, 'Unresolved MissingFn');
   });
 
   test('Symbol note reveal prefers resolved coordinates', async () => {
     const workspace = createTestWorkspace();
     const noteView = createSymbolNoteView('src/sample.ts', 'myFn', 1, 'symbol note', {
-      line: 8,
+      line: 2,
       column: 4,
     });
     const item = new NotesPanelItem(noteView, workspace.root);
 
-    assert.strictEqual(item.description, 'L8 myFn');
+    assert.strictEqual(item.description, 'L2 myFn');
 
     await configureExtension(workspace);
     await openFile(workspace.sourceFile);
 
-    await revealNote(noteView, workspace.root);
+    const target = await revealNote(noteView, workspace.root);
+    assert.ok(target);
 
     const editor = vscode.window.activeTextEditor;
     assert.ok(editor);
-    assert.strictEqual(editor.selection.active.line, 7);
+    assert.strictEqual(editor.selection.active.line, 1);
     assert.strictEqual(editor.selection.active.character, 3);
   });
 
@@ -298,11 +308,13 @@ suite('Extension Test Suite', function () {
       () => cliClient.workspaceExplorer(workspace.root),
       () => workspace.root,
     );
-    const children = await provider.getChildren();
+    const files = await provider.getChildren();
 
-    assert.strictEqual(children.length, 2);
-    assert.strictEqual(children[0]?.label, path.join('src', 'sample.ts'));
-    assert.strictEqual(children[1]?.label, 'No notes are attached to this file.');
+    assert.strictEqual(files.length, 1);
+    assert.strictEqual(files[0]?.label, path.join('src', 'sample.ts'));
+    const children = await provider.getChildren(files[0]);
+    assert.strictEqual(children.length, 1);
+    assert.strictEqual(children[0]?.label, 'No notes are attached to this file.');
   });
 
   test('FrilVault Notes provider shows workspace note overview when no file is open', async () => {

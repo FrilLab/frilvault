@@ -57,4 +57,25 @@ suite('Note viewer state', () => {
     assert.strictEqual(state.isCollapsed('doc1', 'note1', true), false);
     assert.strictEqual(state.isCollapsed('doc2', 'note1', true), true);
   });
+
+  test('persists explicit disclosure choices after a document closes', () => {
+    const values = new Map<string, unknown>();
+    const memento = {
+      get: <T>(key: string, defaultValue: T): T => (values.get(key) as T | undefined) ?? defaultValue,
+      update: async (key: string, value: unknown) => {
+        values.set(key, value);
+      },
+    } as unknown as import('vscode').Memento;
+    const firstSession = new NoteViewerState();
+    firstSession.setPersistence(memento);
+    firstSession.set('file:///workspace/file.ts', 'note-a', true);
+    firstSession.clearDocument('file:///workspace/file.ts');
+
+    const reopenedSession = new NoteViewerState();
+    reopenedSession.setPersistence(memento);
+    assert.strictEqual(
+      reopenedSession.isCollapsed('file:///workspace/file.ts', 'note-a', false),
+      true,
+    );
+  });
 });
