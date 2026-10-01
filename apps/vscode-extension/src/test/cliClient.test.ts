@@ -102,6 +102,41 @@ suite('CliClient', () => {
     ]);
   });
 
+  test('scopes workspace syncs to notes or source changes', async () => {
+    const calls: string[] = [];
+    const cliClient = new CliClient({
+      extensionPath: '/extension',
+      extensionVersion: '0.1.0',
+      platform: 'darwin',
+      arch: 'arm64',
+      existsSync: () => true,
+      access: async () => undefined,
+      execFile: async (_file, args) => {
+        calls.push(args.join(' '));
+        return {
+          stdout: args[0] === '--version'
+            ? 'flvt 0.1.0\n'
+            : JSON.stringify({ notes_synced: args.includes('--notes-only'), repairs_applied: 0 }),
+          stderr: '',
+        };
+      },
+    });
+
+    await cliClient.sync('/workspace', { notesOnly: true });
+    await cliClient.sync('/workspace', { sourcesOnly: true });
+    await cliClient.sync('/workspace');
+
+    assert.deepStrictEqual(calls.slice(1), [
+      'sync --notes-only --format json',
+      'sync --sources-only --format json',
+      'sync --format json',
+    ]);
+    await assert.rejects(
+      cliClient.sync('/workspace', { notesOnly: true, sourcesOnly: true }),
+      /Cannot request notes-only and sources-only sync together/,
+    );
+  });
+
   test('reports a clear error when no bundled CLI is available', async () => {
     const cliClient = new CliClient({
       extensionPath: '/extension',

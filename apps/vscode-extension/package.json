@@ -401,6 +401,11 @@
           "default": "",
           "description": "Optional path to a custom FrilVault CLI. Leave empty to use the bundled CLI."
         },
+        "frilvault.refreshDiagnostics.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Write metadata-only refresh request diagnostics to the FrilVault CLI output channel. Note content, tags, environment values, and file paths are not included."
+        },
         "frilvault.gutterMarkerStyle": {
           "type": "string",
           "enum": [

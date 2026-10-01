@@ -5,62 +5,135 @@ import { suite, test } from 'mocha';
 import { ContextualRefresh } from '../features/refresh/contextualRefresh';
 
 suite('Contextual refresh', () => {
-  test('coalesces an in-flight invalidation and bounds repeated feedback', async () => {
+  test('a mutation during a follow-up read remains pending until latest state is published', async () => {
     const refresh = new ContextualRefresh<number>();
+    let persistedRevision = 0;
     let loads = 0;
-    let finishFirst: ((value: number) => void) | undefined;
-    const values: number[] = [];
+    let displayedRevision: number | undefined;
+    const started = [deferred<void>(), deferred<void>(), deferred<void>()];
+    const completions = [deferred<void>(), deferred<void>(), deferred<void>()];
+
     const load = async (): Promise<number> => {
-      loads += 1;
-      if (loads === 1) {
-        return new Promise((resolve) => {
-          finishFirst = resolve;
-        });
-      }
-      if (loads === 2) {
-        void refresh.run('workspace', load, (value) => values.push(value), () => undefined, true);
-      }
-      return loads;
+      const capturedRevision = persistedRevision;
+      const index = loads++;
+      started[index]?.resolve();
+      await completions[index]?.promise;
+      return capturedRevision;
     };
 
-    const first = refresh.run('workspace', load, (value) => values.push(value), () => undefined);
-    await Promise.resolve();
-    const invalidation = refresh.run(
+    const first = refresh.run(
       'workspace',
       load,
-      (value) => values.push(value),
+      (revision) => { displayedRevision = revision; },
+      () => undefined,
+    );
+    await started[0]?.promise;
+
+    persistedRevision = 1;
+    const firstInvalidation = refresh.run(
+      'workspace',
+      load,
+      (revision) => { displayedRevision = revision; },
       () => undefined,
       true,
     );
+    completions[0]?.resolve();
+    await started[1]?.promise;
+
+    persistedRevision = 2;
+    const followUpInvalidation = refresh.run(
+      'workspace',
+      load,
+      (revision) => { displayedRevision = revision; },
+      () => undefined,
+      true,
+    );
+    completions[1]?.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (loads > 2) {
+      completions[2]?.resolve();
+    }
+    await Promise.all([first, firstInvalidation, followUpInvalidation]);
+
+    assert.strictEqual(loads, 3);
+    assert.strictEqual(displayedRevision, 2);
+  });
+
+  test('redundant presentation requests coalesce without invalidating the read', async () => {
+    const refresh = new ContextualRefresh<number>();
+    const completion = deferred<number>();
+    let loads = 0;
+    const values: number[] = [];
+    const load = async () => {
+      loads += 1;
+      return completion.promise;
+    };
+    const publish = (value: number) => values.push(value);
+
+    const first = refresh.run('workspace', load, publish, () => undefined);
+    await Promise.resolve();
+    const second = refresh.run('workspace', load, publish, () => undefined);
+    const third = refresh.run('workspace', load, publish, () => undefined);
+    completion.resolve(7);
+    await Promise.all([first, second, third]);
+
     assert.strictEqual(loads, 1);
-    finishFirst?.(1);
-    await Promise.all([first, invalidation]);
-
-    assert.strictEqual(loads, 2, 'feedback during the follow-up must not start an endless read loop');
-    assert.deepStrictEqual(values, [2], 'the last bounded read still updates the current snapshot');
-
-    await refresh.run('workspace', load, (value) => values.push(value), () => undefined);
-    assert.strictEqual(loads, 3, 'a later independent invalidation can still read new external state');
-    assert.deepStrictEqual(values, [2, 3]);
+    assert.deepStrictEqual(values, [7]);
   });
 
   test('a new context rejects values from an older pending read', async () => {
     const refresh = new ContextualRefresh<string>();
-    let finishOld: ((value: string) => void) | undefined;
+    const oldRead = deferred<string>();
     const values: string[] = [];
     const old = refresh.run(
       'old',
-      () => new Promise((resolve) => {
-        finishOld = resolve;
-      }),
+      () => oldRead.promise,
       (value) => values.push(value),
       () => undefined,
     );
     await Promise.resolve();
     await refresh.run('new', async () => 'current', (value) => values.push(value), () => undefined);
-    finishOld?.('stale');
+    oldRead.resolve('stale');
     await old;
 
     assert.deepStrictEqual(values, ['current']);
   });
+
+  test('dispose rejects a pending value and prevents new reads', async () => {
+    const refresh = new ContextualRefresh<number>();
+    const pending = deferred<number>();
+    const values: number[] = [];
+    let loads = 0;
+    const request = refresh.run(
+      'workspace',
+      () => {
+        loads += 1;
+        return pending.promise;
+      },
+      (value) => values.push(value),
+      () => undefined,
+    );
+    await Promise.resolve();
+    refresh.dispose();
+    pending.resolve(7);
+    await request;
+    await refresh.run('workspace', async () => {
+      loads += 1;
+      return 8;
+    }, (value) => values.push(value), () => undefined);
+
+    assert.deepStrictEqual(values, []);
+    assert.strictEqual(loads, 1);
+  });
 });
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}

@@ -12,6 +12,7 @@ export class NotesFileHeaderItem extends vscode.TreeItem {
   public constructor(
     public readonly sourceFile: string,
     public readonly identity: string,
+    public readonly contextKey: string,
     collapsed: boolean,
   ) {
     super(
@@ -41,9 +42,13 @@ export class NotesStatusItem extends vscode.TreeItem {
 }
 
 export class NotesWorkspaceOverviewItem extends vscode.TreeItem {
-  public constructor() {
-    super('Workspace notes', vscode.TreeItemCollapsibleState.None);
-    this.description = 'No active file';
+  public constructor(
+    public readonly contextKey: string,
+    noteCount: number,
+  ) {
+    super('Workspace notes', vscode.TreeItemCollapsibleState.Expanded);
+    this.id = `workspace-overview:${contextKey}`;
+    this.description = `(${noteCount})`;
     this.iconPath = new vscode.ThemeIcon('files');
     this.contextValue = VIEW_ITEM_CONTEXT.notesStatus;
   }
@@ -54,8 +59,11 @@ export class NotesWorkspaceFolderItem extends vscode.TreeItem {
     public readonly relativePath: string,
     public readonly noteCount: number,
     public readonly children: Array<NotesWorkspaceFolderItem | NotesWorkspaceFileItem>,
+    public readonly identity: string,
+    public readonly contextKey: string,
   ) {
     super(path.posix.basename(relativePath), vscode.TreeItemCollapsibleState.Expanded);
+    this.id = identity;
     this.description = `(${noteCount})`;
     this.iconPath = new vscode.ThemeIcon('folder');
     this.contextValue = VIEW_ITEM_CONTEXT.notesStatus;
@@ -67,8 +75,11 @@ export class NotesWorkspaceFileItem extends vscode.TreeItem {
     public readonly workspaceRoot: string,
     public readonly relativePath: string,
     public readonly noteCount: number,
+    public readonly identity: string,
+    public readonly contextKey: string,
   ) {
     super(path.posix.basename(relativePath), vscode.TreeItemCollapsibleState.None);
+    this.id = identity;
     this.description = `(${noteCount})`;
     this.iconPath = new vscode.ThemeIcon('file');
     this.contextValue = VIEW_ITEM_CONTEXT.notesFileHeader;
@@ -85,6 +96,7 @@ export class NotesSymbolGroupItem extends vscode.TreeItem {
     public readonly symbolName: string,
     public readonly notes: NoteView[],
     identity: string,
+    public readonly contextKey: string,
   ) {
     super(`Symbol: ${symbolName}`, vscode.TreeItemCollapsibleState.Expanded);
     this.id = identity;
@@ -99,6 +111,7 @@ export class NotesAnchorGroupItem extends vscode.TreeItem {
     public readonly kind: AnchorGroupKind,
     public readonly notes: NoteView[],
     identity: string,
+    public readonly contextKey: string,
   ) {
     const label =
       kind === 'Line'
@@ -152,25 +165,25 @@ export class NotesPanelItem extends vscode.TreeItem {
 }
 
 function createPreview(noteView: NoteView): string {
-  return noteView.note.content.length > 60
+  const content = noteView.note.content.length > 60
     ? `${noteView.note.content.slice(0, 57)}...`
     : noteView.note.content;
+  const location = createLocation(noteView);
+  return content ? `${location} — ${content}` : location;
 }
 
-function createDescription(noteView: NoteView): string {
-  let anchor: string;
-
+function createLocation(noteView: NoteView): string {
   if (noteView.note.anchor.type === 'Line') {
-    anchor = `L${noteView.note.anchor.line ?? 1}`;
-  } else {
-    const resolvedLine = noteView.resolved?.line;
-    const lineHint =
-      typeof resolvedLine === 'number' ? `L${resolvedLine}` : 'Unresolved';
-
-    anchor = `${lineHint} ${noteView.note.anchor.name ?? ''}`.trim();
+    return `L${noteView.note.anchor.line ?? 1}`;
   }
 
-  const tags = formatTagList(noteView.note.tags, SIDEBAR_TAG_LIMIT);
+  const name = noteView.note.anchor.name ?? 'Symbol';
+  return noteView.resolved
+    ? `L${noteView.resolved.line} · ${name}`
+    : `Unresolved · ${name}`;
+}
 
-  return tags ? `${anchor} · ${tags}` : anchor;
+function createDescription(noteView: NoteView): string | undefined {
+  const tags = formatTagList(noteView.note.tags, SIDEBAR_TAG_LIMIT);
+  return tags || undefined;
 }

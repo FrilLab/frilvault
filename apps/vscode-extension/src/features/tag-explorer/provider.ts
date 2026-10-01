@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 
 import type { NoteView, TagSummary } from '../../types';
 import { ContextualRefresh } from '../refresh/contextualRefresh';
+import type { RefreshTraceSink } from '../refresh/diagnostics';
 import { prepareTaggedNotes, prepareTagSummaries } from './presentation';
 import {
   createTagNoteItems,
@@ -48,7 +49,7 @@ export class FrilVaultTagExplorerProvider
 implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
   private readonly onDidChangeTreeDataEmitter =
     new vscode.EventEmitter<TagExplorerTreeNode | undefined>();
-  private readonly tagRefresh = new ContextualRefresh<TagSummary[]>();
+  private readonly tagRefresh: ContextualRefresh<TagSummary[]>;
   private readonly noteSnapshots = new Map<string, TagNoteSnapshot>();
   private snapshot: TagSnapshot = { ...EMPTY_SNAPSHOT };
   private contextError: string | undefined;
@@ -64,26 +65,30 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
       workspaceRoot: '',
       vaultRoot: '',
     }),
-  ) {}
+    private readonly trace?: RefreshTraceSink,
+  ) {
+    this.tagRefresh = new ContextualRefresh('tag-summaries', trace);
+  }
 
   /** Refreshes this context; same-context invalidations share the active read. */
-  public async refresh(): Promise<void> {
-    await this.refreshContext(true, true);
+  public async refresh(trigger = 'tag-refresh'): Promise<void> {
+    await this.refreshContext(true, true, trigger);
   }
 
   /** Refresh only tag summaries, for example after changing a tag color. */
   public async refreshTagSummaries(): Promise<void> {
-    await this.refreshContext(true, false);
+    await this.refreshContext(true, false, 'tag-color-change');
   }
 
   /** Refresh expanded tag results without reloading the tag summary list. */
   public async refreshTaggedNotes(): Promise<void> {
-    await this.refreshContext(false, true);
+    await this.refreshContext(false, true, 'tagged-note-change');
   }
 
   private async refreshContext(
     includeSummaries: boolean,
     includeTaggedNotes: boolean,
+    trigger: string,
   ): Promise<void> {
     if (this.disposed) {
       return;
@@ -105,13 +110,13 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
     const jobs: Promise<void>[] = [];
 
     if (includeSummaries) {
-      jobs.push(this.refreshTags(context, contextKey, !contextChanged));
+      jobs.push(this.refreshTags(context, contextKey, !contextChanged, trigger));
     }
 
     if (includeTaggedNotes) {
       for (const [key, snapshot] of this.noteSnapshots) {
         if (key.startsWith(`${contextKey}\0`)) {
-          jobs.push(this.refreshTagNotes(snapshot, contextKey, true));
+          jobs.push(this.refreshTagNotes(snapshot, contextKey, true, trigger));
         }
       }
     }
@@ -195,7 +200,7 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
     }
 
     if (!this.snapshot.loaded && !this.snapshot.loading) {
-      void this.refreshTags(context, contextKey, false);
+      void this.refreshTags(context, contextKey, false, 'tree-view');
     }
     if (!this.snapshot.loaded && this.snapshot.loading) {
       return [new TagExplorerStatusItem('Loading tags...', 'loading~spin')];
@@ -239,7 +244,7 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
     };
     this.notifyTreeChanged();
     if (startLoad) {
-      void this.refreshTags(context, contextKey, false);
+      void this.refreshTags(context, contextKey, false, 'context-change');
     }
   }
 
@@ -247,13 +252,14 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
     context: TagExplorerContext,
     contextKey: string,
     invalidated: boolean,
+    trigger: string,
   ): Promise<void> {
     await this.tagRefresh.run(
       contextKey,
       () => this.loadTags(context),
       (summaries) => {
         if (this.snapshot.contextKey !== contextKey || this.disposed) {
-          return;
+          return false;
         }
         const nextSummaries = prepareTagSummaries(summaries);
         this.pruneRemovedTagNotes(contextKey, nextSummaries);
@@ -266,9 +272,11 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
           error: undefined,
         };
         this.snapshot = next;
-        if (!tagSnapshotsEqual(previous, next)) {
+        const changed = !tagSnapshotsEqual(previous, next);
+        if (changed) {
           this.notifyTreeChanged();
         }
+        return changed;
       },
       (error) => {
         if (this.snapshot.contextKey !== contextKey || this.disposed) {
@@ -286,6 +294,7 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
         }
       },
       invalidated,
+      trigger,
     );
   }
 
@@ -304,10 +313,10 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
         loaded: false,
         loading: false,
         error: undefined,
-        refresh: new ContextualRefresh<NoteView[]>(),
+        refresh: new ContextualRefresh('tagged-notes', this.trace),
       };
       this.noteSnapshots.set(loadKey, snapshot);
-      void this.refreshTagNotes(snapshot, contextKey, false);
+      void this.refreshTagNotes(snapshot, contextKey, false, 'tag-expanded');
     }
 
     if (!snapshot.loaded && snapshot.loading) {
@@ -334,6 +343,7 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
     snapshot: TagNoteSnapshot,
     contextKey: string,
     invalidated: boolean,
+    trigger: string,
   ): Promise<void> {
     const loadKey = `${contextKey}\0${snapshot.tag.trim().toLowerCase()}`;
     snapshot.loading = snapshot.values === undefined;
@@ -343,7 +353,7 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
       (notes) => {
         if (this.disposed || this.snapshot.contextKey !== contextKey
           || this.noteSnapshots.get(loadKey) !== snapshot) {
-          return;
+          return false;
         }
         const values = prepareTaggedNotes(notes);
         const changed = !snapshot.loaded
@@ -356,6 +366,7 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
         if (changed) {
           this.notifyTreeChanged();
         }
+        return changed;
       },
       (error) => {
         if (this.disposed || this.snapshot.contextKey !== contextKey
@@ -372,6 +383,7 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
         }
       },
       invalidated,
+      trigger,
     );
   }
 
