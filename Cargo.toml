@@ -17,7 +17,7 @@ chrono = "0.4.45"
 serde = "1"
 uuid = "1.23.3"
 thiserror = "2"
-toml = "0.5.11"
+toml = "1.1.6"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
