@@ -6,7 +6,7 @@ import type { NoteView, TagSummary } from '../../types';
 import { ContextualRefresh } from '../refresh/contextualRefresh';
 import { prepareTaggedNotes, prepareTagSummaries } from './presentation';
 import {
-  TagExplorerNoteItem,
+  createTagNoteItems,
   TagExplorerStatusItem,
   TagExplorerTagItem,
   type TagExplorerTreeNode,
@@ -68,6 +68,23 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
 
   /** Refreshes this context; same-context invalidations share the active read. */
   public async refresh(): Promise<void> {
+    await this.refreshContext(true, true);
+  }
+
+  /** Refresh only tag summaries, for example after changing a tag color. */
+  public async refreshTagSummaries(): Promise<void> {
+    await this.refreshContext(true, false);
+  }
+
+  /** Refresh expanded tag results without reloading the tag summary list. */
+  public async refreshTaggedNotes(): Promise<void> {
+    await this.refreshContext(false, true);
+  }
+
+  private async refreshContext(
+    includeSummaries: boolean,
+    includeTaggedNotes: boolean,
+  ): Promise<void> {
     if (this.disposed) {
       return;
     }
@@ -84,12 +101,18 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
 
     const contextKey = tagContextKey(context);
     const contextChanged = this.snapshot.contextKey !== contextKey;
-    this.useContext(context, contextKey, false);
-    const jobs = [this.refreshTags(context, contextKey, !contextChanged)];
+    this.useContext(context, contextKey, contextChanged && !includeSummaries);
+    const jobs: Promise<void>[] = [];
 
-    for (const [key, snapshot] of this.noteSnapshots) {
-      if (key.startsWith(`${contextKey}\0`)) {
-        jobs.push(this.refreshTagNotes(snapshot, contextKey, true));
+    if (includeSummaries) {
+      jobs.push(this.refreshTags(context, contextKey, !contextChanged));
+    }
+
+    if (includeTaggedNotes) {
+      for (const [key, snapshot] of this.noteSnapshots) {
+        if (key.startsWith(`${contextKey}\0`)) {
+          jobs.push(this.refreshTagNotes(snapshot, contextKey, true));
+        }
       }
     }
 
@@ -297,8 +320,10 @@ implements vscode.TreeDataProvider<TagExplorerTreeNode>, vscode.Disposable {
       return [];
     }
 
-    const rows: TagExplorerTreeNode[] = prepareTaggedNotes(snapshot.values ?? [])
-      .map((note) => new TagExplorerNoteItem(note));
+    const rows: TagExplorerTreeNode[] = createTagNoteItems(
+      prepareTaggedNotes(snapshot.values ?? []),
+      tag,
+    );
     if (snapshot.error) {
       rows.push(new TagExplorerStatusItem(snapshot.error, 'error'));
     }

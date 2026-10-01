@@ -9,8 +9,16 @@ import { formatTagList, SIDEBAR_TAG_LIMIT } from '../presentation/tagPresentatio
 export type AnchorGroupKind = 'Line' | 'Symbol' | 'Unresolved';
 
 export class NotesFileHeaderItem extends vscode.TreeItem {
-  public constructor(sourceFile: string) {
-    super(sourceFile, vscode.TreeItemCollapsibleState.None);
+  public constructor(
+    public readonly sourceFile: string,
+    public readonly identity: string,
+    collapsed: boolean,
+  ) {
+    super(
+      sourceFile,
+      collapsed ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded,
+    );
+    this.id = identity;
     this.description = 'Active file';
     this.iconPath = new vscode.ThemeIcon('file');
     this.contextValue = VIEW_ITEM_CONTEXT.notesFileHeader;
@@ -76,8 +84,10 @@ export class NotesSymbolGroupItem extends vscode.TreeItem {
   public constructor(
     public readonly symbolName: string,
     public readonly notes: NoteView[],
+    identity: string,
   ) {
     super(`Symbol: ${symbolName}`, vscode.TreeItemCollapsibleState.Expanded);
+    this.id = identity;
     this.description = `${notes.length}`;
     this.iconPath = new vscode.ThemeIcon('symbol-method');
     this.contextValue = VIEW_ITEM_CONTEXT.notesSymbolGroup;
@@ -88,6 +98,7 @@ export class NotesAnchorGroupItem extends vscode.TreeItem {
   public constructor(
     public readonly kind: AnchorGroupKind,
     public readonly notes: NoteView[],
+    identity: string,
   ) {
     const label =
       kind === 'Line'
@@ -97,6 +108,7 @@ export class NotesAnchorGroupItem extends vscode.TreeItem {
           : 'Symbol Notes';
 
     super(label, vscode.TreeItemCollapsibleState.Expanded);
+    this.id = identity;
     this.description = `${notes.length}`;
     this.iconPath = new vscode.ThemeIcon(
       kind === 'Line'
@@ -120,6 +132,12 @@ export class NotesPanelItem extends vscode.TreeItem {
     public readonly workspaceRoot: string,
   ) {
     super(createPreview(noteView), vscode.TreeItemCollapsibleState.None);
+    this.id = JSON.stringify([
+      'note',
+      path.resolve(workspaceRoot),
+      noteView.source_file,
+      noteView.note.id,
+    ]);
 
     this.description = createDescription(noteView);
     this.tooltip = formatNoteHover(noteView, workspaceRoot);
@@ -145,7 +163,7 @@ function createDescription(noteView: NoteView): string {
   if (noteView.note.anchor.type === 'Line') {
     anchor = `L${noteView.note.anchor.line ?? 1}`;
   } else {
-    const resolvedLine = noteView.resolved?.line ?? noteView.note.anchor.line_hint;
+    const resolvedLine = noteView.resolved?.line;
     const lineHint =
       typeof resolvedLine === 'number' ? `L${resolvedLine}` : 'Unresolved';
 

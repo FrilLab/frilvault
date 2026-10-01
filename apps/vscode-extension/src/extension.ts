@@ -26,9 +26,9 @@ import { FrilVaultDecorator } from './features/decorations/decorator';
 import { GutterNoteActions } from './features/decorations/gutterActions';
 import { registerGutterCommands } from './features/decorations/gutterCommands';
 import { GutterNoteRegistry } from './features/decorations/registry';
+import { SelectedNoteHighlighter } from './features/decorations/selectedNote';
 import { FrilVaultHoverProvider } from './features/hover/hoverProvider';
 import { registerFrilVaultHoverProvider } from './features/hover/register';
-import { registerInlineNoteCodeLensProvider } from './features/inline-editor/codelens';
 import {
   createAddNoteCommand,
   createEditNoteCommand,
@@ -83,7 +83,7 @@ let activeNoteCountStore: WorkspaceNoteCountStore | undefined;
 let activeStore: CurrentFileNotesStore | undefined;
 let activeRegistry: GutterNoteRegistry | undefined;
 let activeNoteViewer: NoteViewerController | undefined;
-const codeLensRefreshEmitter = new vscode.EventEmitter<void>();
+let activeSelectedNote: SelectedNoteHighlighter | undefined;
 
 export async function runBackgroundRefresh(
   refresh: () => Promise<void>,
@@ -143,6 +143,7 @@ export function activate(context: vscode.ExtensionContext): void {
     () => cliClient.workspaceExplorer(getWorkspaceRoot()),
     getWorkspaceRoot,
     isEnabled,
+    context.workspaceState,
   );
   const tagExplorerProvider = new FrilVaultTagExplorerProvider(
     (tagContext) => cliClient.tagList(tagContext.workspaceRoot),
@@ -163,6 +164,8 @@ export function activate(context: vscode.ExtensionContext): void {
     isEnabled,
   );
   activeDecorator = decorator;
+  const selectedNoteHighlighter = new SelectedNoteHighlighter(context.extensionPath);
+  activeSelectedNote = selectedNoteHighlighter;
   const noteViewer = new NoteViewerController(store, isEnabled);
   activeNoteViewer = noteViewer;
   const hoverProvider = new FrilVaultHoverProvider(
@@ -190,11 +193,29 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  const refreshAfterMutation = async (editor?: vscode.TextEditor) => {
-    await tagExplorerProvider.refresh();
+  const refreshAffectedViews = async (
+    editor: vscode.TextEditor | undefined,
+    refreshTagData: 'all' | 'notes',
+  ) => {
+    if (refreshTagData === 'all') {
+      await tagExplorerProvider.refresh();
+    } else {
+      await tagExplorerProvider.refreshTaggedNotes();
+    }
     await refreshNoteState(editor);
     await refreshWorkspaceNoteCounts();
     searchRefreshEmitter.fire();
+  };
+
+  const refreshAfterMutation = async (editor?: vscode.TextEditor) => {
+    await refreshAffectedViews(editor, 'all');
+  };
+
+  const refreshAfterInlineNoteChange = async (change = { tagsChanged: true }) => {
+    await refreshAffectedViews(
+      vscode.window.activeTextEditor,
+      change.tagsChanged ? 'all' : 'notes',
+    );
   };
 
   const refreshCurrentFile = async (editor: vscode.TextEditor | undefined) => {
@@ -224,7 +245,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const inlineNoteEditor = createInlineNoteEditor({
     cliClient,
     getWorkspaceRoot,
-    refreshNoteState: () => refreshAfterMutation(),
+    refreshNoteState: refreshAfterInlineNoteChange,
     showWarningMessage: (message) => vscode.window.showWarningMessage(message),
   });
   inlineNoteEditor.register(context);
@@ -246,6 +267,7 @@ export function activate(context: vscode.ExtensionContext): void {
     gutterRegistry.clear();
     decorator.clear();
     noteViewer.clearAll();
+    selectedNoteHighlighter.clear();
     notesProvider.refresh();
     tagExplorerProvider.clear();
     environmentProvider?.refresh();
@@ -285,7 +307,6 @@ export function activate(context: vscode.ExtensionContext): void {
     notesProvider.refresh();
     void decorator.refresh();
     void noteViewer.refresh();
-    codeLensRefreshEmitter.fire();
   };
 
   store.onDidChange(onStoreChanged, undefined, context.subscriptions);
@@ -343,6 +364,7 @@ export function activate(context: vscode.ExtensionContext): void {
     store,
     noteCountStore,
     decorator,
+    selectedNoteHighlighter,
     noteViewer,
     registerFrilVaultHoverProvider(context, hoverProvider),
     vscode.commands.registerCommand(COMMAND_IDS.notesPanelOpenNote, async (noteView: NoteView) => {
@@ -350,7 +372,15 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      await revealNote(noteView, getWorkspaceRoot());
+      selectedNoteHighlighter.clear();
+      const target = await revealNote(noteView, getWorkspaceRoot());
+      if (target) {
+        selectedNoteHighlighter.select(target.editor.document.uri.toString(), target.line);
+      } else {
+        await vscode.window.showWarningMessage(
+          `This note's source anchor no longer resolves. Use Edit Note to repair it.`,
+        );
+      }
     }),
     vscode.commands.registerCommand(
       COMMAND_IDS.enable,
@@ -418,7 +448,7 @@ export function activate(context: vscode.ExtensionContext): void {
       runWhenEnabled(createSetTagColorCommand({
         cliClient,
         getWorkspaceRoot,
-        refresh: refreshAfterMutation,
+        refresh: () => tagExplorerProvider.refreshTagSummaries(),
       })),
     ),
     vscode.commands.registerCommand(
@@ -426,7 +456,7 @@ export function activate(context: vscode.ExtensionContext): void {
       runWhenEnabled(createRemoveTagColorCommand({
         cliClient,
         getWorkspaceRoot,
-        refresh: refreshAfterMutation,
+        refresh: () => tagExplorerProvider.refreshTagSummaries(),
       })),
     ),
     vscode.commands.registerCommand(
@@ -514,14 +544,6 @@ export function activate(context: vscode.ExtensionContext): void {
   registerNoteUriHandler(context, { cliClient, isEnabled });
   registerExplorerNoteCountDecorations(context, noteCountStore, getWorkspaceRoot, isEnabled);
   noteViewer.register(context);
-  registerInlineNoteCodeLensProvider(
-    context,
-    store,
-    getWorkspaceRoot,
-    isEnabled,
-    codeLensRefreshEmitter.event,
-  );
-
   void syncEnabledContext(isEnabled()).then(async () => {
     try {
       if (isEnabled()) {
@@ -548,11 +570,13 @@ export function deactivate(): void {
   disposeNotesTreeDataProvider();
   activeDecorator?.clear();
   activeNoteViewer?.clearAll();
+  activeSelectedNote?.clear();
   activeStore?.clear();
   activeNoteCountStore?.clear();
   activeRegistry?.clear();
   activeDecorator = undefined;
   activeNoteViewer = undefined;
+  activeSelectedNote = undefined;
   activeStore = undefined;
   activeNoteCountStore = undefined;
   activeRegistry = undefined;

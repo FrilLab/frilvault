@@ -1,5 +1,6 @@
 /** Coalesces refreshes by context and discards responses from older contexts. */
 export class ContextualRefresh<T> {
+  private static readonly MAX_FOLLOW_UP_READS = 1;
   private generation = 0;
   private active:
     | {
@@ -63,6 +64,8 @@ export class ContextualRefresh<T> {
     onValue: (value: T) => void,
     onError: (error: unknown) => void,
   ): Promise<void> {
+    let followUpReads = 0;
+
     while (this.isCurrent(request)) {
       request.invalidated = false;
 
@@ -71,22 +74,26 @@ export class ContextualRefresh<T> {
         if (!this.isCurrent(request)) {
           return;
         }
-        if (request.invalidated) {
+        if (request.invalidated && followUpReads < ContextualRefresh.MAX_FOLLOW_UP_READS) {
+          followUpReads += 1;
           continue;
         }
         onValue(value);
-        if (request.invalidated) {
+        if (request.invalidated && followUpReads < ContextualRefresh.MAX_FOLLOW_UP_READS) {
+          followUpReads += 1;
           continue;
         }
       } catch (error) {
         if (!this.isCurrent(request)) {
           return;
         }
-        if (request.invalidated) {
+        if (request.invalidated && followUpReads < ContextualRefresh.MAX_FOLLOW_UP_READS) {
+          followUpReads += 1;
           continue;
         }
         onError(error);
-        if (request.invalidated) {
+        if (request.invalidated && followUpReads < ContextualRefresh.MAX_FOLLOW_UP_READS) {
+          followUpReads += 1;
           continue;
         }
       }
