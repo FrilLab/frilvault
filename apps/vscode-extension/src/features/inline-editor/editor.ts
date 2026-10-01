@@ -42,7 +42,7 @@ import {
 export interface InlineNoteEditorDependencies {
   cliClient: CliClient;
   getWorkspaceRoot?: () => string;
-  refreshNoteState: () => Promise<void>;
+  refreshNoteState: (change?: { tagsChanged: boolean }) => Promise<void>;
   showErrorMessage?: (message: string) => Thenable<string | undefined>;
   showInformationMessage?: (message: string) => Thenable<string | undefined>;
   showWarningMessage?: (message: string) => Thenable<string | undefined>;
@@ -514,7 +514,7 @@ export class InlineNoteEditor implements vscode.Disposable {
       }
 
       try {
-        await this.dependencies.refreshNoteState();
+        await this.dependencies.refreshNoteState({ tagsChanged: true });
       } catch (error) {
         await this.reportOptionalFailure('refreshing note views', error, 'deleted');
       }
@@ -610,7 +610,9 @@ export class InlineNoteEditor implements vscode.Disposable {
     this.panel.updateDraft(this.draft, { status: 'saved', canDelete: true });
 
     try {
-      await this.dependencies.refreshNoteState();
+      await this.dependencies.refreshNoteState({
+        tagsChanged: !sameTags(draftAtSaveStart.tagsText, saved.note.tags ?? []),
+      });
     } catch (error) {
       await this.reportOptionalFailure('refreshing note views', error, 'saved');
     }
@@ -857,6 +859,14 @@ function notePreview(note: NoteView): string {
   const content = Array.from(firstLine).slice(0, 64).join('');
   const tags = (note.note.tags ?? []).map((tag) => `#${tag}`).join(' ');
   return [content, tags].filter(Boolean).join(' · ') || 'Empty note';
+}
+
+function sameTags(tagsText: string, tags: string[]): boolean {
+  const normalize = (values: string[]) => [...new Set(values
+    .map((tag) => tag.trim().replace(/^#+/, '').trim().toLocaleLowerCase())
+    .filter(Boolean))].sort();
+
+  return JSON.stringify(normalize(tagsText.split(','))) === JSON.stringify(normalize(tags));
 }
 
 function isConcurrentModificationError(error: unknown): boolean {

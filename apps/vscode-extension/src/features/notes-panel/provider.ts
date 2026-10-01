@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 
 import { COMMAND_IDS } from '../../constants/ids';
 import {
   CurrentFileNotesStore,
 } from '../current-file/store';
 import type { WorkspaceExplorer } from '../../types';
+import { getVaultRoot } from '../../utils/file';
 import {
   buildWorkspaceNoteTreeFromExplorer,
   groupNotesByAnchor,
@@ -32,7 +34,9 @@ type TreeNode =
   | NotesWorkspaceFileItem;
 
 export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode> {
+  private static readonly FILE_COLLAPSE_STATE_KEY = 'frilvault.notes.collapsedFiles.v1';
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<void>();
+  private readonly collapsedFiles: Record<string, boolean>;
   private workspaceOverviewLoad: Promise<void> | undefined;
   private workspaceOverviewError: string | undefined;
   private workspaceOverview: WorkspaceExplorer | undefined;
@@ -44,7 +48,13 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
     private readonly loadWorkspaceOverview: () => Promise<WorkspaceExplorer>,
     private readonly getWorkspaceRoot: () => string,
     private readonly isEnabled: () => boolean = () => true,
-  ) {}
+    private readonly workspaceState?: vscode.Memento,
+  ) {
+    this.collapsedFiles = workspaceState?.get<Record<string, boolean>>(
+      FrilVaultNotesProvider.FILE_COLLAPSE_STATE_KEY,
+      {},
+    ) ?? {};
+  }
 
   public refresh(): void {
     this.workspaceOverview = undefined;
@@ -56,6 +66,14 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
     return element;
   }
 
+  public setFileCollapsed(item: NotesFileHeaderItem, collapsed: boolean): void {
+    this.collapsedFiles[item.identity] = collapsed;
+    void this.workspaceState?.update(
+      FrilVaultNotesProvider.FILE_COLLAPSE_STATE_KEY,
+      this.collapsedFiles,
+    );
+  }
+
   public async getChildren(element?: TreeNode): Promise<TreeNode[]> {
     if (!this.isEnabled()) {
       return [new NotesStatusItem('Disabled for this workspace.', 'debug-pause')];
@@ -65,6 +83,16 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
 
     if (element instanceof NotesSymbolGroupItem || element instanceof NotesAnchorGroupItem) {
       return element.notes.map((note) => new NotesPanelItem(note, this.getWorkspaceRoot()));
+    }
+
+    if (element instanceof NotesFileHeaderItem) {
+      if (
+        snapshot.sourceFile !== element.sourceFile ||
+        this.fileIdentity(element.sourceFile) !== element.identity
+      ) {
+        return [];
+      }
+      return this.currentFileChildren(snapshot, element.identity);
     }
 
     if (element instanceof NotesWorkspaceOverviewItem) {
@@ -91,33 +119,57 @@ export class FrilVaultNotesProvider implements vscode.TreeDataProvider<TreeNode>
       return this.workspaceOverviewRoot();
     }
 
+    return [this.createFileHeader(snapshot.sourceFile)];
+  }
+
+  private currentFileChildren(snapshot: ReturnType<CurrentFileNotesStore['getSnapshot']>, fileIdentity: string): TreeNode[] {
     if (snapshot.notes.length === 0) {
-      return [
-        new NotesFileHeaderItem(snapshot.sourceFile),
-        new NotesStatusItem(
-          'No notes are attached to this file.',
-          'note',
-          COMMAND_IDS.addNote,
-        ),
-      ];
+      return [new NotesStatusItem(
+        'No notes are attached to this file.',
+        'note',
+        COMMAND_IDS.addNote,
+      )];
     }
 
     const groups = groupNotesByAnchor(snapshot.notes);
-    const children: TreeNode[] = [new NotesFileHeaderItem(snapshot.sourceFile)];
+    const children: TreeNode[] = [];
 
     for (const group of groups.symbolGroups) {
-      children.push(new NotesSymbolGroupItem(group.name, group.notes));
+      children.push(new NotesSymbolGroupItem(
+        group.name,
+        group.notes,
+        `${fileIdentity}:symbol:${group.name}`,
+      ));
     }
 
     if (groups.lineNotes.length > 0) {
-      children.push(new NotesAnchorGroupItem('Line', groups.lineNotes));
+      children.push(new NotesAnchorGroupItem('Line', groups.lineNotes, `${fileIdentity}:line`));
     }
 
     if (groups.unresolvedNotes.length > 0) {
-      children.push(new NotesAnchorGroupItem('Unresolved', groups.unresolvedNotes));
+      children.push(new NotesAnchorGroupItem(
+        'Unresolved',
+        groups.unresolvedNotes,
+        `${fileIdentity}:unresolved`,
+      ));
     }
 
     return children;
+  }
+
+  private createFileHeader(sourceFile: string): NotesFileHeaderItem {
+    const identity = this.fileIdentity(sourceFile);
+    return new NotesFileHeaderItem(sourceFile, identity, this.collapsedFiles[identity] ?? false);
+  }
+
+  private fileIdentity(sourceFile: string): string {
+    const workspaceRoot = this.getWorkspaceRoot();
+    return JSON.stringify([
+      'file',
+      path.resolve(workspaceRoot),
+      path.resolve(getVaultRoot(workspaceRoot)),
+      sourceFile,
+    ]);
   }
 
   private workspaceOverviewRoot(): TreeNode[] {

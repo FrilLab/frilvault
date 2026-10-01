@@ -9,6 +9,7 @@ import {
   parseTagsText,
   validateInlineNoteForm,
 } from '../features/inline-editor/draft';
+import { renderPanelHtml } from '../features/inline-editor/panel';
 import type { NoteView } from '../types';
 
 suite('Inline note editor draft', () => {
@@ -70,6 +71,37 @@ suite('Inline note editor draft', () => {
 
     assert.strictEqual(draft.line, 4);
     assert.strictEqual(draft.column, 2);
+  });
+
+  test('short-note editor uses compact location and responsive growing content input', () => {
+    const draft = createLineCreateDraft({
+      workspaceRoot: '/tmp/workspace',
+      sourceFile: 'src/main.rs',
+      line: 4,
+      column: 2,
+    });
+    const html = renderPanelHtml(draft);
+
+    assert.match(html, /aria-label="Note location">src\/main\.rs · L4/);
+    assert.match(html, /min-height: calc\(1\.4em \* 4 \+ 16px\)/);
+    assert.match(html, /max-height: 50vh/);
+    assert.match(html, /max-width: 720px/);
+    assert.match(html, /function resizeContent\(\)/);
+    assert.doesNotMatch(html, /min-height: 220px|tag-preview|tag-chip/);
+  });
+
+  test('editing an unresolved Symbol does not present its saved line hint as verified', () => {
+    const draft = createEditDraft({
+      source_file: 'src/main.rs',
+      note: {
+        id: 'unresolved-symbol',
+        content: 'note',
+        anchor: { type: 'Symbol', name: 'missing', kind: 'Function', line_hint: 90 },
+      },
+    }, '/tmp/workspace');
+
+    assert.strictEqual(draft.anchorSummary, 'Symbol missing · Unresolved');
+    assert.doesNotMatch(draft.anchorSummary, /90/);
   });
 });
 

@@ -9,7 +9,9 @@ import { FrilVaultTagExplorerProvider } from '../features/tag-explorer/provider'
 import {
   prepareTaggedNotes,
   prepareTagSummaries,
+  tagFileIdentities,
   tagNoteDescription,
+  tagNoteLabel,
 } from '../features/tag-explorer/presentation';
 import { TagExplorerTagItem } from '../features/tag-explorer/view';
 import type { NoteView } from '../types';
@@ -32,8 +34,10 @@ suite('Tag explorer', () => {
   test('shows counts and expands tags into file, anchor, and preview details', async () => {
     let tagLoads = 0;
     let noteLoads = 0;
+    const symbolNote = createSymbolNote('src/parser.rs', 'parse', 'Improve error recovery', 12);
+    symbolNote.resolved = { line: 12, column: 1 };
     const notes = [
-      createSymbolNote('src/parser.rs', 'parse', 'Improve error recovery', 12),
+      symbolNote,
       createLineNote('src/main.rs', 7, 3, 'Replace temporary initialization'),
     ];
     const provider = new FrilVaultTagExplorerProvider(
@@ -58,11 +62,11 @@ suite('Tag explorer', () => {
     const children = await getLoadedChildren(provider, tags[0]);
 
     assert.deepStrictEqual(children.map((item) => item.label), [
-      'Replace temporary initialization',
-      'Improve error recovery',
+      'L7 · main.rs · todo — Replace temporary initialization',
+      'L12 · parser.rs · todo — Improve error recovery',
     ]);
-    assert.strictEqual(children[0]?.description, 'src/main.rs · Line 7:3');
-    assert.strictEqual(children[1]?.description, 'src/parser.rs · Symbol parse · Line 12');
+    assert.strictEqual(children[0]?.description, undefined);
+    assert.strictEqual(children[1]?.description, undefined);
     assert.strictEqual(children[0]?.command?.command, 'frilvault.notesPanel.openNote');
 
     await getLoadedChildren(provider, tags[0]);
@@ -305,6 +309,7 @@ suite('Tag explorer', () => {
   test('supports line and symbol anchor descriptions and deterministic note ordering', () => {
     const line = createLineNote('src/b.rs', 2, 4, 'line note');
     const symbol = createSymbolNote('src/a.rs', 'run', 'symbol note', 8);
+    symbol.resolved = { line: 8, column: 2 };
     const unresolved = createSymbolNote('src/a.rs', 'missing', 'unresolved note');
 
     assert.strictEqual(tagNoteDescription(line), 'src/b.rs · Line 2:4');
@@ -317,6 +322,54 @@ suite('Tag explorer', () => {
       prepareTaggedNotes([line, symbol, unresolved]).map((note) => note.note.content),
       ['symbol note', 'unresolved note', 'line note'],
     );
+  });
+
+  test('puts verified locations before previews and disambiguates duplicate basenames', () => {
+    const left = createLineNote('src/left/lib.rs', 16, 1, 'long body '.repeat(20));
+    const right = createSymbolNote('vendor/right/lib.rs', 'parse', 'symbol body', 99);
+    right.resolved = { line: 14, column: 3 };
+    const identities = tagFileIdentities([left, right]);
+
+    assert.strictEqual(identities.get('src/left/lib.rs'), 'left/lib.rs');
+    assert.strictEqual(identities.get('vendor/right/lib.rs'), 'right/lib.rs');
+    assert.match(
+      tagNoteLabel(left, identities.get('src/left/lib.rs') ?? '', 'security'),
+      /^L16 · left\/lib\.rs · security — /,
+    );
+    assert.match(
+      tagNoteLabel(right, identities.get('vendor/right/lib.rs') ?? '', 'security'),
+      /^L14 · right\/lib\.rs · security — /,
+    );
+
+    const unresolved = createSymbolNote('src/missing.rs', 'missing', 'still useful', 88);
+    const unresolvedLabel = tagNoteLabel(unresolved, 'missing.rs', 'security');
+    assert.match(unresolvedLabel, /^Unresolved · missing\.rs · security — still useful/);
+    assert.doesNotMatch(unresolvedLabel, /L88/);
+  });
+
+  test('refreshes expanded Tag rows without reloading summaries for body-only saves', async () => {
+    let tagLoads = 0;
+    let noteLoads = 0;
+    const updated = createLineNote('src/main.rs', 2, 1, 'before');
+    const provider = new FrilVaultTagExplorerProvider(
+      async () => {
+        tagLoads += 1;
+        return [{ tag: 'todo', note_count: 1 }];
+      },
+      async () => {
+        noteLoads += 1;
+        return [{ ...updated, note: { ...updated.note, content: noteLoads === 1 ? 'before' : 'after' } }];
+      },
+    );
+
+    const tags = await getLoadedChildren(provider);
+    await getLoadedChildren(provider, tags[0]);
+    await provider.refreshTaggedNotes();
+
+    assert.strictEqual(tagLoads, 1);
+    assert.strictEqual(noteLoads, 2);
+    const rows = await getLoadedChildren(provider, tags[0]);
+    assert.match(String(rows[0]?.label), /after/);
   });
 
   test('shows a useful empty state when the workspace has no tagged notes', async () => {
@@ -337,7 +390,7 @@ suite('Tag explorer', () => {
       activationEvents?: string[];
       contributes?: {
         views?: { explorer?: Array<{ id: string }> };
-        commands?: Array<{ command: string }>;
+        commands?: Array<{ command: string; icon?: string }>;
         menus?: { 'view/item/context'?: Array<{ command: string; when?: string }> };
       };
     };
@@ -352,6 +405,14 @@ suite('Tag explorer', () => {
         (item) => item.command === command && item.when?.includes('viewItem == frilvault.tag'),
       ));
     }
+    assert.strictEqual(
+      packageJson.contributes?.commands?.find((item) => item.command === COMMAND_IDS.setTagColor)?.icon,
+      '$(symbol-color)',
+    );
+    assert.strictEqual(
+      packageJson.contributes?.commands?.find((item) => item.command === COMMAND_IDS.removeTagColor)?.icon,
+      '$(clear-all)',
+    );
   });
 });
 
