@@ -96,7 +96,7 @@ jobs:
         run: brew untap aws/tap || true
 
       - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: stable
 
