@@ -35,6 +35,24 @@ suite('Unified Add / Edit Note', function () {
     assert.deepStrictEqual(calls, ['cursor', exact, ['legacy-1', exact.source_file], 'cursor']);
   });
 
+  test('editor context URI dispatch retains the invoking file and partial note targets cannot create', async () => {
+    const fixture = await sourceFixture('source');
+    let invoked: vscode.TextEditor | undefined;
+    let error = '';
+    const command = createAddOrEditNoteCommand({
+      openCreateHere: async (editor: vscode.TextEditor) => { invoked = editor; },
+    } as unknown as InlineNoteEditor, async (message) => { error = message; return undefined; });
+    try {
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ content: 'other split' }), vscode.ViewColumn.Two);
+      await command(fixture.editor.document.uri);
+      assert.strictEqual(invoked?.document.uri.toString(), fixture.editor.document.uri.toString());
+      invoked = undefined;
+      await command('partial-note-id');
+      assert.strictEqual(invoked, undefined);
+      assert.match(error, /ID and source file/);
+    } finally { await fixture.dispose(); }
+  });
+
   test('reports an actionable no-source error without mutation', async () => {
     let error = '';
     await createAddOrEditNoteCommand({
