@@ -16,6 +16,7 @@ export interface NoteRevisionSnapshot {
 export interface InlineNoteDraft {
   mode: InlineEditorMode;
   workspaceRoot: string;
+  vaultPath?: string;
   sourceFile: string;
   noteId?: string;
   kind: 'Line' | 'Symbol';

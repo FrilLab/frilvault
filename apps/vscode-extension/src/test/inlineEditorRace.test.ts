@@ -36,7 +36,7 @@ suite('Inline note editor race handling', () => {
       panel,
     });
 
-    editor.openEdit(createLineNoteView('note'));
+    await editor.openEdit(createLineNoteView('note'));
     await waitFor(() => panel.tagSuggestions.length === 2);
 
     assert.deepStrictEqual(panel.tagSuggestions, ['performance', 'permission']);
@@ -64,7 +64,7 @@ suite('Inline note editor race handling', () => {
         new DebouncedAutoSave(0, onStatusChange, persist),
     });
 
-    editor.openEdit(createLineNoteView('te'));
+    await editor.openEdit(createLineNoteView('te'));
 
     await panel.emit({ type: 'change', content: 'tes', tagsText: '' });
     const flush = panel.emit({ type: 'retry' });
@@ -105,7 +105,7 @@ suite('Inline note editor race handling', () => {
       createAutoSave: (onStatusChange, persist) => autoSave.bind(onStatusChange, persist),
     });
 
-    editor.openEdit(createLineNoteView('a'));
+    await editor.openEdit(createLineNoteView('a'));
 
     await panel.emit({ type: 'change', content: 'ab', tagsText: '' });
     await panel.emit({ type: 'change', content: 'abc', tagsText: '' });
@@ -136,7 +136,7 @@ suite('Inline note editor race handling', () => {
         new DebouncedAutoSave(0, onStatusChange, persist),
     });
 
-    editor.openEdit(createLineNoteView(''));
+    await editor.openEdit(createLineNoteView(''));
 
     await panel.emit({ type: 'compositionStart' });
     await panel.emit({ type: 'change', content: 'ㅌ', tagsText: '' });
@@ -170,11 +170,11 @@ suite('Inline note editor race handling', () => {
         new DebouncedAutoSave(60_000, onStatusChange, persist),
     });
 
-    editor.openEdit(persisted);
+    await editor.openEdit(persisted);
     await panel.emit({ type: 'change', content: 'latest typed characters', tagsText: '' });
 
     panel.disposeNatively();
-    editor.openEdit(createLineNoteView('before close'));
+    await editor.openEdit(createLineNoteView('before close'));
     await waitFor(() => panel.openCount === 2);
 
     assert.strictEqual(saveCount, 1);
@@ -234,10 +234,10 @@ process.exit(1);
     });
 
     try {
-      editor.openEdit(initialNote);
+      await editor.openEdit(initialNote);
       await panel.emit({ type: 'change', content: 'last persisted characters', tagsText: '' });
       panel.disposeNatively();
-      editor.openEdit(initialNote);
+      await editor.openEdit(initialNote);
       await waitFor(() => panel.openCount === 2, 5_000);
 
       const persisted = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { notes: NoteView[] };
@@ -267,11 +267,11 @@ process.exit(1);
         new DebouncedAutoSave(60_000, onStatusChange, persist),
     }, state);
 
-    editor.openEdit(createLineNoteView('before close'));
+    await editor.openEdit(createLineNoteView('before close'));
     await panel.emit({ type: 'change', content: 'last characters typed', tagsText: '#keep' });
 
     panel.disposeNatively();
-    editor.openEdit(createLineNoteView('before close'));
+    await editor.openEdit(createLineNoteView('before close'));
     await waitFor(() => panel.openCount === 2);
 
     assert.strictEqual(saveCount, 1);
@@ -295,7 +295,7 @@ process.exit(1);
         new DebouncedAutoSave(60_000, onStatusChange, persist),
     });
 
-    editor.openEdit(createLineNoteView('before close'));
+    await editor.openEdit(createLineNoteView('before close'));
     await panel.emit({ type: 'change', content: 'unsaved draft', tagsText: '' });
     await panel.emit({ type: 'close' });
 
@@ -329,7 +329,7 @@ process.exit(1);
         new DebouncedAutoSave(60_000, onStatusChange, persist),
     });
 
-    editor.openEdit(createLineNoteView('before refresh'));
+    await editor.openEdit(createLineNoteView('before refresh'));
     await panel.emit({ type: 'change', content: 'persisted once', tagsText: '' });
     await panel.emit({ type: 'retry' });
 
@@ -355,7 +355,7 @@ process.exit(1);
         new DebouncedAutoSave(60_000, onStatusChange, persist),
     });
 
-    editor.openEdit(createLineNoteView('before disable'));
+    await editor.openEdit(createLineNoteView('before disable'));
     editor.suspend();
     await panel.emit({ type: 'change', content: 'typed while disabled', tagsText: '' });
 

@@ -34,6 +34,7 @@ export interface InlineNotePanelLike {
   ): void;
   updateTagSuggestions?(tags: string[]): void;
   updateTagMetadata?(tags: TagSummary[]): void;
+  reveal?(): void;
   close(): void;
   isOpen(): boolean;
 }
@@ -119,6 +120,10 @@ export class InlineNotePanel implements InlineNotePanelLike {
     }
 
     void this.panel.webview.postMessage(message);
+  }
+
+  public reveal(): void {
+    this.panel?.reveal(vscode.ViewColumn.Beside, false);
   }
 
   public close(): void {

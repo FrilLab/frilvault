@@ -25,7 +25,16 @@ export class InlineNoteDraftRecoveryStore {
   public constructor(private readonly state: vscode.Memento) {}
 
   public get(draft: InlineNoteDraft): RecoveredInlineNoteDraft | undefined {
-    return this.readState()[recoveryId(draft)];
+    const state = this.readState();
+    const scoped = state[recoveryId(draft)];
+    if (scoped) {
+      return scoped;
+    }
+    // Keep pre-Vault-scoping drafts recoverable; a revision mismatch is handled
+    // as a conflict by the editor, and recovery is pinned to the chosen Vault.
+    const legacy = state[legacyRecoveryId(draft)];
+    return legacy?.draft.vaultPath && legacy.draft.vaultPath !== draft.vaultPath
+      ? undefined : legacy;
   }
 
   public write(
@@ -88,11 +97,20 @@ export function recoveryId(draft: InlineNoteDraft): string {
         draft.column,
         draft.symbolName,
         draft.symbolKind,
+        draft.symbolSignature,
       ];
 
   return JSON.stringify([
     path.resolve(draft.workspaceRoot),
+    draft.vaultPath ?? null,
     draft.sourceFile,
     ...identity,
   ]);
+}
+
+function legacyRecoveryId(draft: InlineNoteDraft): string {
+  const identity = draft.noteId ? ['note', draft.noteId] : [
+    'create', draft.kind, draft.line, draft.column, draft.symbolName, draft.symbolKind,
+  ];
+  return JSON.stringify([path.resolve(draft.workspaceRoot), draft.sourceFile, ...identity]);
 }

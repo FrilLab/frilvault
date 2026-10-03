@@ -39,6 +39,32 @@ suite('Note viewer delete action', () => {
     assert.deepStrictEqual(deletedIds, []);
   });
 
+  test('editing from a pending action menu keeps its captured note and target after focus changes', async () => {
+    const document = await vscode.workspace.openTextDocument({ content: 'source' });
+    await vscode.window.showTextDocument(document);
+    const selected = noteView('selected', 'parseSelected', 'original target', []);
+    let target = 'original-vault';
+    const edited: string[] = [];
+    const actions = new GutterNoteActions({
+      cliClient: {} as CliClient,
+      registry: { findNote: () => selected } as never,
+      getWorkspaceRoot: () => '/tmp/workspace',
+      invalidateViews: async () => undefined,
+      openInlineEditor: () => { assert.fail('Use the prepared target'); },
+      prepareInlineEditor: async () => {
+        const captured = target;
+        return async (note) => { edited.push(`${captured}:${note.note.id}`); };
+      },
+      showQuickPick: async <T extends vscode.QuickPickItem>(items: readonly T[]) => {
+        target = 'other-vault';
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        return items.find((item) => item.label === 'Edit');
+      },
+    });
+    await actions.showActionsForNotes(['selected'], 'src/a.ts');
+    assert.deepStrictEqual(edited, ['original-vault:selected']);
+  });
+
   test('confirmation deletes only the selected note', async () => {
     const deletedIds: string[] = [];
     const invalidations: number[] = [];

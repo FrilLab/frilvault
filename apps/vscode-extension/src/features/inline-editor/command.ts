@@ -3,27 +3,25 @@ import * as vscode from 'vscode';
 import type { NoteView } from '../../types';
 import type { InlineNoteEditor } from './editor';
 
-export function createAddNoteCommand(
+/** Unified dispatch used by the palette, shortcut, and compatibility aliases. */
+export function createAddOrEditNoteCommand(
   editor: InlineNoteEditor,
-): () => Promise<void> {
-  return async () => {
-    await editor.openCreateHere();
-  };
-}
-
-export function createEditNoteCommand(
-  editor: InlineNoteEditor,
+  showErrorMessage = (message: string) => vscode.window.showErrorMessage(message),
 ): (noteId?: string, sourceFile?: string, noteView?: NoteView) => Promise<void> {
-  return async (noteId?: string, sourceFile?: string, noteView?: NoteView) => {
-    if (noteView) {
-      editor.openEdit(noteView);
-      return;
+  return async (noteId, sourceFile, noteView) => {
+    try {
+      if (noteView) {
+        await editor.openEdit(noteView);
+      } else if (noteId && sourceFile) {
+        await editor.openEditById(noteId, sourceFile);
+      } else {
+        await editor.openCreateHere();
+      }
+    } catch (error) {
+      await showErrorMessage(error instanceof Error ? error.message : 'Could not open a note.');
     }
-
-    if (!noteId || !sourceFile) {
-      throw new Error('Edit note requires a note id and source file.');
-    }
-
-    editor.openEditById(noteId, sourceFile);
   };
 }
+
+export const createAddNoteCommand = createAddOrEditNoteCommand;
+export const createEditNoteCommand = createAddOrEditNoteCommand;
