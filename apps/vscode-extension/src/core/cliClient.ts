@@ -197,6 +197,14 @@ export class CliClient {
     };
   }
 
+  /** Freeze the selected Vault for a pending editor operation, including discovery. */
+  public withVaultPath(vaultPath: string | undefined): CliClient {
+    return new CliClient({
+      ...this.dependencies,
+      getConfiguredVaultPath: () => vaultPath,
+    });
+  }
+
   public async addLineNote(input: AddLineNoteInput): Promise<NoteView> {
     const args = [
       'add',

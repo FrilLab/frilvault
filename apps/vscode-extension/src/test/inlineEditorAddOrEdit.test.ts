@@ -68,8 +68,8 @@ suite('Inline note add or edit by anchor', () => {
     const line = noteView('line-note', { type: 'Line', line: 18, column: 1 }, 'line note');
     let chooserDescriptions: string[] = [];
     const setup = createEditor([first, selected, line], (items) => {
-      chooserDescriptions = items.map((item) => item.description ?? '');
-      return items.find((item) => item.description?.includes('selected legacy note'));
+      chooserDescriptions = items.map((item) => item.label);
+      return items.find((item) => item.label.includes('selected legacy note'));
     });
 
     try {

@@ -73,7 +73,7 @@ CodeLens is the closest stable supported editor API for this UI. Unresolved symb
 
 | Label | Command ID | Description |
 | --- | --- | --- |
-| `Add` | `frilvault.addNote` | Add a note at the current line or symbol |
+| `Add / Edit Note` | `frilvault.addOrEditNote` | Add or edit the chosen Line position or Symbol identity |
 | `Show Notes` | `frilvault.showNotesForCurrentFile` | Show notes for the active file |
 | `Search Notes` | `frilvault.searchNotes` | Search notes in the current workspace with the native Quick Pick |
 | `Show Stats` | `frilvault.showStats` | Show workspace note statistics |
@@ -85,6 +85,42 @@ CodeLens is the closest stable supported editor API for this UI. Unresolved symb
 | `Run with Environment Profile` | `frilvault.environment.run` | Launch a direct child command with a profile injected by the CLI |
 
 The viewer also exposes `frilvault.noteViewer.toggle` and `frilvault.noteViewer.actions` through its CodeLens rows; these commands receive stable note IDs from the provider.
+
+### Add / Edit Note shortcut
+
+Use **FrilVault: Add / Edit Note** from the Command Palette or the existing `+`
+controls. The default shortcut is **⌘K, ⌘N** on macOS and **Ctrl+K, Ctrl+N** on
+Windows/Linux (press the two combinations in sequence). Remap
+`frilvault.addOrEditNote` in VS Code Keyboard Shortcuts.
+
+The shortcut runs only when a trusted, enabled workspace's source editor has
+text focus. It excludes files inside the selected Vault, terminals, search
+inputs, note inputs, and unrelated webviews. If no eligible source file or
+initialized Vault is available, the command explains the required action;
+invoking it never initializes storage.
+
+On a code line with a symbol, choose **Line** or **Symbol** using the keyboard.
+Blank lines and files without a symbol provider use Line directly. Escape
+cancels without creating a note. A Line identity is the existing exact
+one-based **line and column**; a Symbol identity is **name, kind and signature**,
+with its line hint used only for location. These two anchor kinds can have notes
+on the same displayed line. Repeating the action for an existing identity edits
+its note. Existing duplicates remain available through a separate, stable
+chooser showing previews and note IDs. A specific note's Edit control opens
+that exact note directly. The original workspace, Vault and anchor remain the
+save target when focus or configuration changes.
+
+The current note editor is reused; editing beside code is tracked separately
+in #243. Compatibility IDs `frilvault.addNote` and `frilvault.editNote` dispatch
+through the same action.
+
+The shortcut uses VS Code's familiar K chord prefix and avoids an Alt-based
+binding that can interfere with text entry on some layouts. The default Git
+extension also uses K/N for Unstage Selected Ranges in `git` documents; this
+binding is scoped to `file` documents. User bindings and other extensions can
+still conflict. See VS Code's [default shortcuts](https://code.visualstudio.com/docs/reference/default-keybindings)
+and [Keyboard Shortcuts editor](https://code.visualstudio.com/docs/configure/keybindings)
+when choosing a remapping.
 
 ### Search syntax
 
@@ -160,7 +196,7 @@ Release automation is split into two stages:
 
 | Label | Command ID | Description |
 | --- | --- | --- |
-| `Add` | `frilvault.addNote` | Add a note at the current line or symbol |
+| `Add / Edit Note` | `frilvault.addOrEditNote` | Add or edit the chosen Line position or Symbol identity |
 | `Show Notes` | `frilvault.showNotesForCurrentFile` | Show notes for the active file |
 | `Search Notes` | `frilvault.searchNotes` | Search notes in the current workspace with native Quick Pick search |
 | `Set Tag Color` | `frilvault.setTagColor` | Assign a theme-safe color from a tag's context menu |

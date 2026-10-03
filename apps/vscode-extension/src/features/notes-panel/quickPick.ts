@@ -20,7 +20,8 @@ export interface CurrentFileNotesQuickPickDependencies {
   cliClient: CliClient;
   getWorkspaceRoot: () => string;
   invalidateViews: () => Promise<void>;
-  openInlineEditor: (noteView: NoteView) => void;
+  openInlineEditor: (noteView: NoteView) => void | Promise<void>;
+  prepareInlineEditor?: () => Promise<(noteView: NoteView) => Promise<void>>;
   createQuickPick?: () => vscode.QuickPick<NoteQuickPickItem>;
   showErrorMessage?: (message: string) => Thenable<string | undefined>;
   showInformationMessage?: (message: string) => Thenable<string | undefined>;
@@ -42,6 +43,7 @@ export async function showCurrentFileNotesQuickPick(
   }
 
   const workspaceRoot = dependencies.getWorkspaceRoot();
+  const edit = await dependencies.prepareInlineEditor?.();
   const items = buildQuickPickItems(snapshot.notes, sourceFile);
   const quickPick = (dependencies.createQuickPick ?? vscode.window.createQuickPick<NoteQuickPickItem>)();
 
@@ -79,7 +81,7 @@ export async function showCurrentFileNotesQuickPick(
 
       switch (event.button.tooltip) {
         case 'Edit Note':
-          dependencies.openInlineEditor(note);
+          await (edit ?? dependencies.openInlineEditor)(note);
           quickPick.hide();
           break;
         case 'Delete Note':
