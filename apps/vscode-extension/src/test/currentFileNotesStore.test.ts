@@ -7,6 +7,7 @@ import { CliClient } from '../core/cliClient';
 import { CurrentFileNotesStore } from '../features/current-file/store';
 import { isActiveEditorDocumentSave } from '../features/current-file/saveRefresh';
 import { FrilVaultNotesProvider } from '../features/notes-panel/provider';
+import { NotesFileHeaderItem } from '../features/notes-panel/view';
 import type { NoteView } from '../types';
 
 suite('CurrentFileNotesStore', () => {
@@ -175,10 +176,12 @@ suite('CurrentFileNotesStore', () => {
     const firstRefresh = store.syncActiveEditor(editor);
     const duplicateRefresh = store.syncActiveEditor(editor);
     const visibleDuringRefresh = await provider.getChildren();
+    const activeFile = visibleDuringRefresh.find((item) => item instanceof NotesFileHeaderItem);
 
     assert.strictEqual(callCount, 2, 'duplicate invalidations should share one CLI read');
     assert.strictEqual(store.getSnapshot().loading, false);
-    assert.strictEqual(visibleDuringRefresh[0]?.label, 'src/sample.ts');
+    assert.ok(activeFile instanceof NotesFileHeaderItem);
+    assert.strictEqual(activeFile.label, 'src/sample.ts');
     assert.strictEqual(store.getSnapshot().notes[0]?.note.content, 'visible note');
     assert.strictEqual(
       store.notesForDocument({

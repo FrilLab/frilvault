@@ -24,7 +24,12 @@ import {
 } from '../features/workspace/watcher';
 import { FrilVaultNotesProvider } from '../features/notes-panel/provider';
 import { NotesPanelService } from '../features/notes-panel/service';
-import { NotesPanelItem } from '../features/notes-panel/view';
+import {
+  NotesFileHeaderItem,
+  NotesPanelItem,
+  NotesWorkspaceFileItem,
+  NotesWorkspaceOverviewItem,
+} from '../features/notes-panel/view';
 import type { NoteView } from '../types';
 import { getVaultRoot, rememberResolvedVaultRoot, revealNote } from '../utils/file';
 
@@ -183,31 +188,45 @@ suite('Extension Test Suite', function () {
       () => cliClient.workspaceExplorer(workspace.root),
       () => workspace.root,
     );
+    await provider.invalidateWorkspaceOverview('test-initial');
     const firstChildren = await provider.getChildren();
-
-    assert.strictEqual(firstChildren.length, 1);
-    assert.strictEqual(firstChildren[0]?.label, path.join('src', 'sample.ts'));
-    const firstGroups = await provider.getChildren(firstChildren[0]);
+    const firstFile = firstChildren.find((item) => item instanceof NotesFileHeaderItem);
+    assert.ok(firstChildren.some((item) => item instanceof NotesWorkspaceOverviewItem));
+    assert.ok(firstFile instanceof NotesFileHeaderItem);
+    assert.strictEqual(firstFile.label, path.join('src', 'sample.ts'));
+    const firstGroups = await provider.getChildren(firstFile);
     assert.strictEqual(firstGroups.length, 1);
     assert.strictEqual(firstGroups[0]?.label, 'Line Notes');
     assert.strictEqual(firstGroups[0]?.description, '1');
     const firstNotes = await provider.getChildren(firstGroups[0]);
-    assert.strictEqual(firstNotes[0]?.label, 'first file note');
-    assert.strictEqual(firstNotes[0]?.description, 'L7');
+    assert.strictEqual(firstNotes[0]?.label, 'L7 — first file note');
+    assert.strictEqual(firstNotes[0]?.description, undefined);
+    const workspaceOverview = firstChildren.find(
+      (item) => item instanceof NotesWorkspaceOverviewItem,
+    );
+    assert.ok(workspaceOverview instanceof NotesWorkspaceOverviewItem);
+    const workspaceFiles = await provider.getChildren(workspaceOverview);
+    const srcFolder = workspaceFiles.find((item) => item.label === 'src');
+    assert.ok(srcFolder);
+    const srcFiles = await provider.getChildren(srcFolder);
+    assert.ok(srcFiles.some(
+      (item) => item instanceof NotesWorkspaceFileItem && item.relativePath === 'src/sample.ts',
+    ));
 
     await openFile(workspace.secondSourceFile);
     await store.syncActiveEditor(vscode.window.activeTextEditor);
 
+    await provider.invalidateWorkspaceOverview('test-active-file-change');
     const secondChildren = await provider.getChildren();
-
-    assert.strictEqual(secondChildren.length, 1);
-    assert.strictEqual(secondChildren[0]?.label, path.join('src', 'other.ts'));
-    const secondGroups = await provider.getChildren(secondChildren[0]);
+    const secondFile = secondChildren.find((item) => item instanceof NotesFileHeaderItem);
+    assert.ok(secondFile instanceof NotesFileHeaderItem);
+    assert.strictEqual(secondFile.label, path.join('src', 'other.ts'));
+    const secondGroups = await provider.getChildren(secondFile);
     assert.strictEqual(secondGroups.length, 1);
     assert.strictEqual(secondGroups[0]?.label, 'Line Notes');
     const secondNotes = await provider.getChildren(secondGroups[0]);
-    assert.strictEqual(secondNotes[0]?.label, 'second file note');
-    assert.strictEqual(secondNotes[0]?.description, 'L2');
+    assert.strictEqual(secondNotes[0]?.label, 'L2 — second file note');
+    assert.strictEqual(secondNotes[0]?.description, undefined);
   });
 
   test('FrilVault Notes provider groups symbol, line, and unresolved notes separately', async () => {
@@ -229,11 +248,11 @@ suite('Extension Test Suite', function () {
       () => cliClient.workspaceExplorer(workspace.root),
       () => workspace.root,
     );
-    const files = await provider.getChildren();
-
-    assert.strictEqual(files.length, 1);
-    assert.strictEqual(files[0]?.label, path.join('src', 'sample.ts'));
-    const groups = await provider.getChildren(files[0]);
+    await provider.invalidateWorkspaceOverview('test-initial');
+    const activeFile = (await provider.getChildren())
+      .find((item) => item instanceof NotesFileHeaderItem);
+    assert.ok(activeFile instanceof NotesFileHeaderItem);
+    const groups = await provider.getChildren(activeFile);
 
     assert.strictEqual(groups.length, 3);
     assert.strictEqual(groups[0]?.label, 'Symbol: myFn');
@@ -242,16 +261,16 @@ suite('Extension Test Suite', function () {
 
     const symbolNotes = await provider.getChildren(groups[0]);
     assert.strictEqual(symbolNotes.length, 1);
-    assert.strictEqual(symbolNotes[0]?.label, 'symbol note');
+    assert.strictEqual(symbolNotes[0]?.label, 'L12 · myFn — symbol note');
 
     const lineNotes = await provider.getChildren(groups[1]);
     assert.strictEqual(lineNotes.length, 1);
-    assert.strictEqual(lineNotes[0]?.label, 'line note');
+    assert.strictEqual(lineNotes[0]?.label, 'L3 — line note');
 
     const unresolvedNotes = await provider.getChildren(groups[2]);
     assert.strictEqual(unresolvedNotes.length, 1);
-    assert.strictEqual(unresolvedNotes[0]?.label, 'unresolved note');
-    assert.strictEqual(unresolvedNotes[0]?.description, 'Unresolved MissingFn');
+    assert.strictEqual(unresolvedNotes[0]?.label, 'Unresolved · MissingFn — unresolved note');
+    assert.strictEqual(unresolvedNotes[0]?.description, undefined);
   });
 
   test('Symbol note reveal prefers resolved coordinates', async () => {
@@ -262,7 +281,8 @@ suite('Extension Test Suite', function () {
     });
     const item = new NotesPanelItem(noteView, workspace.root);
 
-    assert.strictEqual(item.description, 'L2 myFn');
+    assert.strictEqual(item.label, 'L2 · myFn — symbol note');
+    assert.strictEqual(item.description, undefined);
 
     await configureExtension(workspace);
     await openFile(workspace.sourceFile);
@@ -308,13 +328,12 @@ suite('Extension Test Suite', function () {
       () => cliClient.workspaceExplorer(workspace.root),
       () => workspace.root,
     );
-    const files = await provider.getChildren();
-
-    assert.strictEqual(files.length, 1);
-    assert.strictEqual(files[0]?.label, path.join('src', 'sample.ts'));
-    const children = await provider.getChildren(files[0]);
+    await provider.invalidateWorkspaceOverview('test-empty');
+    const children = await provider.getChildren();
     assert.strictEqual(children.length, 1);
-    assert.strictEqual(children[0]?.label, 'No notes are attached to this file.');
+    assert.strictEqual(children[0]?.label, 'No notes found in this workspace yet.');
+    assert.strictEqual(children[0]?.command?.command, 'frilvault.addNote');
+    assert.ok(!children.some((item) => item instanceof NotesFileHeaderItem));
   });
 
   test('FrilVault Notes provider shows workspace note overview when no file is open', async () => {
@@ -339,22 +358,26 @@ suite('Extension Test Suite', function () {
       },
       () => workspace.root,
     );
-    const overviewLoaded = waitForTreeChange(provider);
     let children = await provider.getChildren();
 
     assert.strictEqual(children[0]?.label, 'Loading workspace notes...');
 
+    const overviewLoaded = waitForTreeChange(provider);
     await overviewLoaded;
     children = await provider.getChildren();
 
     assert.strictEqual(children[0]?.label, 'Workspace notes');
-    assert.strictEqual(children[1]?.label, 'src');
-    assert.strictEqual(children[1]?.description, '(2)');
-    assert.strictEqual(children[2]?.label, 'README.md');
-    assert.strictEqual(children[2]?.description, '(1)');
     assert.strictEqual(overviewLoadCount, 1);
 
-    const srcChildren = await provider.getChildren(children[1]);
+    const overview = children[0];
+    assert.ok(overview instanceof NotesWorkspaceOverviewItem);
+    const workspaceFiles = await provider.getChildren(overview);
+    assert.strictEqual(workspaceFiles[0]?.label, 'src');
+    assert.strictEqual(workspaceFiles[0]?.description, '(2)');
+    assert.strictEqual(workspaceFiles[1]?.label, 'README.md');
+    assert.strictEqual(workspaceFiles[1]?.description, '(1)');
+
+    const srcChildren = await provider.getChildren(workspaceFiles[0]);
     assert.strictEqual(srcChildren[0]?.label, 'deep');
     assert.strictEqual(srcChildren[0]?.description, '(1)');
     assert.strictEqual(srcChildren[1]?.label, 'sample.ts');
@@ -408,14 +431,14 @@ suite('Extension Test Suite', function () {
     assert.strictEqual(children[0]?.label, 'explorer failed');
 
     provider.refresh();
-    overviewLoaded = waitForTreeChange(provider);
-    children = await provider.getChildren();
-    assert.strictEqual(children[0]?.label, 'Loading workspace notes...');
-
-    await overviewLoaded;
+    assert.strictEqual(overviewLoadCount, 1, 'presentation refresh does not reload data');
+    await provider.invalidateWorkspaceOverview('test-retry');
     children = await provider.getChildren();
     assert.strictEqual(children[0]?.label, 'Workspace notes');
-    assert.strictEqual(children[1]?.label, 'README.md');
+    const overview = children[0];
+    assert.ok(overview instanceof NotesWorkspaceOverviewItem);
+    const workspaceFiles = await provider.getChildren(overview);
+    assert.strictEqual(workspaceFiles[0]?.label, 'README.md');
     assert.strictEqual(overviewLoadCount, 2);
   });
 
@@ -594,6 +617,8 @@ suite('Extension Test Suite', function () {
         createFileSystemWatcher: createWatcher,
         onDidChangeConfiguration: (() =>
           new vscode.Disposable(() => undefined)) as typeof vscode.workspace.onDidChangeConfiguration,
+        onDidChangeWorkspaceFolders: (() =>
+          new vscode.Disposable(() => undefined)) as typeof vscode.workspace.onDidChangeWorkspaceFolders,
         setTimeout: setTimer,
         clearTimeout: clearTimer,
       },
@@ -666,6 +691,8 @@ suite('Extension Test Suite', function () {
       {
         createFileSystemWatcher: watcherFactory,
         onDidChangeConfiguration: configurationListener,
+        onDidChangeWorkspaceFolders: (() => new vscode.Disposable(() => undefined)) as
+          typeof vscode.workspace.onDidChangeWorkspaceFolders,
       },
     );
 
@@ -775,6 +802,8 @@ suite('Extension Test Suite', function () {
       {
         createFileSystemWatcher: watcherFactory,
         onDidChangeConfiguration: configurationListener,
+        onDidChangeWorkspaceFolders: (() => new vscode.Disposable(() => undefined)) as
+          typeof vscode.workspace.onDidChangeWorkspaceFolders,
       },
     );
 
