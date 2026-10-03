@@ -183,6 +183,37 @@ suite('Inline note editor race handling', () => {
     editor.dispose();
   });
 
+  test('a newly created note recovers later input after native close and save failure', async () => {
+    const panel = new FakeInlineNotePanel();
+    let persisted: NoteView | undefined;
+    const editor = createTestEditor({
+      cliClient: {
+        tagList: async () => [],
+        listNotes: async () => persisted ? [persisted] : [],
+        addLineNote: async (input: { content: string }) => {
+          persisted = createSavedLineNoteView(input.content, '2026-09-30T00:00:01Z');
+          return persisted;
+        },
+        updateNote: async () => { throw new Error('simulated disk failure'); },
+      } as unknown as CliClient,
+      panel,
+      createAutoSave: (onStatusChange, persist) => new DebouncedAutoSave(60_000, onStatusChange, persist),
+    });
+    try {
+      await editor.openCreateOrEditAt('src/main.ts', { type: 'Line', line: 2, column: 1 });
+      await panel.emit({ type: 'change', content: 'first persisted content', tagsText: '' });
+      await panel.emit({ type: 'retry' });
+      assert.ok(persisted);
+      await panel.emit({ type: 'change', content: 'last received characters after creation', tagsText: '' });
+      panel.disposeNatively();
+      await editor.openEdit(persisted);
+      await waitFor(() => panel.openCount === 2);
+      assert.strictEqual(persisted.note.content, 'first persisted content');
+      assert.strictEqual(panel.openedDraft?.noteId, persisted.note.id);
+      assert.strictEqual(panel.openedDraft?.content, 'last received characters after creation');
+    } finally { editor.dispose(); }
+  });
+
   test('immediate native close persists and reopens through the CLI boundary', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'frilvault-note-close-test-'));
     const cliPath = path.join(root, 'fake-flvt');

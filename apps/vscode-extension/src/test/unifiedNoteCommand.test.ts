@@ -243,6 +243,33 @@ suite('Unified Add / Edit Note', function () {
     } finally { setup.editor.dispose(); }
   });
 
+  test('reopening a newly persisted note finds later recovery revisions under its original create key', async () => {
+    const setup = makeEditor('/tmp/workspace', []);
+    try {
+      await setup.editor.openCreateOrEditAt('노트.txt', { type: 'Line', line: 1, column: 1 });
+      const created = { ...setup.opened[0], vaultPath: '/vault/original' };
+      const afterFirstSave: InlineNoteDraft = {
+        ...created, mode: 'edit', noteId: 'saved-id', expectedUpdatedAt: 'saved-revision', content: 'latest received characters',
+      };
+      let state: unknown;
+      const store = new InlineNoteDraftRecoveryStore({
+        get: () => state,
+        update: async (_key: string, value: unknown) => { state = value; },
+      } as unknown as vscode.Memento);
+      const originalKey = recoveryId(created);
+      await store.write(originalKey, 'create-session', 2, afterFirstSave);
+      assert.strictEqual(store.get(afterFirstSave)?.draft.content, 'latest received characters');
+      assert.strictEqual(store.get(afterFirstSave)?.id, originalKey);
+      assert.strictEqual(store.get({ ...afterFirstSave, vaultPath: '/vault/other' }), undefined);
+      await store.clear(originalKey, 'create-session', 2);
+      assert.strictEqual(store.get(afterFirstSave), undefined);
+
+      const legacyKey = JSON.stringify([created.workspaceRoot, created.sourceFile, 'create', 'Line', 1, 1, null, null]);
+      await store.write(legacyKey, 'legacy-session', 2, { ...afterFirstSave, vaultPath: undefined });
+      assert.strictEqual(store.get(afterFirstSave)?.draft.content, 'latest received characters');
+    } finally { setup.editor.dispose(); }
+  });
+
   test('shortcut is discoverable, remappable and limited to trusted eligible source editor focus', () => {
     const manifest = vscode.extensions.getExtension('frillab.frilvault')!.packageJSON;
     const bindings = manifest.contributes.keybindings as { command: string; key: string; mac: string; when: string }[];

@@ -26,13 +26,19 @@ export class InlineNoteDraftRecoveryStore {
 
   public get(draft: InlineNoteDraft): RecoveredInlineNoteDraft | undefined {
     const state = this.readState();
-    const scoped = state[recoveryId(draft)];
+    const identity = recoveryId(draft);
+    // A create session keeps its original storage key after its first save.
+    // The saved draft metadata now identifies a note, so also follow that identity.
+    const scoped = state[identity] ?? Object.values(state)
+      .find((entry) => recoveryId(entry.draft) === identity);
     if (scoped) {
       return scoped;
     }
     // Keep pre-Vault-scoping drafts recoverable; a revision mismatch is handled
     // as a conflict by the editor, and recovery is pinned to the chosen Vault.
-    const legacy = state[legacyRecoveryId(draft)];
+    const legacyIdentity = legacyRecoveryId(draft);
+    const legacy = state[legacyIdentity] ?? Object.values(state)
+      .find((entry) => !entry.draft.vaultPath && legacyRecoveryId(entry.draft) === legacyIdentity);
     return legacy?.draft.vaultPath && legacy.draft.vaultPath !== draft.vaultPath
       ? undefined : legacy;
   }
