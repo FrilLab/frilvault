@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 
 import { VIEW_IDS } from '../../constants/ids';
+import { NotesFileHeaderItem } from './view';
 import type { FrilVaultNotesProvider } from './provider';
 
 let notesTreeRegistration: vscode.Disposable | undefined;
@@ -22,7 +23,25 @@ export function registerNotesTreeDataProvider(
     return notesTreeRegistration;
   }
 
-  notesTreeRegistration = vscode.window.registerTreeDataProvider(VIEW_IDS.notes, provider);
+  const view = vscode.window.createTreeView(VIEW_IDS.notes, {
+    treeDataProvider: provider,
+    showCollapseAll: true,
+  });
+  const collapsed = view.onDidCollapseElement(({ element }) => {
+    if (element instanceof NotesFileHeaderItem) {
+      provider.setFileCollapsed(element, true);
+    }
+  });
+  const expanded = view.onDidExpandElement(({ element }) => {
+    if (element instanceof NotesFileHeaderItem) {
+      provider.setFileCollapsed(element, false);
+    }
+  });
+  notesTreeRegistration = new vscode.Disposable(() => {
+    collapsed.dispose();
+    expanded.dispose();
+    view.dispose();
+  });
 
   context.subscriptions.push({
     dispose: () => {

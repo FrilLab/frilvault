@@ -18,6 +18,17 @@ export function tryGetWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
+/** Resolve the invoking source editor's folder, honoring the explicit override. */
+export function getWorkspaceRootForSource(uri: vscode.Uri): string {
+  const configured = vscode.workspace.getConfiguration('frilvault')
+    .get<string>('workspaceRoot', '').trim();
+  const root = configured || vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath;
+  if (!root) {
+    throw new Error('Open a source file in a workspace folder to add or edit a note.');
+  }
+  return root;
+}
+
 export function getWorkspaceRoot(): string {
   const workspaceRoot = tryGetWorkspaceRoot();
 
@@ -150,26 +161,49 @@ export function getRelativeFilePath(workspaceRoot: string, sourceFile: string): 
   return relative;
 }
 
-export async function revealNote(note: NoteView, workspaceRoot: string): Promise<void> {
+export async function revealNote(
+  note: NoteView,
+  workspaceRoot: string,
+): Promise<{ editor: vscode.TextEditor; line: number } | undefined> {
+  if (note.note.anchor.type === 'Symbol' && !note.resolved) {
+    return undefined;
+  }
+
   const document = await vscode.workspace.openTextDocument(
     vscode.Uri.file(path.join(workspaceRoot, note.source_file)),
   );
   const editor = await vscode.window.showTextDocument(document);
-  let line: number;
+  const line = resolveNoteRevealLine(note, document.lineCount);
   let column: number;
 
-  if (note.note.anchor.type === 'Line') {
-    line = Math.max((note.note.anchor.line ?? 1) - 1, 0);
-    column = Math.max((note.note.anchor.column ?? 1) - 1, 0);
-  } else if (note.resolved) {
-    line = Math.max(note.resolved.line - 1, 0);
-    column = Math.max(note.resolved.column - 1, 0);
-  } else {
-    line = Math.max((note.note.anchor.line_hint ?? 1) - 1, 0);
-    column = 0;
+  if (line === undefined) {
+    return undefined;
   }
+
+  if (note.note.anchor.type === 'Line') {
+    column = Math.max((note.note.anchor.column ?? 1) - 1, 0);
+  } else {
+    column = Math.max((note.resolved?.column ?? 1) - 1, 0);
+  }
+  column = Math.min(column, document.lineAt(line).text.length);
   const position = new vscode.Position(line, column);
 
   editor.selection = new vscode.Selection(position, position);
   editor.revealRange(new vscode.Range(position, position));
+  return { editor, line };
+}
+
+export function resolveNoteRevealLine(note: NoteView, documentLineCount: number): number | undefined {
+  const oneBasedLine = note.note.anchor.type === 'Line'
+    ? note.note.anchor.line ?? 1
+    : note.resolved?.line;
+  if (
+    typeof oneBasedLine !== 'number' ||
+    !Number.isInteger(oneBasedLine) ||
+    oneBasedLine < 1 ||
+    oneBasedLine > documentLineCount
+  ) {
+    return undefined;
+  }
+  return oneBasedLine - 1;
 }

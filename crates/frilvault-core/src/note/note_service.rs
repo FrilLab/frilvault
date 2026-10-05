@@ -122,6 +122,9 @@ impl NoteService {
         input.source_file = source_file.clone();
         let anchor = input.anchor.clone();
 
+        // The lock serializes writers, but another service may have filled this
+        // cache before the lock was acquired. Check the persisted state.
+        self.vault_context.invalidate_notes(&source_file);
         let mut notes = self.load_notes(&source_file)?;
         if notes
             .iter()

@@ -16,6 +16,7 @@ export interface NoteRevisionSnapshot {
 export interface InlineNoteDraft {
   mode: InlineEditorMode;
   workspaceRoot: string;
+  vaultPath?: string;
   sourceFile: string;
   noteId?: string;
   kind: 'Line' | 'Symbol';
@@ -176,10 +177,10 @@ export function createSymbolCreateDraft(input: {
 
 function formatSymbolAnchorSummary(noteView: NoteView): string {
   const anchor = noteView.note.anchor;
-  const resolvedLine = noteView.resolved?.line ?? anchor.line_hint ?? 1;
-  const kind = anchor.kind ?? 'Symbol';
-
-  return `Symbol ${anchor.name ?? 'unknown'} (${kind}) at line ${resolvedLine}`;
+  const name = anchor.name ?? 'unknown';
+  return noteView.resolved
+    ? `Symbol ${name} · L${noteView.resolved.line}`
+    : `Symbol ${name} · Unresolved`;
 }
 
 export function applyFormInput(draft: InlineNoteDraft, input: InlineNoteFormInput): InlineNoteDraft {

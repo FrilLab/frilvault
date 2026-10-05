@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
+import * as path from 'node:path';
 
 import type { CliClient } from '../../core/cliClient';
 import type { NoteAnchor, NoteView } from '../../types';
 import {
-  getActiveEditorOrThrow,
   getRelativeFilePath,
   getWorkspaceRoot,
+  getWorkspaceRootForSource,
 } from '../../utils/file';
 import {
   findSymbolAnchorAtPosition,
@@ -39,10 +40,18 @@ import {
   recoveryId,
 } from './draftRecovery';
 
+interface NoteTarget {
+  workspaceRoot: string;
+  vaultPath?: string;
+  client: CliClient;
+  generation: number;
+}
+
 export interface InlineNoteEditorDependencies {
   cliClient: CliClient;
   getWorkspaceRoot?: () => string;
-  refreshNoteState: () => Promise<void>;
+  resolveVaultPath?: (workspaceRoot: string) => Promise<string>;
+  refreshNoteState: (change?: { tagsChanged: boolean }) => Promise<void>;
   showErrorMessage?: (message: string) => Thenable<string | undefined>;
   showInformationMessage?: (message: string) => Thenable<string | undefined>;
   showWarningMessage?: (message: string) => Thenable<string | undefined>;
@@ -77,9 +86,10 @@ export class InlineNoteEditor implements vscode.Disposable {
   private recoveryId: string | undefined;
   private recoverySessionId: string | undefined;
   private nativeClosePromise: Promise<void> | undefined;
-  private deferredOpen: InlineNoteDraft | undefined;
+  private deferredOpen: { draft: InlineNoteDraft; generation: number } | undefined;
   private disposed = false;
   private suspended = false;
+  private generation = 0;
 
   public constructor(private readonly dependencies: InlineNoteEditorDependencies) {
     this.panel = dependencies.panel ?? new InlineNotePanel();
@@ -106,35 +116,56 @@ export class InlineNoteEditor implements vscode.Disposable {
     context.subscriptions.push(this);
   }
 
-  public async openCreateHere(): Promise<void> {
-    const editor = getActiveEditorOrThrow();
-    const workspaceRoot = this.workspaceRoot();
-    const sourceFile = getRelativeFilePath(workspaceRoot, editor.document.uri.fsPath);
-    const position = editor.selection.active;
-    const line = position.line + 1;
-    const column = position.character + 1;
+  public async openCreateHere(
+    invokingEditor = vscode.window.activeTextEditor,
+    requestedKind?: 'Line' | 'Symbol',
+  ): Promise<void> {
+    if (!invokingEditor) {
+      throw new Error('Open a source file in a workspace folder to add or edit a note.');
+    }
+    const document = invokingEditor.document;
+    if (document.uri.scheme !== 'file') {
+      throw new Error('Open a source file on disk to add or edit a note.');
+    }
+    const workspaceRoot = this.dependencies.getWorkspaceRoot?.()
+      ?? getWorkspaceRootForSource(document.uri);
+    const sourceFile = getRelativeFilePath(workspaceRoot, document.uri.fsPath);
+    const position = invokingEditor.selection.active;
+    // Capture the Vault before any symbol provider or chooser changes focus.
+    const targetPromise = this.captureTarget(workspaceRoot);
+    const target = await targetPromise;
+    const lineAnchor: NoteAnchor = {
+      type: 'Line', line: position.line + 1, column: position.character + 1,
+    };
+    const symbol = requestedKind === 'Line'
+      ? undefined
+      : await findSymbolAnchorAtPosition(document, position);
+    const symbolAnchor: NoteAnchor | undefined = symbol ? {
+      type: 'Symbol',
+      name: symbol.name,
+      kind: mapDocumentSymbolKind(symbol.kind),
+      signature: readSymbolSignature(document, symbol),
+      line_hint: symbol.range.start.line + 1,
+    } : undefined;
 
-    const symbol = await findSymbolAnchorAtPosition(editor.document, position);
-    const draft = this.service.buildCreateDraftForEditor({
-      workspaceRoot,
-      sourceFile,
-      line,
-      column,
-      symbol: symbol
-        ? {
-            name: symbol.name,
-            kind: mapDocumentSymbolKind(symbol.kind),
-            signature: readSymbolSignature(editor.document, symbol),
-            lineHint: symbol.range.start.line + 1,
-          }
-        : undefined,
-    });
-
-    await this.openCreateOrEditAt(
-      sourceFile,
-      draftAnchor(draft),
-      draft.kind === 'Symbol' ? draft.lineHint : line,
-    );
+    let anchor = lineAnchor;
+    if (requestedKind === 'Symbol') {
+      if (!symbolAnchor) {
+        throw new Error('No symbol at this cursor. Choose a Line anchor instead.');
+      }
+      anchor = symbolAnchor;
+    } else if (symbolAnchor) {
+      const showQuickPick = this.dependencies.showQuickPick ?? vscode.window.showQuickPick;
+      const selected = await showQuickPick([
+        { label: `Line ${lineAnchor.line}:${lineAnchor.column}`, anchor: lineAnchor },
+        { label: `Symbol ${symbolAnchor.name}`, description: `Declaration at line ${symbolAnchor.line_hint}`, anchor: symbolAnchor },
+      ], { title: 'Add / Edit Note: choose anchor', placeHolder: 'Line position or symbol identity' });
+      if (!selected) {
+        return;
+      }
+      anchor = selected.anchor;
+    }
+    await this.openAtTarget(target, sourceFile, anchor);
   }
 
   public async openCreateOrEditAt(
@@ -143,8 +174,8 @@ export class InlineNoteEditor implements vscode.Disposable {
     resolvedLine?: number,
     documentUri?: string,
   ): Promise<void> {
-    const workspaceRoot = this.workspaceRoot();
-
+    const workspaceRoot = this.dependencies.getWorkspaceRoot?.()
+      ?? (documentUri ? getWorkspaceRootForSource(vscode.Uri.parse(documentUri)) : this.workspaceRoot());
     if (documentUri) {
       try {
         if (getRelativeFilePath(workspaceRoot, vscode.Uri.parse(documentUri).fsPath) !== sourceFile) {
@@ -154,37 +185,62 @@ export class InlineNoteEditor implements vscode.Disposable {
         return;
       }
     }
+    const target = await this.captureTarget(workspaceRoot);
+    await this.openAtTarget(target, sourceFile, anchor, resolvedLine);
+  }
 
-    const notes = await this.dependencies.cliClient.listNotes(workspaceRoot, sourceFile);
-    const matchingNotes = notes.filter((note) => sameCanonicalAnchor(note.note.anchor, anchor));
+  private async captureTarget(workspaceRoot: string): Promise<NoteTarget> {
+    const generation = this.generation;
+    const vaultPath = await this.dependencies.resolveVaultPath?.(workspaceRoot);
+    return {
+      workspaceRoot,
+      vaultPath,
+      generation,
+      client: vaultPath ? this.dependencies.cliClient.withVaultPath(vaultPath) : this.dependencies.cliClient,
+    };
+  }
 
-    if (matchingNotes.length === 1) {
-      this.openEdit(matchingNotes[0]);
-      return;
+  private async openAtTarget(
+    target: NoteTarget,
+    sourceFile: string,
+    anchor: NoteAnchor,
+    resolvedLine?: number,
+  ): Promise<void> {
+    getRelativeFilePath(target.workspaceRoot, path.resolve(target.workspaceRoot, sourceFile));
+    if (target.vaultPath) {
+      const relativeToVault = path.relative(target.vaultPath, path.resolve(target.workspaceRoot, sourceFile));
+      if (relativeToVault === '' || (!relativeToVault.startsWith(`..${path.sep}`) && !path.isAbsolute(relativeToVault))) {
+        throw new Error('Open a source file outside the selected Vault to add or edit a note.');
+      }
     }
-
+    const notes = await target.client.listNotes(target.workspaceRoot, sourceFile);
+    const matchingNotes = notes.filter((note) => sameCanonicalAnchor(note.note.anchor, anchor))
+      .sort((left, right) => (left.note.created_at ?? '').localeCompare(right.note.created_at ?? '')
+        || left.note.id.localeCompare(right.note.id));
+    let note = matchingNotes[0];
     if (matchingNotes.length > 1) {
       const showQuickPick = this.dependencies.showQuickPick ?? vscode.window.showQuickPick;
       const selected = await showQuickPick(
-        matchingNotes.map((note) => ({
-          label: note.note.anchor.type === 'Symbol'
-            ? `${note.note.anchor.name ?? 'Symbol'} note`
-            : `Line ${note.note.anchor.line ?? 1} note`,
-          description: notePreview(note),
-          note,
+        matchingNotes.map((entry) => ({
+          label: notePreview(entry),
+          description: entry.note.id,
+          detail: entry.note.created_at,
+          note: entry,
         })),
-        { title: 'Select note to edit', placeHolder: 'Choose a note at this anchor' },
+        { title: 'Select legacy note to edit', placeHolder: 'Each existing note is preserved' },
       );
-
-      if (selected) {
-        this.openEdit(selected.note);
+      if (!selected) {
+        return;
       }
+      note = selected.note;
+    }
+    if (note) {
+      await this.openDraft({ ...createEditDraft(note, target.workspaceRoot), vaultPath: target.vaultPath }, target.generation);
       return;
     }
-
     const anchorLine = resolvedLine ?? anchor.line ?? anchor.line_hint ?? 1;
     const draft = this.service.buildCreateDraftForEditor({
-      workspaceRoot,
+      workspaceRoot: target.workspaceRoot,
       sourceFile,
       line: anchor.type === 'Line' ? anchor.line ?? anchorLine : anchorLine,
       column: anchor.type === 'Line' ? anchor.column ?? 1 : 1,
@@ -197,31 +253,37 @@ export class InlineNoteEditor implements vscode.Disposable {
           }
         : undefined,
     });
-    this.openDraft(draft);
+    await this.openDraft({ ...draft, vaultPath: target.vaultPath }, target.generation);
   }
 
-  public openEdit(noteView: NoteView): void {
-    this.openDraft(createEditDraft(noteView, this.workspaceRoot()));
+  public async prepareEdit(): Promise<(noteView: NoteView) => Promise<void>> {
+    const target = await this.captureTarget(this.workspaceRoot());
+    return async (noteView) => {
+      await this.openDraft({ ...createEditDraft(noteView, target.workspaceRoot), vaultPath: target.vaultPath }, target.generation);
+    };
   }
 
-  public openEditById(noteId: string, sourceFile: string, noteView?: NoteView): void {
+  public async openEdit(noteView: NoteView): Promise<void> {
+    const edit = await this.prepareEdit();
+    await edit(noteView);
+  }
+
+  public async openEditById(noteId: string, sourceFile: string, noteView?: NoteView): Promise<void> {
     if (noteView) {
-      this.openEdit(noteView);
+      await this.openEdit(noteView);
       return;
     }
-
-    this.openEdit({
-      source_file: sourceFile,
-      note: {
-        id: noteId,
-        content: '',
-        anchor: { type: 'Line', line: 1, column: 1 },
-      },
-    });
+    const target = await this.captureTarget(this.workspaceRoot());
+    const notes = await target.client.listNotes(target.workspaceRoot, sourceFile);
+    const matches = notes.filter((note) => note.note.id === noteId);
+    if (matches.length !== 1) {
+      throw new Error('The selected note is missing or has an ambiguous ID. Refresh the Notes view.');
+    }
+    await this.openDraft({ ...createEditDraft(matches[0], target.workspaceRoot), vaultPath: target.vaultPath }, target.generation);
   }
 
-  private openDraft(draft: InlineNoteDraft): void {
-    if (this.disposed) {
+  private async openDraft(draft: InlineNoteDraft, generation = this.generation): Promise<void> {
+    if (this.disposed || this.suspended || generation !== this.generation) {
       return;
     }
 
@@ -230,11 +292,27 @@ export class InlineNoteEditor implements vscode.Disposable {
     }
 
     if (this.nativeClosePromise) {
-      this.deferredOpen = draft;
+      this.deferredOpen = { draft, generation };
       return;
     }
 
-    this.openDraftNow(draft);
+    if (this.draft && this.panel.isOpen()) {
+      if (recoveryId(this.draft) === recoveryId(draft)) {
+        this.panel.reveal?.();
+        return;
+      }
+      await this.autoSave.flush();
+      if (this.saveStatus === 'failed' || this.saveStatus === 'conflict') {
+        throw new Error('Save or recover the current note before opening another note.');
+      }
+      if (this.disposed || this.suspended || generation !== this.generation) {
+        return;
+      }
+      draft = await this.latestPersistedDraft(draft);
+    }
+    if (!this.disposed && !this.suspended && generation === this.generation) {
+      this.openDraftNow(draft);
+    }
   }
 
   private openDraftNow(draft: InlineNoteDraft): void {
@@ -244,14 +322,16 @@ export class InlineNoteEditor implements vscode.Disposable {
       throw new Error('Inline note editor is not registered.');
     }
 
-    const id = recoveryId(draft);
     const recovered = this.recoveryStore?.get(draft);
+    const id = recovered?.id ?? recoveryId(draft);
     const recoveredMatchesPersisted = recovered?.draft.expectedUpdatedAt === draft.expectedUpdatedAt;
     const recoveredMatchesContent = recovered &&
       draftFingerprint(recovered.draft.content, recovered.draft.tagsText) !==
         draftFingerprint(draft.content, draft.tagsText);
     const shouldRestore = Boolean(recovered && recoveredMatchesContent);
-    const initialDraft = shouldRestore && recovered ? recovered.draft : draft;
+    const initialDraft = shouldRestore && recovered
+      ? { ...recovered.draft, vaultPath: draft.vaultPath }
+      : draft;
     const isConflictingRecovery = Boolean(shouldRestore && !recoveredMatchesPersisted);
 
     this.draft = initialDraft;
@@ -297,7 +377,7 @@ export class InlineNoteEditor implements vscode.Disposable {
       void this.dependencies.showInformationMessage?.('Recovered unsaved changes for this note.');
     }
 
-    void this.refreshTagSuggestions(initialDraft.workspaceRoot);
+    void this.refreshTagSuggestions(initialDraft);
   }
 
   private async handlePanelMessage(message: InlineNotePanelMessage): Promise<void> {
@@ -317,7 +397,7 @@ export class InlineNoteEditor implements vscode.Disposable {
         await this.handleChange(message.content, message.tagsText);
         break;
       case 'requestTagSuggestions':
-        await this.refreshTagSuggestions(this.draft.workspaceRoot);
+        await this.refreshTagSuggestions(this.draft);
         break;
       case 'close':
         await this.handlePanelClose(false);
@@ -403,8 +483,10 @@ export class InlineNoteEditor implements vscode.Disposable {
       this.deferredOpen = undefined;
 
       if (deferred) {
-        const latest = await this.latestPersistedDraft(deferred);
-        this.openDraftNow(latest);
+        const latest = await this.latestPersistedDraft(deferred.draft);
+        if (!this.disposed && !this.suspended && deferred.generation === this.generation) {
+          this.openDraftNow(latest);
+        }
       }
     }
   }
@@ -415,9 +497,9 @@ export class InlineNoteEditor implements vscode.Disposable {
     }
 
     try {
-      const notes = await this.dependencies.cliClient.listNotes(draft.workspaceRoot, draft.sourceFile);
+      const notes = await this.service.clientForDraft(draft).listNotes(draft.workspaceRoot, draft.sourceFile);
       const latest = notes.find((note) => note.note.id === draft.noteId);
-      return latest ? createEditDraft(latest, draft.workspaceRoot) : draft;
+      return latest ? { ...createEditDraft(latest, draft.workspaceRoot), vaultPath: draft.vaultPath } : draft;
     } catch {
       return draft;
     }
@@ -425,6 +507,7 @@ export class InlineNoteEditor implements vscode.Disposable {
 
   public dispose(): void {
     this.disposed = true;
+    this.generation += 1;
     this.autoSave.cancel();
     this.panel.close();
     this.draft = undefined;
@@ -438,6 +521,7 @@ export class InlineNoteEditor implements vscode.Disposable {
     }
 
     this.suspended = true;
+    this.generation += 1;
     this.autoSave.cancel();
 
     if (this.draft) {
@@ -496,7 +580,7 @@ export class InlineNoteEditor implements vscode.Disposable {
     }
 
     try {
-      await this.dependencies.cliClient.deleteNote(
+      await this.service.clientForDraft(draft).deleteNote(
         draft.workspaceRoot,
         draft.sourceFile,
         noteId,
@@ -514,7 +598,7 @@ export class InlineNoteEditor implements vscode.Disposable {
       }
 
       try {
-        await this.dependencies.refreshNoteState();
+        await this.dependencies.refreshNoteState({ tagsChanged: true });
       } catch (error) {
         await this.reportOptionalFailure('refreshing note views', error, 'deleted');
       }
@@ -610,12 +694,14 @@ export class InlineNoteEditor implements vscode.Disposable {
     this.panel.updateDraft(this.draft, { status: 'saved', canDelete: true });
 
     try {
-      await this.dependencies.refreshNoteState();
+      await this.dependencies.refreshNoteState({
+        tagsChanged: !sameTags(draftAtSaveStart.tagsText, saved.note.tags ?? []),
+      });
     } catch (error) {
       await this.reportOptionalFailure('refreshing note views', error, 'saved');
     }
 
-    await this.refreshTagSuggestions(draftAtSaveStart.workspaceRoot, 'saved');
+    await this.refreshTagSuggestions(draftAtSaveStart, 'saved');
   }
 
   private async handleKeepLocalVersion(): Promise<void> {
@@ -627,7 +713,7 @@ export class InlineNoteEditor implements vscode.Disposable {
     let latest: NoteView | undefined;
 
     try {
-      const latestNotes = await this.dependencies.cliClient.listNotes(
+      const latestNotes = await this.service.clientForDraft(localDraft).listNotes(
         localDraft.workspaceRoot,
         localDraft.sourceFile,
       );
@@ -676,7 +762,7 @@ export class InlineNoteEditor implements vscode.Disposable {
     }
 
     try {
-      const notes = await this.dependencies.cliClient.listNotes(
+      const notes = await this.service.clientForDraft(this.draft).listNotes(
         this.draft.workspaceRoot,
         this.draft.sourceFile,
       );
@@ -686,7 +772,7 @@ export class InlineNoteEditor implements vscode.Disposable {
         throw new Error('Note no longer exists.');
       }
 
-      this.draft = createEditDraft(latest, this.draft.workspaceRoot);
+      this.draft = { ...createEditDraft(latest, this.draft.workspaceRoot), vaultPath: this.draft.vaultPath };
       this.draftRevision = 0;
       this.lastPersistedRevision = 0;
       this.draftSnapshots.clear();
@@ -792,12 +878,12 @@ export class InlineNoteEditor implements vscode.Disposable {
   }
 
   private async refreshTagSuggestions(
-    workspaceRoot: string,
+    draft: InlineNoteDraft,
     noteResult?: 'saved' | 'deleted',
   ): Promise<void> {
     try {
-      const tags = await this.dependencies.cliClient.tagList(workspaceRoot);
-      if (this.draft?.workspaceRoot !== workspaceRoot) {
+      const tags = await this.service.clientForDraft(draft).tagList(draft.workspaceRoot);
+      if (this.draft?.workspaceRoot !== draft.workspaceRoot || this.draft?.vaultPath !== draft.vaultPath) {
         return;
       }
       this.panel.updateTagSuggestions?.(tags.map((item) => item.tag));
@@ -806,24 +892,6 @@ export class InlineNoteEditor implements vscode.Disposable {
       await this.reportOptionalFailure('refreshing tag suggestions', error, noteResult);
     }
   }
-}
-
-function draftAnchor(draft: InlineNoteDraft): NoteAnchor {
-  if (draft.kind === 'Symbol') {
-    return {
-      type: 'Symbol',
-      name: draft.symbolName,
-      kind: draft.symbolKind,
-      signature: draft.symbolSignature,
-      line_hint: draft.lineHint,
-    };
-  }
-
-  return {
-    type: 'Line',
-    line: draft.line,
-    column: draft.column,
-  };
 }
 
 function sameCanonicalAnchor(left: NoteAnchor, right: NoteAnchor): boolean {
@@ -839,7 +907,7 @@ function sameCanonicalAnchor(left: NoteAnchor, right: NoteAnchor): boolean {
   return left.type === 'Symbol' && right.type === 'Symbol' &&
     left.name === right.name &&
     normalizeSymbolKind(left.kind) === normalizeSymbolKind(right.kind) &&
-    left.signature === right.signature;
+    (left.signature ?? undefined) === (right.signature ?? undefined);
 }
 
 function normalizeSymbolKind(kind: string | undefined): string {
@@ -857,6 +925,14 @@ function notePreview(note: NoteView): string {
   const content = Array.from(firstLine).slice(0, 64).join('');
   const tags = (note.note.tags ?? []).map((tag) => `#${tag}`).join(' ');
   return [content, tags].filter(Boolean).join(' · ') || 'Empty note';
+}
+
+function sameTags(tagsText: string, tags: string[]): boolean {
+  const normalize = (values: string[]) => [...new Set(values
+    .map((tag) => tag.trim().replace(/^#+/, '').trim().toLocaleLowerCase())
+    .filter(Boolean))].sort();
+
+  return JSON.stringify(normalize(tagsText.split(','))) === JSON.stringify(normalize(tags));
 }
 
 function isConcurrentModificationError(error: unknown): boolean {

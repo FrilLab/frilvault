@@ -14,7 +14,11 @@ import {
   buildEditorNotesHoverParts,
   formatFullMarkdownNoteHover,
 } from '../features/presentation/noteHover';
-import { resolveNotesFromCache } from '../features/hover/resolveNotes';
+import {
+  lineHoverRangeAtPosition,
+  resolveNotesAtPosition,
+  resolveNotesFromCache,
+} from '../features/hover/resolveNotes';
 import { RICH_HOVER_COMMANDS, formatRichNotesHoverParts } from '../features/hover/richHover';
 import type { NoteView } from '../types';
 
@@ -211,6 +215,39 @@ suite('Hover presentation', () => {
     assert.strictEqual(markdown.isTrusted, false);
   });
 
+  test('line notes resolve on empty and whitespace-only source lines', async () => {
+    const document = await vscode.workspace.openTextDocument({
+      language: 'typescript',
+      content: 'const value = 1;\n\n  \n',
+    });
+    const empty = createLineNoteView('Empty line note', 'empty-line', 2, 'sample.ts');
+    const whitespace = createLineNoteView('Whitespace line note', 'whitespace-line', 3, 'sample.ts');
+
+    const emptyRange = lineHoverRangeAtPosition(document, new vscode.Position(1, 0));
+    const whitespaceRange = lineHoverRangeAtPosition(document, new vscode.Position(2, 1));
+    assert.strictEqual(emptyRange?.start.line, 1);
+    assert.strictEqual(emptyRange?.end.character, 0);
+    assert.strictEqual(whitespaceRange?.start.character, 0);
+    assert.strictEqual(whitespaceRange?.end.character, 2);
+
+    const cancellation = new vscode.CancellationTokenSource();
+    const emptyNotes = await resolveNotesAtPosition(
+      [empty],
+      document,
+      new vscode.Position(1, 0),
+      cancellation.token,
+    );
+    const whitespaceNotes = await resolveNotesAtPosition(
+      [whitespace],
+      document,
+      new vscode.Position(2, 1),
+      cancellation.token,
+    );
+    cancellation.dispose();
+    assert.strictEqual(emptyNotes?.notes[0]?.note.id, 'empty-line');
+    assert.strictEqual(whitespaceNotes?.notes[0]?.note.id, 'whitespace-line');
+  });
+
   test('copy note content excludes hover action labels', () => {
     const note = createLineNoteView('plain body', 'note-1');
     const content = buildNoteContentForClipboard(note);
@@ -284,13 +321,18 @@ suite('Hover presentation', () => {
   });
 });
 
-function createLineNoteView(content: string, id: string): NoteView {
+function createLineNoteView(
+  content: string,
+  id: string,
+  line = 8,
+  sourceFile = 'src/a.ts',
+): NoteView {
   return {
-    source_file: 'src/a.ts',
+    source_file: sourceFile,
     note: {
       id,
       content,
-      anchor: { type: 'Line', line: 8, column: 12 },
+      anchor: { type: 'Line', line, column: 12 },
       tags: ['test'],
       created_at: '2026-07-24T00:00:00Z',
       updated_at: '2026-07-24T00:00:00Z',

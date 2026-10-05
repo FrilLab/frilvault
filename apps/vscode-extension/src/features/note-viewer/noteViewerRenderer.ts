@@ -2,10 +2,9 @@
  * Renders note viewer items as CodeLens rows.
  *
  * VS Code's supported editor APIs do not provide an extension-owned block
- * widget in a text editor. CodeLens provides compact rows between source
- * lines, so the viewer uses one summary or preview row per anchor. This keeps
- * the source document untouched and makes the collapse control a
- * real VS Code command rather than relying on decoration pseudo-elements.
+ * widget in a text editor. CodeLens provides compact controls between source
+ * lines, while a line decoration shows the expanded first-line preview to the
+ * right of its source anchor. The source document stays untouched.
  */
 import * as vscode from 'vscode';
 
@@ -21,7 +20,7 @@ const MAX_CODE_LENS_LINE_LENGTH = 144;
 
 export class NoteViewerRenderer implements vscode.Disposable {
   /**
-   * Build CodeLens previews for a document. Every command carries the stable note
+   * Build CodeLens controls for a document. Every command carries the stable note
    * id(s) and document URI needed when an editor is split or changes focus.
    */
   public render(document: vscode.TextDocument, items: NoteViewerItem[]): vscode.CodeLens[] {
@@ -52,7 +51,7 @@ export class NoteViewerRenderer implements vscode.Disposable {
       lenses.push(
         this.commandLens(
           range,
-          allCollapsed ? '▶' : `▼ ${formatExpandedPreview(group)}`,
+          allCollapsed ? '▶' : '▼',
           COMMAND_IDS.noteViewerToggle,
           [noteIds, documentUri],
           allCollapsed ? 'Expand note preview' : 'Collapse note preview',
@@ -104,6 +103,37 @@ export class NoteViewerRenderer implements vscode.Disposable {
       tooltip,
     });
   }
+}
+
+export function buildExpandedPreviewDecorations(
+  document: vscode.TextDocument,
+  items: NoteViewerItem[],
+): vscode.DecorationOptions[] {
+  const decorations: vscode.DecorationOptions[] = [];
+  for (const group of groupNoteViewerItems(items)) {
+    if (group.items.every((item) => item.collapsed)) {
+      continue;
+    }
+
+    const line = group.anchorLine - 1;
+    if (line < 0 || line >= document.lineCount) {
+      continue;
+    }
+    const preview = formatExpandedPreview(group);
+    if (!preview) {
+      continue;
+    }
+    const sourceLine = document.lineAt(line);
+    decorations.push({
+      range: sourceLine.range,
+      renderOptions: {
+        after: {
+          contentText: `  ${preview}`,
+        },
+      },
+    });
+  }
+  return decorations;
 }
 
 function truncateLine(value: string): string {

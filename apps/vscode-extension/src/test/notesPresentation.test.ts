@@ -130,7 +130,8 @@ suite('Notes presentation', () => {
     );
 
     const item = new NotesPanelItem(note, '/tmp/workspace');
-    assert.strictEqual(item.description, 'L42 · #todo  #parser  #error-handling  +1 more');
+    assert.strictEqual(item.label, 'L42 — tagged note');
+    assert.strictEqual(item.description, '#todo  #parser  #error-handling  +1 more');
   });
 
   test('omits tag metadata for untagged note entries', () => {
@@ -138,7 +139,8 @@ suite('Notes presentation', () => {
     const item = new NotesPanelItem(note, '/tmp/workspace');
 
     assert.strictEqual(formatNoteQuickPickDetail(note), 'Updated 2026-06-09T00:00:00Z');
-    assert.strictEqual(item.description, 'L42');
+    assert.strictEqual(item.label, 'L42 — plain note');
+    assert.strictEqual(item.description, undefined);
   });
 
   test('package.json exposes the editor title action for current-file notes', () => {

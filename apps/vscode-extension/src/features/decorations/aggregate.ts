@@ -58,6 +58,14 @@ export function aggregateNotesByLine(
     }));
 }
 
+/** Keeps native VS Code breakpoint glyphs above note gutter markers. */
+export function suppressBreakpointLineGroups(
+  groups: LineNoteGroup[],
+  breakpointLines: ReadonlySet<number>,
+): LineNoteGroup[] {
+  return groups.filter((group) => !breakpointLines.has(group.line));
+}
+
 function anchorKindOrder(note: NoteView): number {
   return note.note.anchor.type === 'Symbol' ? 0 : 1;
 }

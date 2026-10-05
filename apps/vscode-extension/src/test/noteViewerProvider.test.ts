@@ -8,6 +8,8 @@ import * as vscode from 'vscode';
 
 import { COMMAND_IDS } from '../constants/ids';
 import { NoteViewerController } from '../features/note-viewer/noteViewerController';
+import { buildExpandedPreviewDecorations } from '../features/note-viewer/noteViewerRenderer';
+import { buildNoteViewerItems } from '../features/note-viewer/noteViewerModel';
 import type { CurrentFileNotesSnapshot } from '../features/current-file/store';
 import type { NoteView } from '../types';
 
@@ -20,7 +22,7 @@ suite('Note viewer CodeLens provider', () => {
       .update('noteViewer.enabled', true, vscode.ConfigurationTarget.Global);
     await vscode.workspace
       .getConfiguration('frilvault')
-      .update('noteViewer.defaultState', 'collapsed', vscode.ConfigurationTarget.Global);
+      .update('noteViewer.defaultState', 'expanded', vscode.ConfigurationTarget.Global);
 
     while (workspaces.length > 0) {
       const workspace = workspaces.pop();
@@ -81,35 +83,49 @@ suite('Note viewer CodeLens provider', () => {
     controller.register(context);
 
     try {
-      const collapsed = await getViewerLenses(source.document.uri);
-      const toggle = collapsed.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerToggle);
-      const addOrEdit = collapsed.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerAddOrEdit);
-      const deleteLens = collapsed.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerDelete);
+      const expanded = await getViewerLenses(source.document.uri);
+      const toggle = expanded.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerToggle);
+      const addOrEdit = expanded.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerAddOrEdit);
+      const deleteLens = expanded.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerDelete);
 
       assert.ok(toggle);
       assert.ok(addOrEdit);
       assert.ok(deleteLens);
-      assert.ok((toggle.command?.title?.length ?? 0) <= 144);
-      assert.ok(!collapsed.some((lens) => lens.command?.title === 'Note Edit'));
+      assert.strictEqual(toggle.command?.title, '▼');
+      assert.ok(!expanded.some((lens) => lens.command?.title === 'Note Edit'));
       assert.deepStrictEqual(toggle.command?.arguments?.[0], ['line-note', 'line-note-2']);
       assert.deepStrictEqual(deleteLens.command?.arguments?.[0], ['line-note', 'line-note-2']);
       assert.strictEqual(addOrEdit.command?.title, '+');
-      assert.strictEqual(toggle.command?.title, '▶');
+      assert.strictEqual(toggle.command?.title, '▼');
       assert.strictEqual(deleteLens.command?.title, '−');
-      assert.ok(!collapsed.some((lens) => lens.command?.command === COMMAND_IDS.noteViewerActions));
-      assert.ok(!collapsed.some((lens) => lens.command?.title?.startsWith('#')));
-      assert.ok(collapsed.some((lens) => lens.command?.arguments?.[0]?.includes?.('symbol-note')));
+      assert.ok(!expanded.some((lens) => lens.command?.command === COMMAND_IDS.noteViewerActions));
+      assert.ok(!expanded.some((lens) => lens.command?.title?.startsWith('#')));
+      assert.ok(expanded.some((lens) => lens.command?.arguments?.[0]?.includes?.('symbol-note')));
 
-      const initialViewerLensCount = collapsed.filter(isViewerLens).length;
+      const expandedItems = buildNoteViewerItems(
+        notesByUri.get(source.document.uri.toString()) ?? [],
+        'expanded',
+      );
+      const previewDecorations = buildExpandedPreviewDecorations(source.document, expandedItems);
+      assert.strictEqual(previewDecorations.length, 2);
+      assert.strictEqual(
+        previewDecorations.find((item) => item.range.start.line === 0)?.renderOptions?.after?.contentText,
+        '  first line · second note',
+      );
+
+      const initialViewerLensCount = expanded.filter(isViewerLens).length;
       controller.toggleNotes(['line-note', 'line-note-2'], source.document.uri.toString());
-      const expanded = await getViewerLenses(source.document.uri);
-      const preview = expanded.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerToggle);
-      assert.ok(preview?.command?.title?.startsWith('▼ first line'));
-      assert.ok(preview?.command?.title?.includes('second note'));
-      assert.ok(!preview?.command?.title?.includes('second line'));
-      assert.ok(!preview?.command?.title?.includes('third line'));
-      assert.ok((preview?.command?.title?.length ?? 0) <= 144);
-      assert.strictEqual(expanded.filter(isViewerLens).length, initialViewerLensCount);
+      const collapsed = await getViewerLenses(source.document.uri);
+      const preview = collapsed.find((lens) => lens.command?.command === COMMAND_IDS.noteViewerToggle);
+      assert.strictEqual(preview?.command?.title, '▶');
+      assert.deepStrictEqual(
+        buildExpandedPreviewDecorations(source.document, buildNoteViewerItems(
+          notesByUri.get(source.document.uri.toString()) ?? [],
+          'expanded',
+        ).map((item) => ({ ...item, collapsed: item.noteId !== 'symbol-note' }))),
+        buildExpandedPreviewDecorations(source.document, expandedItems.filter((item) => item.noteId === 'symbol-note')),
+      );
+      assert.strictEqual(collapsed.filter(isViewerLens).length, initialViewerLensCount);
       assert.strictEqual(fs.readFileSync(sourcePath, 'utf8'), originalSource);
 
       activeUri = other.uri.toString();
@@ -127,15 +143,17 @@ suite('Note viewer CodeLens provider', () => {
       await vscode.window.showTextDocument(source.document);
       controller.refresh();
       const refreshed = await getViewerLenses(source.document.uri);
-      assert.ok(refreshed.some((lens) => lens.command?.title === '▶'));
+      assert.ok(refreshed.some((lens) => lens.command?.title === '▼'));
       assert.ok(!refreshed.some((lens) => lens.command?.arguments?.[0]?.includes?.('line-note')));
 
       notesByUri.set(source.document.uri.toString(), []);
       controller.refresh();
-      assert.strictEqual(
-        (await getViewerLenses(source.document.uri)).filter(isViewerLens).length,
-        0,
-      );
+      const emptyLenses = await getViewerLenses(source.document.uri);
+      assert.ok(emptyLenses.some((lens) => lens.command?.command === COMMAND_IDS.noteViewerAddOrEdit));
+      assert.ok(!emptyLenses.some((lens) => [
+        COMMAND_IDS.noteViewerToggle,
+        COMMAND_IDS.noteViewerDelete,
+      ].includes(lens.command?.command as typeof COMMAND_IDS.noteViewerToggle | typeof COMMAND_IDS.noteViewerDelete)));
 
       await vscode.workspace
         .getConfiguration('frilvault')

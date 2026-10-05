@@ -38,7 +38,7 @@ export function registerInlineNoteCodeLensProvider(
         const line = lineNumber - 1;
         lenses.push(
           new vscode.CodeLens(new vscode.Range(line, 0, line, 0), {
-            title: 'Note Edit',
+            title: 'Add / Edit Note',
             command: 'frilvault.editNote',
             arguments: [note.note.id, note.source_file, note],
           }),
@@ -57,8 +57,8 @@ export function registerInlineNoteCodeLensProvider(
         if (!hasNoteOnActiveLine) {
           lenses.push(
             new vscode.CodeLens(new vscode.Range(activeLine, 0, activeLine, 0), {
-              title: 'Note Add',
-              command: 'frilvault.addNote',
+              title: 'Add / Edit Note',
+              command: 'frilvault.addOrEditNote',
             }),
           );
         }

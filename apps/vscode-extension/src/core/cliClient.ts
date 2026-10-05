@@ -108,6 +108,11 @@ export interface UpdateNoteInput {
   expectedUpdatedAt?: string;
 }
 
+export interface SyncOptions {
+  notesOnly?: boolean;
+  sourcesOnly?: boolean;
+}
+
 export interface InitResult {
   mode: 'local' | 'shared';
   git_exclude:
@@ -190,6 +195,14 @@ export class CliClient {
             }
           : runCommandWithoutBuffer),
     };
+  }
+
+  /** Freeze the selected Vault for a pending editor operation, including discovery. */
+  public withVaultPath(vaultPath: string | undefined): CliClient {
+    return new CliClient({
+      ...this.dependencies,
+      getConfiguredVaultPath: () => vaultPath,
+    });
   }
 
   public async addLineNote(input: AddLineNoteInput): Promise<NoteView> {
@@ -483,8 +496,19 @@ export class CliClient {
     return parseJson<number>(stdout);
   }
 
-  public async sync(workspaceRoot: string): Promise<SyncResult> {
-    const stdout = await this.execInWorkspace(workspaceRoot, ['sync', '--format', 'json']);
+  public async sync(workspaceRoot: string, options: SyncOptions = {}): Promise<SyncResult> {
+    if (options.notesOnly && options.sourcesOnly) {
+      throw new Error('Cannot request notes-only and sources-only sync together.');
+    }
+
+    const args = ['sync'];
+    if (options.notesOnly) {
+      args.push('--notes-only');
+    } else if (options.sourcesOnly) {
+      args.push('--sources-only');
+    }
+    args.push('--format', 'json');
+    const stdout = await this.execInWorkspace(workspaceRoot, args);
     return parseJson<SyncResult>(stdout);
   }
 
