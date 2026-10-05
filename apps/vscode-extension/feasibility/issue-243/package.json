@@ -1,0 +1,24 @@
+{
+  "name": "frilvault-issue-243-feasibility",
+  "displayName": "FrilVault Issue 243 Feasibility Probe",
+  "description": "Disposable Extension Host probe for documented editor UI APIs.",
+  "version": "0.0.1",
+  "publisher": "frillab",
+  "engines": {
+    "vscode": "^1.125.0"
+  },
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "frilvault243.probe.openCommentSurface",
+        "title": "FrilVault #243 Probe: Open Native Comment Surface"
+      },
+      {
+        "command": "frilvault243.probe.openQuickInput",
+        "title": "FrilVault #243 Probe: Open Quick Input"
+      }
+    ]
+  }
+}

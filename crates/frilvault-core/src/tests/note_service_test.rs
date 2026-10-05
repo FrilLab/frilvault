@@ -1301,3 +1301,99 @@ fn query_notes_file_filter_accepts_a_workspace_directory() {
 
     assert_eq!(absolute_results.len(), 2);
 }
+
+#[test]
+fn concurrent_cached_services_reject_duplicates_and_preserve_both_anchor_kinds() {
+    use std::sync::{Arc, Barrier};
+
+    let workspace = create_test_workspace();
+    let source_file = "src/노트.ts";
+    let source = "\nfunction parse() {}\n";
+    fs::create_dir_all(workspace.root().join("src")).unwrap();
+    fs::write(workspace.root().join(source_file), source).unwrap();
+    let barrier = Arc::new(Barrier::new(12));
+    let handles: Vec<_> = (0..12)
+        .map(|index| {
+            let mut service = create_test_note_service(workspace.root());
+            // Every writer has the same stale empty snapshot before locking.
+            assert!(service.list_notes(source_file).unwrap().is_empty());
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                let anchor = if index % 2 == 0 {
+                    NoteAnchor::Line(LineAnchor { line: 2, column: 1 })
+                } else {
+                    NoteAnchor::Symbol(SymbolAnchor {
+                        name: "parse".to_string(),
+                        kind: SymbolKind::Function,
+                        signature: Some("function parse() {}".to_string()),
+                        line_hint: Some(index + 1),
+                    })
+                };
+                service.add_note(AddNoteRequest {
+                    source_file: source_file.into(),
+                    anchor,
+                    content: format!("writer {index}"),
+                    tags: None,
+                })
+            })
+        })
+        .collect();
+    let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 2);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|r| matches!(r, Err(FrilVaultError::DuplicateNoteAnchor(_))))
+            .count(),
+        10
+    );
+    let mut reopened = create_test_note_service(workspace.root());
+    let persisted = reopened.list_notes(source_file).unwrap();
+    assert_eq!(persisted.len(), 2);
+    for saved in results.into_iter().filter_map(Result::ok) {
+        assert!(persisted.iter().any(|view| view.note == saved));
+    }
+    assert_eq!(
+        fs::read(workspace.root().join(source_file)).unwrap(),
+        source.as_bytes()
+    );
+}
+
+#[test]
+fn cached_service_checks_newer_persisted_notes_before_adding() {
+    let workspace = create_test_workspace();
+    let mut cached = create_test_note_service(workspace.root());
+    assert!(cached.list_notes("src/main.rs").unwrap().is_empty());
+    let mut other = create_test_note_service(workspace.root());
+    let saved = other
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 1, column: 1 }),
+            content: "external writer".to_string(),
+            tags: None,
+        })
+        .unwrap();
+    let duplicate = cached.add_note(AddNoteRequest {
+        source_file: "src/main.rs".into(),
+        anchor: saved.anchor.clone(),
+        content: "must not overwrite".to_string(),
+        tags: None,
+    });
+    assert!(matches!(
+        duplicate,
+        Err(FrilVaultError::DuplicateNoteAnchor(_))
+    ));
+    cached
+        .add_note(AddNoteRequest {
+            source_file: "src/main.rs".into(),
+            anchor: NoteAnchor::Line(LineAnchor { line: 2, column: 1 }),
+            content: "another anchor".to_string(),
+            tags: None,
+        })
+        .unwrap();
+    let mut reopened = create_test_note_service(workspace.root());
+    let persisted = reopened.list_notes("src/main.rs").unwrap();
+    assert_eq!(persisted.len(), 2);
+    assert!(persisted.iter().any(|view| view.note == saved));
+}

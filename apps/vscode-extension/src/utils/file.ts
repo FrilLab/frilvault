@@ -18,6 +18,17 @@ export function tryGetWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
+/** Resolve the invoking source editor's folder, honoring the explicit override. */
+export function getWorkspaceRootForSource(uri: vscode.Uri): string {
+  const configured = vscode.workspace.getConfiguration('frilvault')
+    .get<string>('workspaceRoot', '').trim();
+  const root = configured || vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath;
+  if (!root) {
+    throw new Error('Open a source file in a workspace folder to add or edit a note.');
+  }
+  return root;
+}
+
 export function getWorkspaceRoot(): string {
   const workspaceRoot = tryGetWorkspaceRoot();
 

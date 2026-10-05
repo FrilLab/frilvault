@@ -51,7 +51,8 @@
     "onCommand:frilvault.noteViewer.actions",
     "onCommand:frilvault.noteViewer.addOrEdit",
     "onCommand:frilvault.noteViewer.delete",
-    "onUri:frilvault"
+    "onUri:frilvault",
+    "onCommand:frilvault.addOrEditNote"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -72,6 +73,12 @@
       ]
     },
     "commands": [
+      {
+        "command": "frilvault.addOrEditNote",
+        "title": "Add / Edit Note",
+        "category": "FrilVault",
+        "icon": "$(add)"
+      },
       {
         "command": "frilvault.addNote",
         "title": "Add Note",
@@ -217,7 +224,7 @@
           "group": "navigation@0"
         },
         {
-          "command": "frilvault.addNote",
+          "command": "frilvault.addOrEditNote",
           "when": "view == frilvault.notes && frilvault.enabled",
           "group": "navigation"
         },
@@ -237,7 +244,7 @@
           "group": "navigation@0"
         },
         {
-          "command": "frilvault.addNote",
+          "command": "frilvault.addOrEditNote",
           "when": "view == frilvault.tags && frilvault.enabled",
           "group": "navigation"
         },
@@ -276,8 +283,8 @@
       ],
       "editor/context": [
         {
-          "command": "frilvault.addNote",
-          "when": "(editorHasSelection || editorTextFocus) && frilvault.enabled",
+          "command": "frilvault.addOrEditNote",
+          "when": "frilvault.sourceEditorEligible && isWorkspaceTrusted",
           "group": "navigation"
         },
         {
@@ -338,12 +345,12 @@
           "when": "frilvault.enabled"
         },
         {
-          "command": "frilvault.addNote",
-          "when": "frilvault.enabled"
+          "command": "frilvault.addOrEditNote",
+          "when": "true"
         },
         {
           "command": "frilvault.editNote",
-          "when": "frilvault.enabled"
+          "when": "false"
         },
         {
           "command": "frilvault.searchNotes",
@@ -380,6 +387,22 @@
         {
           "command": "frilvault.environment.run",
           "when": "frilvault.enabled"
+        },
+        {
+          "command": "frilvault.addNote",
+          "when": "false"
+        },
+        {
+          "command": "frilvault.noteViewer.addOrEdit",
+          "when": "false"
+        },
+        {
+          "command": "frilvault.gutter.editNote",
+          "when": "false"
+        },
+        {
+          "command": "frilvault.notesPanel.editNote",
+          "when": "false"
         }
       ]
     },
@@ -400,6 +423,11 @@
           "type": "string",
           "default": "",
           "description": "Optional path to a custom FrilVault CLI. Leave empty to use the bundled CLI."
+        },
+        "frilvault.refreshDiagnostics.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Write metadata-only refresh request diagnostics to the FrilVault CLI output channel. Note content, tags, environment values, and file paths are not included."
         },
         "frilvault.gutterMarkerStyle": {
           "type": "string",
@@ -448,7 +476,15 @@
           "description": "Delay in milliseconds before auto-saving inline note edits."
         }
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "frilvault.addOrEditNote",
+        "key": "ctrl+k ctrl+n",
+        "mac": "cmd+k cmd+n",
+        "when": "editorTextFocus && resourceScheme == file && frilvault.sourceEditorEligible && isWorkspaceTrusted"
+      }
+    ]
   },
   "scripts": {
     "check": "npm run check-types && npm run check-types:ts6 && npm run lint",
@@ -472,16 +508,16 @@
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
-    "@types/node": "26.5.1",
-    "@types/vscode": "1.125.0",
+    "@types/node": "26.6.3",
+    "@types/vscode": "1.138.0",
     "@typescript/native": "npm:typescript@^7.0.2",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
-    "@vscode/vsce": "^3.9.2",
+    "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",
-    "eslint": "^10.10.0",
+    "eslint": "^10.11.0",
     "npm-run-all": "^4.1.5",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "typescript-eslint": "^8.70.0"
+    "typescript-eslint": "^8.71.0"
   }
 }

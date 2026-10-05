@@ -16,8 +16,13 @@ import {
 export class InlineNoteEditorService {
   public constructor(private readonly cliClient: CliClient) {}
 
+  public clientForDraft(draft: InlineNoteDraft): CliClient {
+    return draft.vaultPath ? this.cliClient.withVaultPath(draft.vaultPath) : this.cliClient;
+  }
+
   public async saveDraft(draft: InlineNoteDraft): Promise<NoteView> {
     const tags = parseTagsText(draft.tagsText);
+    const client = this.clientForDraft(draft);
 
     if (draft.mode === 'create') {
       if (draft.kind === 'Symbol') {
@@ -25,7 +30,7 @@ export class InlineNoteEditorService {
           throw new Error('Symbol note is missing a symbol name.');
         }
 
-        return this.cliClient.addSymbolNote({
+        return client.addSymbolNote({
           workspaceRoot: draft.workspaceRoot,
           sourceFile: draft.sourceFile,
           symbol: draft.symbolName,
@@ -41,7 +46,7 @@ export class InlineNoteEditorService {
         throw new Error('Line note is missing an anchor position.');
       }
 
-      return this.cliClient.addLineNote({
+      return client.addLineNote({
         workspaceRoot: draft.workspaceRoot,
         sourceFile: draft.sourceFile,
         line: draft.line,
@@ -55,7 +60,7 @@ export class InlineNoteEditorService {
       throw new Error('Edited note is missing an id.');
     }
 
-    return this.cliClient.updateNote({
+    return this.clientForDraft(draft).updateNote({
       workspaceRoot: draft.workspaceRoot,
       sourceFile: draft.sourceFile,
       noteId: draft.noteId,
@@ -74,7 +79,7 @@ export class InlineNoteEditorService {
       throw new Error('Undo requires a persisted note id.');
     }
 
-    return this.cliClient.updateNote({
+    return this.clientForDraft(draft).updateNote({
       workspaceRoot: draft.workspaceRoot,
       sourceFile: draft.sourceFile,
       noteId: draft.noteId,

@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import type { CliClient } from '../../core/cliClient';
 import type { NoteView } from '../../types';
 import { ContextualRefresh } from '../refresh/contextualRefresh';
+import type { RefreshTraceSink } from '../refresh/diagnostics';
 import { getVaultRoot, tryGetRelativeFilePath, tryGetWorkspaceRoot } from '../../utils/file';
 
 export interface CurrentFileNotesSnapshot {
@@ -43,13 +44,16 @@ export class CurrentFileNotesStore implements vscode.Disposable {
   public readonly onDidChange = this.onDidChangeEmitter.event;
 
   private contextKey: string | undefined;
-  private readonly refreshScheduler = new ContextualRefresh<NoteView[]>();
+  private readonly refreshScheduler: ContextualRefresh<NoteView[]>;
 
   public constructor(
     private readonly cliClient: CliClient,
     private readonly isEnabled: () => boolean,
     private readonly getWorkspaceRoot: () => string | undefined = tryGetWorkspaceRoot,
-  ) {}
+    trace?: RefreshTraceSink,
+  ) {
+    this.refreshScheduler = new ContextualRefresh('active-file-notes', trace);
+  }
 
   public getSnapshot(): CurrentFileNotesSnapshot {
     return this.snapshot;
@@ -62,12 +66,13 @@ export class CurrentFileNotesStore implements vscode.Disposable {
   }
 
   public async syncActiveEditor(editor = vscode.window.activeTextEditor): Promise<void> {
-    await this.refreshEditor(editor, false);
+    await this.refreshEditor(editor, false, 'active-editor');
   }
 
   private async refreshEditor(
     editor: vscode.TextEditor | undefined,
     invalidated: boolean,
+    trigger: string,
   ): Promise<void> {
     if (!this.isEnabled()) {
       this.clear();
@@ -107,21 +112,24 @@ export class CurrentFileNotesStore implements vscode.Disposable {
     }
 
     const editorDocumentUri = editor.document.uri.toString();
-    await this.refreshContext(workspaceRoot, sourceFile, editorDocumentUri, invalidated);
+    await this.refreshContext(workspaceRoot, sourceFile, editorDocumentUri, invalidated, trigger);
   }
 
-  public async invalidateAfterMutation(editor?: vscode.TextEditor): Promise<void> {
+  public async invalidateAfterMutation(
+    editor?: vscode.TextEditor,
+    trigger = 'note-mutation',
+  ): Promise<void> {
     const activeEditor = editor ?? vscode.window.activeTextEditor;
 
     if (activeEditor) {
-      await this.refreshEditor(activeEditor, true);
+      await this.refreshEditor(activeEditor, true, trigger);
       return;
     }
 
     const { workspaceRoot, sourceFile, editorDocumentUri } = this.snapshot;
 
     if (workspaceRoot && sourceFile && editorDocumentUri) {
-      await this.refreshContext(workspaceRoot, sourceFile, editorDocumentUri, true);
+      await this.refreshContext(workspaceRoot, sourceFile, editorDocumentUri, true, trigger);
     }
   }
 
@@ -145,6 +153,7 @@ export class CurrentFileNotesStore implements vscode.Disposable {
     sourceFile: string,
     editorDocumentUri: string,
     invalidated: boolean,
+    trigger: string,
   ): Promise<void> {
     const vaultRoot = getVaultRoot(workspaceRoot);
     const key = JSON.stringify([
@@ -172,7 +181,7 @@ export class CurrentFileNotesStore implements vscode.Disposable {
       key,
       () => this.cliClient.listNotes(workspaceRoot, sourceFile),
       (notes) => {
-        this.setSnapshot({
+        return this.setSnapshot({
           workspaceRoot,
           sourceFile,
           editorDocumentUri,
@@ -195,16 +204,18 @@ export class CurrentFileNotesStore implements vscode.Disposable {
         });
       },
       invalidated,
+      trigger,
     );
   }
 
-  private setSnapshot(snapshot: CurrentFileNotesSnapshot): void {
+  private setSnapshot(snapshot: CurrentFileNotesSnapshot): boolean {
     if (snapshotsEqual(this.snapshot, snapshot)) {
-      return;
+      return false;
     }
 
     this.snapshot = snapshot;
     this.onDidChangeEmitter.fire();
+    return true;
   }
 }
 

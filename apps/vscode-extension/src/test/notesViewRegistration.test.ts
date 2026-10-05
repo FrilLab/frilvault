@@ -176,7 +176,9 @@ suite('Notes view registration', () => {
     );
 
     const provider = createProviderWithState();
-    const firstFile = (await provider.getChildren())[0] as NotesFileHeaderItem;
+    await provider.invalidateWorkspaceOverview('test-initial');
+    const firstFile = (await provider.getChildren())
+      .find((item) => item instanceof NotesFileHeaderItem) as NotesFileHeaderItem;
     const firstChildren = await provider.getChildren(firstFile);
     const firstGroupId = firstChildren[0]?.id;
     assert.ok(firstGroupId);
@@ -185,7 +187,9 @@ suite('Notes view registration', () => {
     provider.setFileCollapsed(firstFile, true);
     await Promise.resolve();
     const nextProvider = createProviderWithState();
-    const nextFile = (await nextProvider.getChildren())[0] as NotesFileHeaderItem;
+    await nextProvider.invalidateWorkspaceOverview('test-initial');
+    const nextFile = (await nextProvider.getChildren())
+      .find((item) => item instanceof NotesFileHeaderItem) as NotesFileHeaderItem;
     const nextChildren = await nextProvider.getChildren(nextFile);
     assert.strictEqual(nextFile.id, firstFile.id);
     assert.strictEqual(nextFile.collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);

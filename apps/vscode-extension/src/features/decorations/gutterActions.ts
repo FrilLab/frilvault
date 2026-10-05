@@ -15,7 +15,8 @@ export interface GutterActionsDependencies {
   registry: GutterNoteRegistry;
   getWorkspaceRoot: () => string;
   invalidateViews: () => Promise<void>;
-  openInlineEditor: (noteView: NoteView) => void;
+  openInlineEditor: (noteView: NoteView) => void | Promise<void>;
+  prepareInlineEditor?: () => Promise<(noteView: NoteView) => Promise<void>>;
   showErrorMessage?: (message: string) => Thenable<string | undefined>;
   showInformationMessage?: (message: string) => Thenable<string | undefined>;
   showInputBox?: (options: vscode.InputBoxOptions) => Thenable<string | undefined>;
@@ -40,8 +41,9 @@ export class GutterNoteActions {
       return;
     }
 
+    const edit = await this.dependencies.prepareInlineEditor?.();
     if (notes.length === 1) {
-      await this.showActionMenu(notes[0], sourceFile);
+      await this.showActionMenu(notes[0], sourceFile, edit);
       return;
     }
 
@@ -51,7 +53,7 @@ export class GutterNoteActions {
       return;
     }
 
-    await this.showActionMenu(selected, sourceFile);
+    await this.showActionMenu(selected, sourceFile, edit);
   }
 
   public async showActionsForNotes(noteIds: string[], sourceFile: string): Promise<void> {
@@ -64,9 +66,10 @@ export class GutterNoteActions {
       return;
     }
 
+    const edit = await this.dependencies.prepareInlineEditor?.();
     const selected = notes.length === 1 ? notes[0] : await this.pickNote(notes);
     if (selected) {
-      await this.showActionMenu(selected, sourceFile);
+      await this.showActionMenu(selected, sourceFile, edit);
     }
   }
 
@@ -89,7 +92,7 @@ export class GutterNoteActions {
       return;
     }
 
-    this.dependencies.openInlineEditor(note);
+    await this.dependencies.openInlineEditor(note);
   }
 
   public async deleteNote(noteId: string, sourceFile: string): Promise<void> {
@@ -211,7 +214,7 @@ export class GutterNoteActions {
     await this.showInfo('FrilVault note markdown copied to clipboard.');
   }
 
-  private async showActionMenu(note: NoteView, sourceFile: string): Promise<void> {
+  private async showActionMenu(note: NoteView, sourceFile: string, edit?: (note: NoteView) => Promise<void>): Promise<void> {
     const showQuickPick = this.dependencies.showQuickPick ?? vscode.window.showQuickPick;
     const choice = await showQuickPick(
       [
@@ -234,7 +237,11 @@ export class GutterNoteActions {
         await this.viewNote(note.note.id, sourceFile);
         break;
       case 'edit':
-        await this.editNote(note.note.id, sourceFile);
+        if (edit) {
+          await edit(note);
+        } else {
+          await this.dependencies.openInlineEditor(note);
+        }
         break;
       case 'delete':
         await this.deleteNote(note.note.id, sourceFile);
