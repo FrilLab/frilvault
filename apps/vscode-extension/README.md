@@ -151,9 +151,8 @@ chooser showing previews and note IDs. A specific note's Edit control opens
 that exact note directly. The original workspace, Vault and anchor remain the
 save target when focus or configuration changes.
 
-The current note editor is reused; editing beside code is tracked separately
-in #243. Compatibility IDs `frilvault.addNote` and `frilvault.editNote` dispatch
-through the same action.
+The current note editor is reused for the Edit action. Compatibility IDs
+`frilvault.addNote` and `frilvault.editNote` dispatch through the same action.
 
 The shortcut uses VS Code's familiar K chord prefix and avoids an Alt-based
 binding that can interfere with text entry on some layouts. The default Git

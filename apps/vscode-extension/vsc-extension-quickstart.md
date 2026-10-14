@@ -30,7 +30,7 @@ GitHub Release packaging and Marketplace publishing are separate steps.
 For a manual local publish, use a generated VSIX:
 
 ```bash
-npx @vscode/vsce publish --packagePath frilvault-0.0.3-darwin-arm64.vsix
+npx @vscode/vsce publish --packagePath frilvault-0.0.4-darwin-arm64.vsix
 ```
 
 ## Useful Commands
