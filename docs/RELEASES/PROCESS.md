@@ -214,13 +214,26 @@ It:
 1. checks out the selected release tag
 2. verifies that the tag matches `apps/vscode-extension/package.json`
 3. downloads the VSIX files attached to that GitHub Release
-4. publishes each VSIX to the single `frillab.frilvault` Marketplace listing
+4. authenticates to Azure using GitHub Actions OIDC
+5. verifies publisher access and publishes each VSIX to the single `frillab.frilvault` Marketplace listing with `vsce --azure-credential`
 
-Required GitHub Actions configuration:
+#### One-time Entra ID configuration
 
-- repository secret: `VSCE_PAT`
+Create a user-assigned managed identity in Azure and grant it the Reader role as described in the VS Code guide. Then configure a federated identity credential for GitHub Actions:
 
-The `VSCE_PAT` token must belong to an account with permission to publish updates for the `frillab` publisher.
+- issuer: `https://token.actions.githubusercontent.com`
+- subject: `repo:FrilLab/frilvault:ref:refs/heads/main`
+- audience: `api://AzureADTokenExchange`
+
+Follow the [VS Code secure publishing guide](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#secure-automated-publishing-to-visual-studio-marketplace) to add the managed identity to the `frillab` Marketplace publisher as a Contributor. The guide uses the managed identity's resource ID for the Marketplace membership.
+
+Add these GitHub Actions repository secrets:
+
+- `AZURE_CLIENT_ID`: managed identity client ID
+- `AZURE_TENANT_ID`: Microsoft Entra tenant ID
+- `AZURE_SUBSCRIPTION_ID`: Azure subscription containing the managed identity
+
+The publishing job requests a GitHub OIDC token only when it is dispatched from `main`. Dispatching from `main` keeps the OIDC subject stable; pass the release tag separately as the `tag` input. `VSCE_PAT` is no longer used.
 
 Marketplace users do not select `darwin-arm64`, `darwin-x64`, `linux-x64`, or `win32-x64` manually. Visual Studio Marketplace serves the matching package for the user's platform.
 
@@ -293,7 +306,8 @@ Publish to the Marketplace only after the GitHub Release assets have been verifi
 Dispatch `publish.yml` with:
 
 - `tag=frilvault-vX.Y.Z` using the verified tag for the release being published
+- workflow ref `main`
 
-The workflow downloads the Release assets, verifies that all four VSIX packages exist, and publishes them with `VSCE_PAT`.
+The workflow downloads the Release assets, verifies that all four VSIX packages exist, authenticates through GitHub OIDC and Microsoft Entra ID, verifies publisher access, and publishes the packages with `vsce --azure-credential`.
 
 Only publish platforms that were actually built and attached to the Release.

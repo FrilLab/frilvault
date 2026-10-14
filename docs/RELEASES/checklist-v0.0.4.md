@@ -18,11 +18,12 @@
 - [x] Release pull request #248 is merged to `main`.
 - [x] GitHub Release `frilvault-v0.0.4` is published and all four VSIX assets are verified.
 - [x] Marketplace publishing workflow was run after asset verification.
+- [ ] Marketplace publication is confirmed.
 
 ## Publication Status
 
 - GitHub Release: [v0.0.4](https://github.com/FrilLab/frilvault/releases/tag/frilvault-v0.0.4). The recovery build completed successfully in [workflow run 38553746552](https://github.com/FrilLab/frilvault/actions/runs/38553746552); all four platform VSIX assets are attached.
-- Marketplace: [workflow run 38554662832](https://github.com/FrilLab/frilvault/actions/runs/38554662832) stopped on the first package because the `VSCE_PAT` repository secret has expired. No v0.0.4 package was published. Rotate `VSCE_PAT`, then rerun `publish.yml` with tag `frilvault-v0.0.4`.
+- Marketplace: [workflow run 38554662832](https://github.com/FrilLab/frilvault/actions/runs/38554662832) stopped on the first package because the `VSCE_PAT` token had expired. No v0.0.4 package was published. The publishing workflow now uses GitHub OIDC with Microsoft Entra ID; configure the managed identity and the `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID` repository secrets before rerunning `publish.yml` from `main` with tag `frilvault-v0.0.4`.
 
 ## Local Validation
 

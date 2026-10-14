@@ -2,6 +2,7 @@ name: Publish Marketplace
 
 permissions:
   contents: read
+  id-token: write
 
 on:
   workflow_dispatch:
@@ -21,6 +22,16 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: Validate workflow ref
+        env:
+          WORKFLOW_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          if [ "$WORKFLOW_REF" != "refs/heads/main" ]; then
+            echo "::error::Dispatch this workflow from main so its OIDC identity matches the trusted credential."
+            exit 1
+          fi
+
       - name: Check out selected tag
         uses: actions/checkout@v7
         with:
@@ -46,10 +57,13 @@ jobs:
           echo "extension_version=$extension_version" >> "$GITHUB_OUTPUT"
 
       - name: Validate selected tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXTENSION_VERSION: ${{ steps.version.outputs.extension_version }}
         shell: bash
         run: |
-          expected_tag="frilvault-v${{ steps.version.outputs.extension_version }}"
-          actual_tag="${{ inputs.tag }}"
+          expected_tag="frilvault-v${EXTENSION_VERSION}"
+          actual_tag="$RELEASE_TAG"
 
           if [ "$expected_tag" != "$actual_tag" ]; then
             echo "::error::Expected '$expected_tag', received '$actual_tag'."
@@ -59,11 +73,12 @@ jobs:
       - name: Download VSIX files from GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
         shell: bash
         run: |
           mkdir -p dist/release
 
-          gh release download "${{ inputs.tag }}" \
+          gh release download "$RELEASE_TAG" \
             --pattern "*.vsix" \
             --dir dist/release
 
@@ -89,33 +104,40 @@ jobs:
             fi
           done
 
-      - name: Verify Marketplace token is available
-        shell: bash
+      - name: Sign in to Azure with GitHub OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify Marketplace publisher access
+        working-directory: apps/vscode-extension
         env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: |
-          if [ -z "$VSCE_PAT" ]; then
-            echo "::error::VSCE_PAT is not available to this workflow."
-            echo "::error::Check whether it is stored as a repository secret or an environment secret."
-            exit 1
-          fi
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: npx @vscode/vsce verify-pat frillab --azure-credential
 
       - name: Publish platform packages
         working-directory: apps/vscode-extension
         env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          EXTENSION_VERSION: ${{ steps.version.outputs.extension_version }}
         shell: bash
         run: |
-          version="${{ steps.version.outputs.extension_version }}"
+          version="$EXTENSION_VERSION"
 
           npx @vscode/vsce publish \
+            --azure-credential \
             --packagePath "../../dist/release/frilvault-${version}-darwin-arm64.vsix"
 
           npx @vscode/vsce publish \
+            --azure-credential \
             --packagePath "../../dist/release/frilvault-${version}-darwin-x64.vsix"
 
           npx @vscode/vsce publish \
+            --azure-credential \
             --packagePath "../../dist/release/frilvault-${version}-linux-x64.vsix"
 
           npx @vscode/vsce publish \
+            --azure-credential \
             --packagePath "../../dist/release/frilvault-${version}-win32-x64.vsix"

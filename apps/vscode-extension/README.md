@@ -221,7 +221,7 @@ Release automation is split into two stages:
 1. `release.yml` builds platform-specific VSIX files and attaches them to a published GitHub Release.
 2. `publish.yml` is run manually when you want to publish those VSIX files to the Visual Studio Marketplace.
 
-`publish.yml` uses `VSCE_PAT` and publishes the existing Release assets to the single Marketplace listing.
+`publish.yml` uses GitHub OIDC and Microsoft Entra ID to publish the existing Release assets to the single Marketplace listing. See [the release process](../../docs/RELEASES/PROCESS.md#marketplace-publishing) for the one-time identity setup.
 
 ## Getting Started
 

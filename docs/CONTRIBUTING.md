@@ -58,7 +58,7 @@ If `npm test` aborts with `SIGABRT` under `vscode-test`, treat that as unresolve
 The repository separates release asset generation from Marketplace publishing.
 
 - `.github/workflows/release.yml` runs from a published GitHub Release and produces platform-specific VSIX artifacts
-- `.github/workflows/publish.yml` is a manual workflow for Marketplace publishing with `VSCE_PAT`
+- `.github/workflows/publish.yml` is a manual Marketplace publishing workflow that uses GitHub OIDC and Microsoft Entra ID
 
 Marketplace users do not choose a platform manually. The Marketplace serves the matching VSIX for the user's platform.
 
