@@ -6,26 +6,39 @@ All notable changes to the FrilVault VS Code extension are documented here.
 
 ### Added
 
-- Unified Add / Edit Note action with a remappable source-editor shortcut, explicit Line/Symbol choice, preserved legacy duplicates, and captured workspace/Vault save targets
+### Changed
 
-- Expandable CodeLens note viewer displayed above associated code anchors with collapsed and expanded states
-- Compact `+`, disclosure, tag, and delete controls at each resolved anchor; expanded previews show the first non-empty logical line, with full Markdown available on the anchored line or resolved Symbol declaration Hover
+### Fixed
+
+## 0.0.4 - 2026-10-14
+
+### Added
+
+- Encrypted environment profiles with safe `.env` import, readiness checks, and run-with-profile support
+- Tag Explorer with tag suggestions, colors, statistics, multi-tag filtering, and management commands
+- Expandable CodeLens note viewer with anchored note actions
+- Unified Add / Edit Note action with a remappable source-editor shortcut, explicit Line/Symbol choice, preserved legacy duplicates, and captured workspace/Vault save targets
+- Native `Search Notes` Quick Pick with live text, tag, file, and symbol filters
 - Configuration settings `frilvault.noteViewer.enabled` and `frilvault.noteViewer.defaultState`
 - Opt-in metadata-only refresh diagnostics through `frilvault.refreshDiagnostics.enabled`
-- Native `Search Notes` Quick Pick with live text, tag, file, and symbol filters
 - Compact, accessible FrilVault note result metadata and temporary anchor highlighting
 
 ### Changed
 
+- Added Local and Shared vault modes, external vault paths, and Git metadata storage for new Local vaults
 - Initialization no longer generates `.vault/AGENTS.md`; existing user-owned files are preserved
-- Keep the workspace Notes overview visible while the active file changes; show an `Active file` section only when that file has notes
-- Retain same-context Notes snapshots during background refresh, coalesce refresh work, and preserve invalidations until the displayed result catches up
-- Store received editor drafts in VS Code workspace state so they can be recovered after webview closure; surface stale recovery drafts as conflicts
+- Notes and Tags views now retain their current workspace context and coalesce background refreshes
+- Editor drafts are stored in workspace state so they can be recovered after a webview closes; stale recovery drafts are shown as conflicts
 
 ### Removed
 
 - Legacy after-line inline note preview decorations and obsolete `frilvault.inlineNotes.*` / `frilvault.inlineLineNotes.*` settings
 - Decoration-based multiline viewer rendering, which could not provide a supported block layout or click target
+
+### Fixed
+
+- Repeated Notes and Tags refreshes and stale workspace note results
+- Note saves that could appear to fail when editor context changed during a save
 
 ## 0.0.3 - 2026-07-27
 

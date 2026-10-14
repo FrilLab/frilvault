@@ -289,7 +289,7 @@ Publish to the Marketplace only after the GitHub Release assets have been verifi
 
 Dispatch `publish.yml` with:
 
-- `tag=frilvault-v0.0.2`
+- `tag=frilvault-vX.Y.Z` using the verified tag for the release being published
 
 The workflow downloads the Release assets, verifies that all four VSIX packages exist, and publishes them with `VSCE_PAT`.
 

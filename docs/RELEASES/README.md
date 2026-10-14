@@ -8,6 +8,7 @@ The template intentionally stays close to [v0.0.md](v0.0.md) so new notes remain
 - [PROCESS.md](PROCESS.md) defines the stable release procedure.
 - [TEMPLATE.md](TEMPLATE.md) is the starting point for a new release note.
 - [v0.0.md](v0.0.md) records the v0.0 release history.
+- [checklist-v0.0.4.md](checklist-v0.0.4.md) tracks the current release readiness.
 
 ## How To Use
 

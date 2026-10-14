@@ -51,7 +51,7 @@ The current checkout contains a CLI and a VS Code extension. Repository guidance
 
 ## Install
 
-The current public release is `v0.0.3` for the VS Code extension.
+The current public release is `v0.0.4` for the VS Code extension.
 
 ### Option 1: Visual Studio Marketplace
 
@@ -92,7 +92,7 @@ Each published GitHub Release attaches these VSIX packages:
 
 ## Current Release
 
-FrilVault `v0.0.3` adds Explorer note counts and a workspace note overview in `FrilVault Notes`. The extension continues to bundle `flvt` inside each platform-specific package.
+FrilVault `v0.0.4` adds encrypted environment profiles, Local and Shared Vault modes, a Tag Explorer, workspace note search, and a more reliable VS Code notes and editor experience. The extension continues to bundle `flvt` inside each platform-specific package.
 
 ## Storage Model
 
