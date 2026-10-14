@@ -183,7 +183,10 @@ Merge reviewed changes to main
 
 ### GitHub Release Assets
 
-`release.yml` runs on `release.published` and:
+`release.yml` runs on `release.published` and supports manual rebuilding of
+assets through `workflow_dispatch`. Manual dispatch requires `tag`; optional
+`source_ref` must be the full SHA of a reviewed commit already merged to `main`
+and must have the same extension version as that tag. The workflow:
 
 1. verifies that the GitHub release tag matches `apps/vscode-extension/package.json`
 2. builds target-specific `flvt` binaries and VSIX packages for:
