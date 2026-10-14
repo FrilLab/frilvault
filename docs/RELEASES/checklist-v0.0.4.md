@@ -15,9 +15,14 @@
 - [x] Latest `main` CI and coverage workflows pass.
 - [x] Version metadata and user-facing release notes are updated.
 - [x] Local release validation passes.
-- [ ] Release pull request is merged to `main`.
-- [ ] The GitHub Release is published and all four VSIX assets are verified.
-- [ ] Marketplace publishing is run after asset verification.
+- [x] Release pull request #248 is merged to `main`.
+- [x] GitHub Release `frilvault-v0.0.4` is published and all four VSIX assets are verified.
+- [x] Marketplace publishing workflow was run after asset verification.
+
+## Publication Status
+
+- GitHub Release: [v0.0.4](https://github.com/FrilLab/frilvault/releases/tag/frilvault-v0.0.4). The recovery build completed successfully in [workflow run 38553746552](https://github.com/FrilLab/frilvault/actions/runs/38553746552); all four platform VSIX assets are attached.
+- Marketplace: [workflow run 38554662832](https://github.com/FrilLab/frilvault/actions/runs/38554662832) stopped on the first package because the `VSCE_PAT` repository secret has expired. No v0.0.4 package was published. Rotate `VSCE_PAT`, then rerun `publish.yml` with tag `frilvault-v0.0.4`.
 
 ## Local Validation
 
