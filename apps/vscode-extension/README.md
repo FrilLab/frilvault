@@ -36,22 +36,62 @@ extension does not decrypt or persist values itself.
 
 ## Note Viewer
 
-FrilVault displays note content above associated source-code anchors without modifying source files. It uses the supported VS Code CodeLens API to show a compact, single-line summary or preview above each anchor; CodeLens does not support a multiline block inside the editor.
+### Notes View
 
-- **Collapsed State**: Displays a compact one-line summary (e.g., `▶ Note · 3 lines · #todo #parser` or `▶ Notes (2)`).
-- **Expanded State**: Displays a compact preview of the note content and tags above the anchor line. Whitespace is flattened and long previews are shortened; the full note remains available from hover and `Open Note`.
-- **Multiple Notes**: Grouped cleanly above the same anchor without visual duplication or overlapping widgets.
-- **Actions**: Select `Actions…` in the viewer, hover the anchor, or use the gutter marker to open the existing View, Edit, Delete, Copy Link, Copy Content, and Copy Markdown actions.
+The `FrilVault Notes` tree keeps the workspace overview visible while you move
+between editors. It groups files by folder and shows note counts. When the
+active file has notes, an additional `Active file` section shows its line,
+resolved symbol, and unresolved symbol groups. The section is omitted when the
+active file has no notes. An empty workspace shows one actionable empty state.
 
-CodeLens is the closest stable supported editor API for this UI. Unresolved symbol anchors stay available in the sidebar and hover paths but are not assigned a guessed editor location.
+The overview is reused during presentation-only redraws and same-context
+background refreshes. A loading row is shown for the initial overview load;
+revalidation keeps the usable snapshot visible. Switching workspace or Vault
+does not display the previous context's notes. File and folder collapse state
+is retained across unchanged refreshes.
+
+### CodeLens and Markdown Hover
+
+FrilVault uses CodeLens controls and a line decoration to present notes at code
+anchors without modifying source files. Each anchored group has compact `+`,
+disclosure, tag, and `−` controls. The disclosure expands a short preview made
+from the first non-empty logical line of each note at that anchor; it does not
+flatten the rest of the Markdown body. The preview is shortened when needed.
+The default state is expanded and can be changed with
+`frilvault.noteViewer.defaultState`. Explicit disclosure choices are retained
+per note and document.
+
+`+` adds a note or opens the existing note for that anchor. `−` asks which note
+to delete when several notes share the anchor, then requires confirmation.
+Line and Symbol anchors remain distinct even when they resolve to the same
+displayed line. The source document is never edited by these controls.
+
+Hovering over an anchored line or a resolved Symbol declaration name shows the
+full note Markdown and tags. Markdown paragraphs, lists, links, and fenced code
+remain readable in the Hover. Unresolved Symbols are not assigned a guessed
+CodeLens location; they remain available in the Notes view and other note
+navigation paths.
+
+### Editing and Recovery
+
+The note editor opens beside the source editor and autosaves after the delay
+configured by `frilvault.inlineEditor.autoSaveDebounceMs` (900 ms by default).
+The editor's `Close` action flushes pending changes before it closes; if saving
+fails, the editor stays open with an error. Changes received by the extension
+are also copied to VS Code workspace state so they can be recovered if the
+webview is closed while a save is in flight. On reopen, a recovered draft is
+restored when its saved base is still current; if the persisted note has
+changed, FrilVault presents a conflict instead of silently overwriting it.
+Because webview input is asynchronous, a keystroke not yet delivered and
+recorded by the extension is not guaranteed after a forced VS Code shutdown.
 
 ### Viewer Differences
 
 | UI Surface | Purpose |
 | --- | --- |
-| **CodeLens Note Preview** | Compact editor preview displayed above code anchors (expandable/collapsible) |
+| **CodeLens Note Preview** | Compact controls at code anchors; expanded first-line preview appears beside the anchor |
 | **Gutter Markers** | Interactive line indicators showing where notes exist and quick action menus |
-| **Hover Preview** | Rich documentation popup on cursor hover with full markdown, tags, and actions |
+| **Hover Preview** | Full Markdown and tags on the anchored line or resolved Symbol declaration |
 | **Notes Sidebar** | Workspace-wide and file-level tree navigation for browsing all notes |
 
 ## Configuration
@@ -59,10 +99,11 @@ CodeLens is the closest stable supported editor API for this UI. Unresolved symb
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
 | `frilvault.noteViewer.enabled` | `boolean` | `true` | Show CodeLens note viewers above associated source-code anchors |
-| `frilvault.noteViewer.defaultState` | `string` | `"collapsed"` | Default collapse state for note viewers (`"collapsed"` or `"expanded"`) |
+| `frilvault.noteViewer.defaultState` | `string` | `"expanded"` | Default collapse state for note viewers (`"collapsed"` or `"expanded"`) |
 | `frilvault.gutterMarkerStyle` | `string` | `"dot"` | Visual style for interactive gutter markers (`"dot"`, `"count"`, `"bar"`) |
 | `frilvault.explorerNoteCounts.enabled` | `boolean` | `true` | Show FrilVault note counts beside files in VS Code Explorer |
 | `frilvault.hoverPreviewLength` | `number` | `800` | Maximum character length for rich hover previews |
+| `frilvault.refreshDiagnostics.enabled` | `boolean` | `false` | Write refresh metadata to the output channel without note content, tags, environment values, or paths |
 | `frilvault.inlineEditor.autoSaveDebounceMs` | `number` | `900` | Delay in milliseconds before auto-saving note edits |
 | `frilvault.workspaceRoot` | `string` | `""` | Workspace root used by FrilVault; empty uses the first VS Code workspace folder |
 | `frilvault.vaultPath` | `string` | `""` | Optional explicit vault directory; relative paths are resolved from `frilvault.workspaceRoot`, and empty discovers an existing vault or uses the selected initialization policy |
@@ -189,7 +230,8 @@ Release automation is split into two stages:
 2. Open a project in VS Code.
 3. Open `FrilVault Notes` in the Explorer and select `Enable`.
 4. Choose `Initialize Local Vault` or `Initialize Shared Vault` when prompted.
-5. Select `Add` or use `Note Add` at the current editor line.
+5. Choose **FrilVault: Add / Edit Note** from the Command Palette, use its
+   keyboard shortcut, or select the `+` CodeLens control at a source anchor.
 6. Enter a note in the inline editor.
 
 ## Commands
