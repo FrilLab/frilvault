@@ -7,12 +7,22 @@ on:
   release:
     types:
       - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: GitHub Release tag to build
+        required: true
+        type: string
+      source_ref:
+        description: Full SHA of a reviewed commit merged to main; defaults to the release tag
+        required: false
+        type: string
 
 env:
   NODE_VERSION: '22'
 
 concurrency:
-  group: release-${{ github.event.release.tag_name }}
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
   cancel-in-progress: false
 
 jobs:
@@ -28,7 +38,8 @@ jobs:
       - name: Check out release tag
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -44,13 +55,32 @@ jobs:
           echo "extension_version=$extension_version" >> "$GITHUB_OUTPUT"
 
       - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         shell: bash
         run: |
           expected_tag="frilvault-v${{ steps.version.outputs.extension_version }}"
-          actual_tag="${{ github.event.release.tag_name }}"
+          actual_tag="$RELEASE_TAG"
 
           if [ "$expected_tag" != "$actual_tag" ]; then
             echo "::error::Expected '$expected_tag', received '$actual_tag'."
+            exit 1
+          fi
+
+      - name: Verify manual build source is merged to main
+        if: github.event_name == 'workflow_dispatch' && inputs.source_ref != ''
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        shell: bash
+        run: |
+          if ! [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::source_ref must be a full commit SHA."
+            exit 1
+          fi
+
+          main_commit=$(git rev-parse refs/remotes/origin/main)
+          if ! git merge-base --is-ancestor "$SOURCE_REF" "$main_commit"; then
+            echo "::error::source_ref must already be merged to main."
             exit 1
           fi
 
@@ -85,10 +115,22 @@ jobs:
         working-directory: apps/vscode-extension
 
     steps:
-      - name: Check out release tag
+      - name: Check out build source
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.source_ref || github.event.release.tag_name || inputs.tag }}
+
+      - name: Verify build source version
+        working-directory: apps/vscode-extension
+        shell: bash
+        run: |
+          source_version=$(node -p "require('./package.json').version")
+          expected_version="${{ needs.verify-release.outputs.extension_version }}"
+
+          if [ "$source_version" != "$expected_version" ]; then
+            echo "::error::Build source version '$source_version' does not match release version '$expected_version'."
+            exit 1
+          fi
 
       - name: Clean untrusted Homebrew taps
         if: runner.os == 'macOS'
@@ -195,6 +237,6 @@ jobs:
       - name: Attach VSIX files
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.event.release.tag_name }}
+          tag_name: ${{ github.event.release.tag_name || inputs.tag }}
           files: dist/release/*.vsix
           fail_on_unmatched_files: true
