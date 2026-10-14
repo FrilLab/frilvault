@@ -175,7 +175,7 @@ The VS Code extension is the current editor-facing integration.
 Current feature scope:
 
 - add note
-- current-file and workspace notes panel
+- workspace Notes overview with a conditional active-file section
 - built-in Explorer note count decorations
 - gutter decorations
 - gutter actions
@@ -192,12 +192,23 @@ Current feature scope:
 - workspace enable/disable state
 - gitignore prompt on first persisted note flow
 
-The note viewer uses `vscode.languages.registerCodeLensProvider` rather than
-`TextEditorDecorationOptions.before`. CodeLens is the supported API that gives
-extensions dedicated horizontal rows between source lines and command
-arguments. An expanded note is therefore represented by stacked rows; VS Code
-does not expose a supported extension-owned multiline block widget in a normal
-text editor. Source documents remain read-only from the viewer's perspective.
+The note viewer uses `vscode.languages.registerCodeLensProvider` for compact
+`+`, disclosure, tag, and delete controls. Its expanded preview is a
+line-decoration suffix containing only the first non-empty logical line from
+each note at the anchor; it does not turn the full Markdown body into stacked
+CodeLens rows. Full Markdown is provided by the Hover provider on the anchored
+line or resolved Symbol declaration. VS Code does not expose a supported
+extension-owned multiline block widget in a normal text editor. Source
+documents remain read-only from the viewer's perspective.
+
+The Notes provider keeps the workspace explorer snapshot visible when the
+active editor changes. It adds an `Active file` section only when that file has
+notes. Presentation redraws do not invalidate the snapshot. Workspace and
+Vault identity scope each snapshot and refresh request; stale context results
+are discarded, real invalidations during a read are retained for a follow-up,
+and unchanged results do not trigger another tree update. The filesystem
+watcher serializes sync work for the selected context and refreshes views only
+when synchronization reports note or repair changes.
 
 Its active backend is currently CLI-backed:
 

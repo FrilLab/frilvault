@@ -9,14 +9,18 @@ All notable changes to the FrilVault VS Code extension are documented here.
 - Unified Add / Edit Note action with a remappable source-editor shortcut, explicit Line/Symbol choice, preserved legacy duplicates, and captured workspace/Vault save targets
 
 - Expandable CodeLens note viewer displayed above associated code anchors with collapsed and expanded states
-- Multiline note content is rendered as stacked CodeLens rows with stable toggle and action commands
+- Compact `+`, disclosure, tag, and delete controls at each resolved anchor; expanded previews show the first non-empty logical line, with full Markdown available on the anchored line or resolved Symbol declaration Hover
 - Configuration settings `frilvault.noteViewer.enabled` and `frilvault.noteViewer.defaultState`
+- Opt-in metadata-only refresh diagnostics through `frilvault.refreshDiagnostics.enabled`
 - Native `Search Notes` Quick Pick with live text, tag, file, and symbol filters
 - Compact, accessible FrilVault note result metadata and temporary anchor highlighting
 
 ### Changed
 
 - Initialization no longer generates `.vault/AGENTS.md`; existing user-owned files are preserved
+- Keep the workspace Notes overview visible while the active file changes; show an `Active file` section only when that file has notes
+- Retain same-context Notes snapshots during background refresh, coalesce refresh work, and preserve invalidations until the displayed result catches up
+- Store received editor drafts in VS Code workspace state so they can be recovered after webview closure; surface stale recovery drafts as conflicts
 
 ### Removed
 

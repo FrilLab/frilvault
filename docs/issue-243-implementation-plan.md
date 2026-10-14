@@ -4,6 +4,8 @@
 
 이 문서는 계획과 API feasibility 실행 결과를 담는다. Extension Host PoC에서 decoration은 실제 입력면이 아니었고, native Comments 입력면은 편집 가능하지만 코드 줄을 아래로 밀며 별도 tags 필드가 없다. Quick Input은 전역 단일 행이다. 따라서 현재 #243 계약에 맞는 stable public UI를 확인하지 못해 제품 편집면과 autosave를 구현하지 않고, 재현 가능한 PoC와 maintainer 대안 선택을 Draft PR로 전달한다. 상세 근거와 screenshot은 [feasibility 결과](issue-243-feasibility.md)를 본다.
 
+**관련 이슈 상태 (2026-10-14):** #231은 #233과 #244, #232는 #234와 #237, #241은 #244의 코드가 병합된 뒤 모두 종료되었다. 이슈 상태는 해결 코드가 저장소에 병합되었음을 반영한다. 다만 각 PR 설명에 남아 있는 라이브 Extension Host 수동 확인은 이 상태 갱신에서 새로 수행하지 않았다. 아래 상태 표는 #243 조사 시작일인 2026-10-04의 기록이다.
+
 ## 1. 목표와 범위
 
 소스 앵커 근처에서 짧은 Markdown 본문과 태그를 편집하고, 마지막 입력을 안전하게 저장하거나 복구한다. 원본 소스 파일은 바이트 단위로 보존한다.
@@ -21,7 +23,7 @@
 
 **고정 sidebar나 별도 editor tab을 이슈의 편집 UI로 대체해서는 안 된다.** 우선 UI와 fallback 모두 불가능하면, 이슈가 지시한 feasibility 결과와 구체적인 대안 제안까지만 전달한다. 이 경우 #243 완료나 `Closes #243`를 선언하지 않는다.
 
-## 2. 확인된 저장소 상태
+## 2. 조사 시작 시점의 저장소 상태 (2026-10-04)
 
 - 구현 branch: `feat/243-compact-note-editor`.
 - 시작 때의 branch HEAD: `8ae4a36` — #244 refresh 안정화 PR merge.
